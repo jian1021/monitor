@@ -1,10 +1,12 @@
 import os
 import json
+import time
+import random
 import requests
 import pandas as pd
 import ta
 import akshare as ak
-import time
+
 headers = {'User-Agent': 'Mozilla/5.0'}
 
 # ================= 全局默认 RSI 参数配置 =================
@@ -64,30 +66,23 @@ def get_okx_rsi(symbol, interval="1H", length=14):
         print(f"❌ OKX [{symbol}] 获取失败: {e}")
     return None, None
 
-def get_cb_rsi(code, length=14):
-    """【可转债】通过 AkShare 获取历史 K 线计算 RSI"""
-    try:
-        # 获取可转债历史日线行情
-        df = ak.bond_zh_hs_cov_daily(symbol=code)
-        if df is not None and len(df) >= length:
-            df['close'] = df['close'].astype(float)
-            df['rsi'] = ta.momentum.rsi(df['close'], window=length)
-            return df['rsi'].iloc[-1], df['close'].iloc[-1]
-    except Exception as e:
-        print(f"❌ 可转债 [{code}] RSI 计算失败: {e}")
-    return None, None
-
-def get_etf_rsi(code, length=14):
-    """【ETF】通过 AkShare 获取历史 K 线计算 RSI"""
-    try:
-        # 获取 ETF 历史日线行情 (东财数据源)
-        df = ak.fund_etf_hist_em(symbol=code, adjust="qfq")
-        if df is not None and len(df) >= length:
-            df['close'] = df['收盘'].astype(float)
-            df['rsi'] = ta.momentum.rsi(df['close'], window=length)
-            return df['rsi'].iloc[-1], df['close'].iloc[-1]
-    except Exception as e:
-        print(f"❌ ETF [{code}] RSI 计算失败: {e}")
+def get_a_share_rsi(code, length=14, max_retries=3):
+    """【A股通用】适用于可转债和 ETF，自带失败重试机制"""
+    for attempt in range(max_retries):
+        try:
+            # stock_zh_a_hist 适配股票、ETF、可转债等所有 A 股标的
+            df = ak.stock_zh_a_hist(symbol=str(code), period="daily", adjust="qfq")
+            if df is not None and not df.empty and len(df) >= length:
+                # 兼容中文列名 '收盘'
+                close_col = '收盘' if '收盘' in df.columns else 'close'
+                df['close_num'] = df[close_col].astype(float)
+                df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
+                return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
+        except Exception:
+            if attempt < max_retries - 1:
+                time.sleep(1.5 * (attempt + 1))  # 失败后等待重试
+            else:
+                print(f"❌ 标的 [{code}] 请求多次失败，可能被风控拦截。")
     return None, None
 
 def send_feishu_msg(webhook, msg):
@@ -96,7 +91,7 @@ def send_feishu_msg(webhook, msg):
         return
     requests.post(webhook, json={"msg_type": "text", "content": {"text": msg}}, timeout=10)
 
-# ================= 3. 主程序逻辑 =================
+# ================= 主程序逻辑 =================
 
 if __name__ == "__main__":
     FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
@@ -108,7 +103,7 @@ if __name__ == "__main__":
 
     messages = []
 
-    # ---------------- 1. 加密货币 RSI 监控 ----------------
+    # 1. 加密货币监控
     crypto_list = config.get("crypto_okx", [])
     c_set = DEFAULT_SETTINGS["crypto"]
     for coin in crypto_list:
@@ -124,31 +119,31 @@ if __name__ == "__main__":
             elif rsi > c_set["rsi_high"]:
                 messages.append(f"⚠️ 【{symbol} 超买】现价 ${price:.2f}，1H RSI: {rsi:.2f} (高于 {c_set['rsi_high']})")
 
-    # ---------------- 2. A股可转债 RSI 监控 ----------------
+    # 2. 可转债监控
     cb_list = config.get("convertible_bonds", [])
     b_set = DEFAULT_SETTINGS["bond"]
     for item in cb_list:
         code = str(item.get("code"))
         cfg_name = item.get("name", code)
 
-        rsi, price = get_cb_rsi(code, length=b_set["period"])
+        rsi, price = get_a_share_rsi(code, length=b_set["period"])
         if rsi is not None and price is not None:
             print(f"✅ [可转债] {cfg_name}({code}) 现价: {price:.2f}, RSI({b_set['period']}): {rsi:.2f}")
             if rsi < b_set["rsi_low"]:
                 messages.append(f"🚨 【可转债 RSI 超卖】{cfg_name}({code}) 现价: {price:.2f} 元，RSI: {rsi:.2f} (低于 {b_set['rsi_low']})")
             elif rsi > b_set["rsi_high"]:
                 messages.append(f"⚠️ 【可转债 RSI 超买】{cfg_name}({code}) 现价: {price:.2f} 元，RSI: {rsi:.2f} (高于 {b_set['rsi_high']})")
+        
+        time.sleep(random.uniform(0.8, 1.5))  # 加入随机延迟，防止触发接口频率限制
 
-        time.sleep(0.5)
-
-    # ---------------- 3. A股 ETF RSI 监控 ----------------
+    # 3. ETF 监控
     etf_list = config.get("etfs", [])
     e_set = DEFAULT_SETTINGS["etf"]
     for item in etf_list:
         code = str(item.get("code"))
         cfg_name = item.get("name", code)
 
-        rsi, price = get_etf_rsi(code, length=e_set["period"])
+        rsi, price = get_a_share_rsi(code, length=e_set["period"])
         if rsi is not None and price is not None:
             print(f"✅ [ETF] {cfg_name}({code}) 现价: {price:.3f}, RSI({e_set['period']}): {rsi:.2f}")
             if rsi < e_set["rsi_low"]:
@@ -156,11 +151,11 @@ if __name__ == "__main__":
             elif rsi > e_set["rsi_high"]:
                 messages.append(f"⚠️ 【ETF RSI 超买】{cfg_name}({code}) 现价: {price:.3f} 元，RSI: {rsi:.2f} (高于 {e_set['rsi_high']})")
 
-        time.sleep(0.5)
+        time.sleep(random.uniform(0.8, 1.5))  # 加入随机延迟，防止触发接口频率限制
 
-    # ---------------- 4. 统一发送消息 ----------------
+    # 4. 发送推送
     if messages:
         full_msg = "\n\n".join(messages)
         send_feishu_msg(FEISHU_WEBHOOK, full_msg)
     else:
-        print("所有标的 RSI 均处于正常区间（30~70），不触发推送。")
+        print("所有标的 RSI 均处于正常区间，不触发推送。")
