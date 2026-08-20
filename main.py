@@ -13,18 +13,18 @@ DEFAULT_SETTINGS = {
     "crypto": {
         "interval": "1H",
         "period": 3,
-        "rsi_low": 30,
+        "rsi_low": 10,
         "rsi_high": 90
     },
     # 可转债：使用日 K 线 (daily) 或 60 分钟 K 线 (60m)，RSI 周期 14
     "bond": {
-        "period": 14,
+        "period": 3,
         "rsi_low": 10,       # RSI < 30 进入超卖区（超跌反弹关注）
         "rsi_high": 90       # RSI > 70 进入超买区
     },
     # ETF：使用日 K 线 (daily)，RSI 周期 14
     "etf": {
-        "period": 14,
+        "period": 3,
         "rsi_low": 10,       # RSI < 30 进入超卖区
         "rsi_high": 90       # RSI > 70 进入超买区
     }
