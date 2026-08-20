@@ -68,7 +68,7 @@ def get_cb_rsi(code, length=14):
     """【可转债】通过 AkShare 获取历史 K 线计算 RSI"""
     try:
         # 获取可转债历史日线行情
-        df = ak.bond_cb_daily(symbol=code)
+        df = ak.bond_zh_hs_cov_daily(symbol=code)
         if df is not None and len(df) >= length:
             df['close'] = df['close'].astype(float)
             df['rsi'] = ta.momentum.rsi(df['close'], window=length)
@@ -139,6 +139,8 @@ if __name__ == "__main__":
             elif rsi > b_set["rsi_high"]:
                 messages.append(f"⚠️ 【可转债 RSI 超买】{cfg_name}({code}) 现价: {price:.2f} 元，RSI: {rsi:.2f} (高于 {b_set['rsi_high']})")
 
+        time.sleep(0.5)
+
     # ---------------- 3. A股 ETF RSI 监控 ----------------
     etf_list = config.get("etfs", [])
     e_set = DEFAULT_SETTINGS["etf"]
@@ -153,6 +155,8 @@ if __name__ == "__main__":
                 messages.append(f"🚨 【ETF RSI 超卖】{cfg_name}({code}) 现价: {price:.3f} 元，RSI: {rsi:.2f} (低于 {e_set['rsi_low']})")
             elif rsi > e_set["rsi_high"]:
                 messages.append(f"⚠️ 【ETF RSI 超买】{cfg_name}({code}) 现价: {price:.3f} 元，RSI: {rsi:.2f} (高于 {e_set['rsi_high']})")
+
+        time.sleep(0.5)
 
     # ---------------- 4. 统一发送消息 ----------------
     if messages:
