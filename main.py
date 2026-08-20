@@ -57,7 +57,7 @@ if __name__ == "__main__":
         print(f"✅ BTC 当前价格: ${price:.2f}, RSI(14): {rsi:.2f}")
         
         # 设置告警条件
-        if rsi < 30:
+        if rsi < 10:
             send_feishu_msg(FEISHU_WEBHOOK, f"🚨 【BTC 超卖预警】当前价格 ${price:.2f}，RSI 为 {rsi:.2f} (低于 30)")
-        elif rsi > 70:
+        elif rsi > 90:
             send_feishu_msg(FEISHU_WEBHOOK, f"⚠️ 【BTC 超买预警】当前价格 ${price:.2f}，RSI 为 {rsi:.2f} (高于 70)")
