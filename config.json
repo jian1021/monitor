@@ -1,11 +1,13 @@
 {
   "crypto_okx": [
-    {
-      "symbol": "BTC-USDT",
-    },
-    {
-      "symbol": "ETH-USDT",
-    }
+          { "symbol": "BTC-USDT" },
+          { "symbol": "ETH-USDT" },
+          { "symbol": "BNB-USDT" },
+          { "symbol": "XRP-USDT" },
+          { "symbol": "USDC-USDT" },
+          { "symbol": "SOL-USDT" },
+          { "symbol": "TRX-USDT" },
+          { "symbol": "DOGE-USDT" }
   ],
   "convertible_bonds": [
           { "code": "118027", "name": "宏图转债" },
