@@ -2,36 +2,29 @@
   "crypto_okx": [
     {
       "symbol": "BTC-USDT",
-      "rsi_interval": "1H",
-
     },
     {
       "symbol": "ETH-USDT",
-      "rsi_interval": "1H",
-
     }
   ],
   "convertible_bonds": [
     {
       "code": "113052",
-      "name_remark": "浙22转债",
-
+      "name": "浙22转债",
     },
     {
       "code": "127018",
-      "name_remark": "本钢转债",
-
+      "name": "本钢转债",
     }
   ],
   "etfs": [
     {
       "code": "510300",
-      "name_remark": "沪深300ETF",
-
+      "name": "沪深300ETF",
     },
     {
       "code": "159915",
-      "name_remark": "创业板ETF",
+      "name": "创业板ETF",
 
     }
   ]
