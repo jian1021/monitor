@@ -1,23 +1,28 @@
 import os
 import requests
 import pandas as pd
-import ta  # 仅保留 ta 库
+import ta
 
-def get_coingecko_rsi(symbol="bitcoin", interval="1h", length=14):
+def get_okx_rsi(symbol="BTC-USDT", interval="1H", length=14):
     """
-    使用 CoinGecko 免费 API 获取 K 线并用 ta 库计算 RSI
-    :param symbol: CoinGecko 币种 ID（如 'bitcoin', 'ethereum', 'solana'）
+    使用 OKX 公开接口获取 K 线并用 ta 库计算 RSI
+    :param symbol: OKX 交易对格式（如 'BTC-USDT', 'ETH-USDT', 'SOL-USDT'）
+    :param interval: K 线周期（如 '15m', '1H', '4H', '1D'）
     """
     headers = {'User-Agent': 'Mozilla/5.0'}
+    url = f"https://www.okx.com/api/v5/market/candles?instId={symbol}&bar={interval}&limit=100"
     
     try:
-        # CoinGecko OHLC 接口：days=1 自动按 1 小时级别返回 K 线
-        url = f"https://api.coingecko.com/api/v3/coins/{symbol}/ohlc?vs_currency=usd&days=1"
         res = requests.get(url, headers=headers, timeout=10).json()
         
-        if isinstance(res, list) and len(res) > 0:
-            df = pd.DataFrame(res, columns=['time', 'open', 'high', 'low', 'close'])
-            df['close'] = df['close'].astype(float)
+        # 校验 OKX 返回状态
+        if res.get('code') == '0' and len(res.get('data', [])) > 0:
+            # OKX 返回格式: [ts, open, high, low, close, vol, ...]
+            df = pd.DataFrame(res['data'])
+            
+            # OKX 返回的数据最新的一条在第 0 行，必须倒序排列为时间正序
+            df = df.iloc[::-1].reset_index(drop=True)
+            df['close'] = df[4].astype(float)
             
             # 使用 ta 库计算 RSI
             df['rsi'] = ta.momentum.rsi(df['close'], window=length)
@@ -26,34 +31,33 @@ def get_coingecko_rsi(symbol="bitcoin", interval="1h", length=14):
             latest_price = df['close'].iloc[-1]
             return latest_rsi, latest_price
         else:
-            print(f"CoinGecko 返回数据异常: {res}")
+            print(f"❌ OKX 返回数据异常: {res}")
             
     except Exception as e:
-        print(f"CoinGecko API 请求失败: {e}")
+        print(f"❌ OKX API 请求失败: {e}")
 
     return None, None
 
 def send_feishu_msg(webhook, msg):
     if not webhook:
-        print("未配置 Webhook，跳过发送")
+        print("未配置 Webhook，跳过推送并仅在日志打印")
         return
     requests.post(webhook, json={"msg_type": "text", "content": {"text": msg}}, timeout=10)
 
 if __name__ == "__main__":
     FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
     
-    # 1. 传入 CoinGecko 的 ID（bitcoin），而不是交易对（BTCUSDT）
-    # 2. 如果要计算 RSI(14)，这里使用默认 length=14 即可
-    rsi, price = get_coingecko_rsi("bitcoin", length=14)
+    # OKX 交易对名称带杠（中间用短横线连接）：BTC-USDT, ETH-USDT
+    rsi, price = get_okx_rsi("BTC-USDT", interval="1H", length=14)
     
-    # 防空保护
+    # 增加空值安全防护
     if rsi is None or price is None:
-        print("❌ 获取数据失败，放弃本次推送")
+        print("⚠️ 数据获取失败，放弃本次推送")
     else:
         print(f"✅ BTC 当前价格: ${price:.2f}, RSI(14): {rsi:.2f}")
         
-        # 触发告警条件
-        if rsi < 10:
-            send_feishu_msg(FEISHU_WEBHOOK, f"🚨 【BTC 极端超卖】当前价格 ${price:.2f}，RSI 为 {rsi:.2f} (低于 10)")
-        elif rsi > 90:
-            send_feishu_msg(FEISHU_WEBHOOK, f"⚠️ 【BTC 极端超买】当前价格 ${price:.2f}，RSI 为 {rsi:.2f} (高于 90)")
+        # 设置告警条件
+        if rsi < 30:
+            send_feishu_msg(FEISHU_WEBHOOK, f"🚨 【BTC 超卖预警】当前价格 ${price:.2f}，RSI 为 {rsi:.2f} (低于 30)")
+        elif rsi > 70:
+            send_feishu_msg(FEISHU_WEBHOOK, f"⚠️ 【BTC 超买预警】当前价格 ${price:.2f}，RSI 为 {rsi:.2f} (高于 70)")
