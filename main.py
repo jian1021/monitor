@@ -20,7 +20,7 @@ def get_okx_rsi(symbol="BTC-USDT", interval="1H", length=14):
             # OKX 返回格式: [ts, open, high, low, close, vol, ...]
             df = pd.DataFrame(res['data'])
             
-            # OKX 返回的数据最新的一条在第 0 行，必须倒序排列为时间正序
+            # OKX 返回的数据最新的一条在第 0 行，倒序排列为时间正序
             df = df.iloc[::-1].reset_index(drop=True)
             df['close'] = df[4].astype(float)
             
@@ -47,10 +47,10 @@ def send_feishu_msg(webhook, msg):
 if __name__ == "__main__":
     FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
     
-    # OKX 交易对名称带杠（中间用短横线连接）：BTC-USDT, ETH-USDT
+    # 使用 OKX 的标准交易对名称：BTC-USDT
     rsi, price = get_okx_rsi("BTC-USDT", interval="1H", length=14)
     
-    # 增加空值安全防护
+    # 增加空值安全防护，防止 rsi 为 None 时格式化报错
     if rsi is None or price is None:
         print("⚠️ 数据获取失败，放弃本次推送")
     else:
