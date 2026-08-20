@@ -4,7 +4,7 @@ import requests
 import pandas as pd
 import ta
 import akshare as ak
-
+import time
 headers = {'User-Agent': 'Mozilla/5.0'}
 
 # ================= 全局默认 RSI 参数配置 =================
