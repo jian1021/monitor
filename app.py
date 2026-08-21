@@ -8,6 +8,7 @@ import ta
 # import akshare as ak  # 【备注】A 股数据源已切换为 baostock（2026-08），旧导入停用保留
 import baostock as bs
 import streamlit as st
+from db import init_db, load_instruments
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -18,14 +19,16 @@ st.set_page_config(page_title="多资产 RSI 监控看板", layout="wide", page_
 st.title("📈 多资产 RSI 实时监控看板")
 
 # ================= 配置文件加载 =================
-def load_config(config_file="config.json"):
-    if not os.path.exists(config_file):
-        return None
-    try:
-        with open(config_file, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return None
+
+# 【备注】旧版本地 JSON 配置加载（已切换为 Turso 远程库 db.load_instruments，停用保留）
+# def load_config(config_file="config.json"):
+#     if not os.path.exists(config_file):
+#         return None
+#     try:
+#         with open(config_file, 'r', encoding='utf-8') as f:
+#             return json.load(f)
+#     except Exception:
+#         return None
 
 # ================= 数据获取逻辑 =================
 def get_okx_rsi(symbol, interval="1H", length=14):
@@ -130,7 +133,8 @@ rsi_low = st.sidebar.slider("超卖阈值 (低于报警)", 10, 40, 30)
 rsi_high = st.sidebar.slider("超买阈值 (高于报警)", 60, 90, 70)
 feishu_webhook = st.sidebar.text_input("飞书 Webhook 链接", value=os.getenv("FEISHU_WEBHOOK", ""), type="password")
 
-config = load_config()
+init_db()  # 首次运行自动建表，并从旧 config.json 播种一次
+config = load_instruments()
 
 if not config:
     st.error("❌ 未找到 `config.json` 配置文件，请检查项目目录！")

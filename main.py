@@ -7,6 +7,7 @@ import pandas as pd
 import ta
 #import akshare as ak
 import baostock as bs
+from db import init_db, load_instruments
 
 headers = {'User-Agent': 'Mozilla/5.0'}
 
@@ -35,20 +36,21 @@ DEFAULT_SETTINGS = {
 
 # ================= 1. 读取配置文件 =================
 
-def load_config(config_file="config.json"):
-    """读取 json 配置文件"""
-    if not os.path.exists(config_file):
-        print(f"❌ 未找到配置文件: {config_file}")
-        return None
-    try:
-        with open(config_file, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"❌ config.json 格式错误，请检查格式或末尾逗号: {e}")
-        return None
-    except Exception as e:
-        print(f"❌ 读取配置文件失败: {e}")
-        return None
+# 【备注】旧版本地 JSON 配置加载（已切换为 Turso 远程库 db.load_instruments，停用保留）
+# def load_config(config_file="config.json"):
+#     """读取 json 配置文件"""
+#     if not os.path.exists(config_file):
+#         print(f"❌ 未找到配置文件: {config_file}")
+#         return None
+#     try:
+#         with open(config_file, 'r', encoding='utf-8') as f:
+#             return json.load(f)
+#     except json.JSONDecodeError as e:
+#         print(f"❌ config.json 格式错误，请检查格式或末尾逗号: {e}")
+#         return None
+#     except Exception as e:
+#         print(f"❌ 读取配置文件失败: {e}")
+#         return None
 
 # ================= 2. 数据获取与 RSI 计算 =================
 
@@ -165,7 +167,8 @@ def send_feishu_msg(webhook, msg):
 
 if __name__ == "__main__":
     FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
-    config = load_config("config.json")
+    init_db()  # 首次运行自动建表，并从旧 config.json 播种一次
+    config = load_instruments()
     
     if not config:
         print("停止运行：未能加载有效的配置文件。")
