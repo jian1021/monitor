@@ -4,7 +4,7 @@ import json
 from libsql_client import create_client_sync
 
 # 环境变量读取，注意 GitHub Actions 中的变量名与此处一致
-LIBSQL_URL = os.getenv("LIBSQL_URL", "https://monitor-db-jian1021.aws-ap-northeast-1.turso.io")
+LIBSQL_URL = "https://monitor-db-jian1021.aws-ap-northeast-1.turso.io"
 LIBSQL_TOKEN = os.getenv("LIBSQL_TOKEN")
 
 
