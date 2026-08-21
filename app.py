@@ -5,7 +5,8 @@ import random
 import requests
 import pandas as pd
 import ta
-import akshare as ak
+# import akshare as ak  # 【备注】A 股数据源已切换为 baostock（2026-08），旧导入停用保留
+import baostock as bs
 import streamlit as st
 
 headers = {
@@ -41,18 +42,82 @@ def get_okx_rsi(symbol, interval="1H", length=14):
         pass
     return None, None
 
-@st.cache_data(ttl=60)  # 设置缓存，1分钟内重复查询直接读取缓存，防止过度请求
-def get_a_share_rsi(code, length=14):
+# ================= 旧版：akshare 数据源（已停用，保留备查） =================
+# @st.cache_data(ttl=60)  # 设置缓存，1分钟内重复查询直接读取缓存，防止过度请求
+# def get_a_share_rsi(code, length=14):
+#     try:
+#         df = ak.stock_zh_a_hist(symbol=str(code), period="daily", adjust="qfq")
+#         if df is not None and not df.empty and len(df) >= length:
+#             close_col = '收盘' if '收盘' in df.columns else 'close'
+#             df['close_num'] = df[close_col].astype(float)
+#             df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
+#             return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
+#     except Exception:
+#         pass
+#     return None, None
+
+# ================= 新版：baostock 数据源 =================
+
+def _to_bs_code(code):
+    """6 位纯数字代码转 baostock 格式：sh.XXXXXX / sz.XXXXXX"""
+    c = str(code).strip().lower()
+    if c.startswith(("sh.", "sz.")):
+        return c
+    c = c.zfill(6)
+    # 沪市：股票 6xxxxx（含 688）、基金/ETF 5xxxxx、可转债 11xxxx；其余归深市
+    if c[0] in ("5", "6", "9") or c.startswith("11"):
+        return f"sh.{c}"
+    return f"sz.{c}"
+
+def _get_tencent_rsi(code, length=14):
+    """腾讯 K 线降级源：覆盖可转债等 baostock 未收录品种"""
     try:
-        df = ak.stock_zh_a_hist(symbol=str(code), period="daily", adjust="qfq")
-        if df is not None and not df.empty and len(df) >= length:
-            close_col = '收盘' if '收盘' in df.columns else 'close'
-            df['close_num'] = df[close_col].astype(float)
-            df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
-            return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
+        c = str(code).strip().lower().zfill(6)
+        mkt = 'sh' if c[0] in ('5', '6', '9') or c.startswith('11') else 'sz'
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={mkt}{c},day,,,320,qfq"
+        res = requests.get(url, headers=headers, timeout=10).json()
+        days = res.get('data', {}).get(f'{mkt}{c}', {})
+        days = days.get('qfqday') or days.get('day') or []
+        if len(days) >= length:
+            close = pd.Series([float(k[2]) for k in days])
+            rsi = ta.momentum.rsi(close, window=length)
+            return rsi.iloc[-1], close.iloc[-1]
     except Exception:
         pass
     return None, None
+
+@st.cache_data(ttl=60)  # 设置缓存，1分钟内重复查询直接读取缓存，防止过度请求
+def get_a_share_rsi(code, length=14):
+    """【A股通用·baostock主源+腾讯降级】适用于股票、可转债和 ETF"""
+    bs_code = _to_bs_code(code)
+    start_date = (pd.Timestamp.now() - pd.Timedelta(days=400)).strftime("%Y-%m-%d")
+    try:
+        lg = bs.login()  # 匿名登录，无需账号密码
+        if lg.error_code != '0':
+            raise RuntimeError(f"baostock 登录失败: {lg.error_msg}")
+        try:
+            rs = bs.query_history_k_data_plus(
+                bs_code,
+                "date,close",
+                start_date=start_date,
+                frequency="d",
+                adjustflag="2",  # 前复权，与原 akshare qfq 对齐
+            )
+            if rs.error_code != '0':
+                raise RuntimeError(f"baostock 查询失败: {rs.error_msg}")
+            df = rs.get_data()
+        finally:
+            bs.logout()
+        if df is not None and not df.empty and 'close' in df.columns:
+            df = df[df['close'] != '']  # 过滤停牌等空值行
+            if len(df) >= length:
+                df['close_num'] = df['close'].astype(float)
+                df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
+                return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
+    except Exception:
+        pass
+    # baostock 无数据（可转债不在覆盖范围）或异常 → 腾讯接口降级
+    return _get_tencent_rsi(code, length)
 
 def send_feishu_msg(webhook, msg):
     if webhook:

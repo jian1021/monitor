@@ -5,7 +5,8 @@ import random
 import requests
 import pandas as pd
 import ta
-import akshare as ak
+#import akshare as ak
+import baostock as bs
 
 headers = {'User-Agent': 'Mozilla/5.0'}
 
@@ -66,24 +67,92 @@ def get_okx_rsi(symbol, interval="1H", length=14):
         print(f"❌ OKX [{symbol}] 获取失败: {e}")
     return None, None
 
+# ================= 旧版：akshare 数据源（已停用，保留备查） =================
+# def get_a_share_rsi(code, length=5, max_retries=3):
+#     """【A股通用】适用于可转债和 ETF，自带失败重试机制"""
+#     for attempt in range(max_retries):
+#         try:
+#             # stock_zh_a_hist 适配股票、ETF、可转债等所有 A 股标的
+#             df = ak.stock_zh_a_hist(symbol=str(code), period="daily", adjust="qfq")
+#             if df is not None and not df.empty and len(df) >= length:
+#                 # 兼容中文列名 '收盘'
+#                 close_col = '收盘' if '收盘' in df.columns else 'close'
+#                 df['close_num'] = df[close_col].astype(float)
+#                 df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
+#                 return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
+#         except Exception:
+#             if attempt < max_retries - 1:
+#                 time.sleep(1.5 * (attempt + 1))  # 失败后等待重试
+#             else:
+#                 print(f"❌ 标的 [{code}] 请求多次失败，可能被风控拦截。")
+#     return None, None
+
+# ================= 新版：baostock 数据源 =================
+
+def _to_bs_code(code):
+    """6 位纯数字代码转 baostock 格式：sh.XXXXXX / sz.XXXXXX"""
+    c = str(code).strip().lower()
+    if c.startswith(("sh.", "sz.")):
+        return c
+    c = c.zfill(6)
+    # 沪市：股票 6xxxxx（含 688）、基金/ETF 5xxxxx、可转债 11xxxx；其余归深市
+    if c[0] in ("5", "6", "9") or c.startswith("11"):
+        return f"sh.{c}"
+    return f"sz.{c}"
+
+def _get_tencent_rsi(code, length=5):
+    """腾讯 K 线降级源：覆盖可转债等 baostock 未收录品种"""
+    try:
+        c = str(code).strip().lower().zfill(6)
+        mkt = 'sh' if c[0] in ('5', '6', '9') or c.startswith('11') else 'sz'
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={mkt}{c},day,,,320,qfq"
+        res = requests.get(url, headers=headers, timeout=10).json()
+        days = res.get('data', {}).get(f'{mkt}{c}', {})
+        days = days.get('qfqday') or days.get('day') or []
+        if len(days) >= length:
+            close = pd.Series([float(k[2]) for k in days])
+            rsi = ta.momentum.rsi(close, window=length)
+            return rsi.iloc[-1], close.iloc[-1]
+    except Exception as e:
+        print(f"❌ 腾讯降级源 [{code}] 获取失败: {e}")
+    return None, None
+
 def get_a_share_rsi(code, length=5, max_retries=3):
-    """【A股通用】适用于可转债和 ETF，自带失败重试机制"""
+    """【A股通用·baostock主源+腾讯降级】适用于股票、可转债和 ETF，自带失败重试机制"""
+    bs_code = _to_bs_code(code)
+    start_date = (pd.Timestamp.now() - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
     for attempt in range(max_retries):
         try:
-            # stock_zh_a_hist 适配股票、ETF、可转债等所有 A 股标的
-            df = ak.stock_zh_a_hist(symbol=str(code), period="daily", adjust="qfq")
-            if df is not None and not df.empty and len(df) >= length:
-                # 兼容中文列名 '收盘'
-                close_col = '收盘' if '收盘' in df.columns else 'close'
-                df['close_num'] = df[close_col].astype(float)
-                df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
-                return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
-        except Exception:
+            lg = bs.login()  # 匿名登录，无需账号密码
+            if lg.error_code != '0':
+                raise RuntimeError(f"baostock 登录失败: {lg.error_msg}")
+            try:
+                rs = bs.query_history_k_data_plus(
+                    bs_code,
+                    "date,close",
+                    start_date=start_date,
+                    frequency="d",
+                    adjustflag="2",  # 前复权，与原 akshare qfq 对齐
+                )
+                if rs.error_code != '0':
+                    raise RuntimeError(f"baostock 查询失败: {rs.error_msg}")
+                df = rs.get_data()
+            finally:
+                bs.logout()
+            if df is not None and not df.empty and 'close' in df.columns:
+                df = df[df['close'] != '']  # 过滤停牌等空值行
+                if len(df) >= length:
+                    df['close_num'] = df['close'].astype(float)
+                    df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
+                    return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
+            # baostock 对可转债返回空数据（不在其覆盖范围）→ 腾讯接口降级
+            return _get_tencent_rsi(code, length)
+        except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(1.5 * (attempt + 1))  # 失败后等待重试
             else:
-                print(f"❌ 标的 [{code}] 请求多次失败，可能被风控拦截。")
-    return None, None
+                print(f"❌ 标的 [{code}] 请求多次失败: {e}")
+    return _get_tencent_rsi(code, length)  # baostock 整体不可用时兜底
 
 def send_feishu_msg(webhook, msg):
     if not webhook:
@@ -92,6 +161,7 @@ def send_feishu_msg(webhook, msg):
     requests.post(webhook, json={"msg_type": "text", "content": {"text": msg}}, timeout=10)
 
 # ================= 主程序逻辑 =================
+
 
 if __name__ == "__main__":
     FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
