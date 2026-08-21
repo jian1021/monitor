@@ -15,12 +15,37 @@ LIBSQL_URL = (
 LIBSQL_TOKEN = st.secrets.get("TURSO_AUTH_TOKEN") or os.getenv("TURSO_AUTH_TOKEN") or os.getenv("LIBSQL_TOKEN")
 
 
-def get_db_client():
-    if not LIBSQL_TOKEN:
-        st.error("❌ 未检测到数据库 Token，请配置 TURSO_AUTH_TOKEN / LIBSQL_TOKEN！")
-        return None
-    return create_client_sync(url=LIBSQL_URL, auth_token=LIBSQL_TOKEN)
+import os
+import streamlit as st
+from libsql_client import create_client_sync
 
+def get_db_client():
+    # 1. 读取原始 URL 和 Token
+    raw_url = (
+        st.secrets.get("TURSO_DATABASE_URL")
+        or os.getenv("TURSO_DATABASE_URL")
+        or os.getenv("LIBSQL_URL", "")
+    )
+    token = (
+        st.secrets.get("TURSO_AUTH_TOKEN")
+        or os.getenv("TURSO_AUTH_TOKEN")
+        or os.getenv("LIBSQL_TOKEN")
+    )
+
+    if not raw_url or not token:
+        st.error("❌ 缺失数据库 URL 或 Token 配置！")
+        return None
+
+    # 2. 关键修复：强制将 libsql:// 替换为 https://，避免触发 wss:// 协议握手失败 (400)
+    db_url = raw_url.replace("libsql://", "https://")
+    if not db_url.startswith("https://") and not db_url.startswith("http://"):
+        db_url = f"https://{db_url}"
+
+    try:
+        return create_client_sync(url=db_url, auth_token=token)
+    except Exception as e:
+        st.error(f"❌ 建立数据库连接失败: {e}")
+        return None
 
 # -----------------------------------------------------------------------------
 # 2. 数据库 CRUD 操作函数
