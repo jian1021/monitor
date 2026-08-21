@@ -1,214 +1,216 @@
 import os
-import json
-import time
-import random
-import requests
 import pandas as pd
-import ta
-# import akshare as ak  # 【备注】A 股数据源已切换为 baostock（2026-08），旧导入停用保留
-import baostock as bs
 import streamlit as st
-from db import init_db, load_instruments
+from libsql_client import create_client_sync
 
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36'
+# 设置页面标题
+st.set_page_config(page_title="标的资产配置管理", page_icon="⚙️", layout="wide")
+
+# 1. 数据库凭据读取（优先读 st.secrets，兼容 os.getenv）
+LIBSQL_URL = (
+    st.secrets.get("TURSO_DATABASE_URL")
+    or os.getenv("TURSO_DATABASE_URL")
+    or os.getenv("LIBSQL_URL", "https://monitor-db-jian1021.aws-ap-northeast-1.turso.io")
+)
+LIBSQL_TOKEN = st.secrets.get("TURSO_AUTH_TOKEN") or os.getenv("TURSO_AUTH_TOKEN") or os.getenv("LIBSQL_TOKEN")
+
+
+def get_db_client():
+    if not LIBSQL_TOKEN:
+        st.error("❌ 未检测到数据库 Token，请配置 TURSO_AUTH_TOKEN / LIBSQL_TOKEN！")
+        return None
+    return create_client_sync(url=LIBSQL_URL, auth_token=LIBSQL_TOKEN)
+
+
+# -----------------------------------------------------------------------------
+# 2. 数据库 CRUD 操作函数
+# -----------------------------------------------------------------------------
+def fetch_all_assets():
+    """读取所有标的资产"""
+    client = get_db_client()
+    if not client:
+        return pd.DataFrame()
+    try:
+        rs = client.execute(
+            "SELECT id, asset_type, code, name, enabled, created_at FROM asset_config ORDER BY id ASC"
+        )
+        # 将结果转换为 DataFrame 方便展示和编辑
+        data = []
+        for row in rs.rows:
+            data.append({
+                "id": row[0],
+                "asset_type": row[1],
+                "code": row[2],
+                "name": row[3],
+                "enabled": bool(row[4]),  # 转为 bool 供 Streamlit Checkbox 编辑
+                "created_at": row[5],
+            })
+        return pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"❌ 读取标的列表失败: {e}")
+        return pd.DataFrame()
+    finally:
+        client.close()
+
+
+def update_asset_status(asset_id: int, enabled: bool):
+    """更新单个标的的启用状态"""
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        status_val = 1 if enabled else 0
+        client.execute(
+            "UPDATE asset_config SET enabled = ? WHERE id = ?",
+            [status_val, asset_id]
+        )
+        return True
+    except Exception as e:
+        st.error(f"❌ 更新状态失败 (ID: {asset_id}): {e}")
+        return False
+    finally:
+        client.close()
+
+
+def add_new_asset(asset_type: str, code: str, name: str):
+    """新增标的"""
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute(
+            "INSERT INTO asset_config (asset_type, code, name, enabled) VALUES (?, ?, ?, 1)",
+            [asset_type, code.strip(), name.strip() or code.strip()]
+        )
+        return True
+    except Exception as e:
+        st.error(f"❌ 添加标的失败: {e}")
+        return False
+    finally:
+        client.close()
+
+
+def delete_asset(asset_id: int):
+    """删除标的"""
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute("DELETE FROM asset_config WHERE id = ?", [asset_id])
+        return True
+    except Exception as e:
+        st.error(f"❌ 删除标的失败: {e}")
+        return False
+    finally:
+        client.close()
+
+
+# -----------------------------------------------------------------------------
+# 3. Streamlit 界面构建
+# -----------------------------------------------------------------------------
+st.title("⚙️ 监控标的配置管理")
+st.caption("在此页面配置需监控的资产标的及其启用/禁用状态，修改实时同步至 Turso 数据库。")
+
+# 映射分类名称展示
+ASSET_TYPE_MAP = {
+    "crypto": "🪙 加密货币 (OKX)",
+    "bond": "📈 可转债",
+    "etf": "📊 ETF 基金",
 }
 
-# ================= 页面基本配置 =================
-st.set_page_config(page_title="多资产 RSI 监控看板", layout="wide", page_icon="📈")
-st.title("📈 多资产 RSI 实时监控看板")
+# --- 侧边栏：添加新标的 ---
+with st.sidebar:
+    st.header("➕ 添加新标的")
+    with st.form("add_asset_form", clear_on_submit=True):
+        new_type = st.selectbox(
+            "资产类别",
+            options=list(ASSET_TYPE_MAP.keys()),
+            format_func=lambda x: ASSET_TYPE_MAP[x]
+        )
+        new_code = st.text_input("标的代码 / Symbol", placeholder="例如: BTC-USDT 或 113052")
+        new_name = st.text_input("标的名称 (可选)", placeholder="例如: 兴业转债")
+        
+        submitted = st.form_submit_button("添加标的", type="primary")
+        if submitted:
+            if not new_code.strip():
+                st.warning("⚠️ 标的代码不能为空！")
+            else:
+                if add_new_asset(new_type, new_code, new_name):
+                    st.success(f"✅ 成功添加: {new_code}")
+                    st.rerun()
 
-# ================= 配置文件加载 =================
+# --- 主界面：按分类展示与编辑配置 ---
+df = fetch_all_assets()
 
-# 【备注】旧版本地 JSON 配置加载（已切换为 Turso 远程库 db.load_instruments，停用保留）
-# def load_config(config_file="config.json"):
-#     if not os.path.exists(config_file):
-#         return None
-#     try:
-#         with open(config_file, 'r', encoding='utf-8') as f:
-#             return json.load(f)
-#     except Exception:
-#         return None
-
-# ================= 数据获取逻辑 =================
-def get_okx_rsi(symbol, interval="1H", length=14):
-    url = f"https://www.okx.com/api/v5/market/candles?instId={symbol}&bar={interval}&limit=100"
-    try:
-        res = requests.get(url, headers=headers, timeout=10).json()
-        if res.get('code') == '0' and len(res.get('data', [])) > 0:
-            df = pd.DataFrame(res['data'])
-            df = df.iloc[::-1].reset_index(drop=True)
-            df['close'] = df[4].astype(float)
-            df['rsi'] = ta.momentum.rsi(df['close'], window=length)
-            return df['rsi'].iloc[-1], df['close'].iloc[-1]
-    except Exception:
-        pass
-    return None, None
-
-# ================= 旧版：akshare 数据源（已停用，保留备查） =================
-# @st.cache_data(ttl=60)  # 设置缓存，1分钟内重复查询直接读取缓存，防止过度请求
-# def get_a_share_rsi(code, length=14):
-#     try:
-#         df = ak.stock_zh_a_hist(symbol=str(code), period="daily", adjust="qfq")
-#         if df is not None and not df.empty and len(df) >= length:
-#             close_col = '收盘' if '收盘' in df.columns else 'close'
-#             df['close_num'] = df[close_col].astype(float)
-#             df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
-#             return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
-#     except Exception:
-#         pass
-#     return None, None
-
-# ================= 新版：baostock 数据源 =================
-
-def _to_bs_code(code):
-    """6 位纯数字代码转 baostock 格式：sh.XXXXXX / sz.XXXXXX"""
-    c = str(code).strip().lower()
-    if c.startswith(("sh.", "sz.")):
-        return c
-    c = c.zfill(6)
-    # 沪市：股票 6xxxxx（含 688）、基金/ETF 5xxxxx、可转债 11xxxx；其余归深市
-    if c[0] in ("5", "6", "9") or c.startswith("11"):
-        return f"sh.{c}"
-    return f"sz.{c}"
-
-def _get_tencent_rsi(code, length=14):
-    """腾讯 K 线降级源：覆盖可转债等 baostock 未收录品种"""
-    try:
-        c = str(code).strip().lower().zfill(6)
-        mkt = 'sh' if c[0] in ('5', '6', '9') or c.startswith('11') else 'sz'
-        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={mkt}{c},day,,,320,qfq"
-        res = requests.get(url, headers=headers, timeout=10).json()
-        days = res.get('data', {}).get(f'{mkt}{c}', {})
-        days = days.get('qfqday') or days.get('day') or []
-        if len(days) >= length:
-            close = pd.Series([float(k[2]) for k in days])
-            rsi = ta.momentum.rsi(close, window=length)
-            return rsi.iloc[-1], close.iloc[-1]
-    except Exception:
-        pass
-    return None, None
-
-@st.cache_data(ttl=60)  # 设置缓存，1分钟内重复查询直接读取缓存，防止过度请求
-def get_a_share_rsi(code, length=14):
-    """【A股通用·baostock主源+腾讯降级】适用于股票、可转债和 ETF"""
-    bs_code = _to_bs_code(code)
-    start_date = (pd.Timestamp.now() - pd.Timedelta(days=400)).strftime("%Y-%m-%d")
-    try:
-        lg = bs.login()  # 匿名登录，无需账号密码
-        if lg.error_code != '0':
-            raise RuntimeError(f"baostock 登录失败: {lg.error_msg}")
-        try:
-            rs = bs.query_history_k_data_plus(
-                bs_code,
-                "date,close",
-                start_date=start_date,
-                frequency="d",
-                adjustflag="2",  # 前复权，与原 akshare qfq 对齐
-            )
-            if rs.error_code != '0':
-                raise RuntimeError(f"baostock 查询失败: {rs.error_msg}")
-            df = rs.get_data()
-        finally:
-            bs.logout()
-        if df is not None and not df.empty and 'close' in df.columns:
-            df = df[df['close'] != '']  # 过滤停牌等空值行
-            if len(df) >= length:
-                df['close_num'] = df['close'].astype(float)
-                df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
-                return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
-    except Exception:
-        pass
-    # baostock 无数据（可转债不在覆盖范围）或异常 → 腾讯接口降级
-    return _get_tencent_rsi(code, length)
-
-def send_feishu_msg(webhook, msg):
-    if webhook:
-        requests.post(webhook, json={"msg_type": "text", "content": {"text": msg}}, timeout=10)
-
-# ================= 侧边栏参数设置 =================
-st.sidebar.header("⚙️ 监控参数设置")
-rsi_period = st.sidebar.number_input("RSI 周期", min_value=2, max_value=50, value=14)
-rsi_low = st.sidebar.slider("超卖阈值 (低于报警)", 10, 40, 30)
-rsi_high = st.sidebar.slider("超买阈值 (高于报警)", 60, 90, 70)
-feishu_webhook = st.sidebar.text_input("飞书 Webhook 链接", value=os.getenv("FEISHU_WEBHOOK", ""), type="password")
-
-init_db()  # 首次运行自动建表，并从旧 config.json 播种一次
-config = load_instruments()
-
-if not config:
-    st.error("❌ 未找到 `config.json` 配置文件，请检查项目目录！")
+if df.empty:
+    st.info("ℹ️ 数据库中暂无标的配置或未查到数据。")
 else:
-    # 点击按钮触发刷新
-    if st.button("🔄 立即刷新行情数据", type="primary"):
-        st.cache_data.clear()  # 手动刷新时清空缓存
-
-    # 1. 加密货币展示区
-    st.subheader("🪙 加密货币 (Crypto)")
-    crypto_list = config.get("crypto_okx", [])
-    crypto_data = []
+    # 顶部统计信息
+    total_count = len(df)
+    enabled_count = len(df[df["enabled"] == True])
     
-    with st.spinner("正在获取加密货币数据..."):
-        for coin in crypto_list:
-            symbol = coin.get("symbol")
-            rsi, price = get_okx_rsi(symbol, "1H", rsi_period)
-            if rsi is not None:
-                status = "🚨 超卖" if rsi < rsi_low else ("⚠️ 超买" if rsi > rsi_high else "🟢 正常")
-                crypto_data.append({"标的": symbol, "现价 ($)": f"{price:.2f}", f"RSI({rsi_period})": f"{rsi:.2f}", "状态": status})
-    
-    if crypto_data:
-        st.dataframe(pd.DataFrame(crypto_data), use_container_width=True)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("总标的数", total_count)
+    col2.metric("已启用标的", enabled_count)
+    col3.metric("已停用标的", total_count - enabled_count)
 
-    # 2. A股可转债展示区
-    st.subheader("📜 A股可转债")
-    cb_list = config.get("convertible_bonds", [])
-    cb_data = []
-    
-    cb_progress = st.progress(0, text="正在获取可转债数据...")
-    for idx, item in enumerate(cb_list):
-        code = str(item.get("code"))
-        name = item.get("name", code)
-        rsi, price = get_a_share_rsi(code, length=rsi_period)
-        if rsi is not None:
-            status = "🚨 超卖" if rsi < rsi_low else ("⚠️ 超买" if rsi > rsi_high else "🟢 正常")
-            cb_data.append({"代码": code, "名称": name, "现价 (元)": f"{price:.2f}", f"RSI({rsi_period})": f"{rsi:.2f}", "状态": status})
-        cb_progress.progress((idx + 1) / len(cb_list))
-        time.sleep(0.2)
-    cb_progress.empty()
-    
-    if cb_data:
-        st.dataframe(pd.DataFrame(cb_data), use_container_width=True)
+    st.divider()
 
-    # 3. ETF 展示区
-    st.subheader("📊 ETF 基金")
-    etf_list = config.get("etfs", [])
-    etf_data = []
-    
-    etf_progress = st.progress(0, text="正在获取 ETF 数据...")
-    for idx, item in enumerate(etf_list):
-        code = str(item.get("code"))
-        name = item.get("name", code)
-        rsi, price = get_a_share_rsi(code, length=rsi_period)
-        if rsi is not None:
-            status = "🚨 超卖" if rsi < rsi_low else ("⚠️ 超买" if rsi > rsi_high else "🟢 正常")
-            etf_data.append({"代码": code, "名称": name, "现价 (元)": f"{price:.3f}", f"RSI({rsi_period})": f"{rsi:.2f}", "状态": status})
-        etf_progress.progress((idx + 1) / len(etf_list))
-        time.sleep(0.2)
-    etf_progress.empty()
+    # 使用 Tab 标签页区分三大类资产
+    tabs = st.tabs([ASSET_TYPE_MAP["crypto"], ASSET_TYPE_MAP["bond"], ASSET_TYPE_MAP["etf"]])
 
-    if etf_data:
-        st.dataframe(pd.DataFrame(etf_data), use_container_width=True)
-
-    # 4. 触发飞书推送（仅触发异常时）
-    alerts = []
-    for row in crypto_data + cb_data + etf_data:
-        if "超卖" in row["状态"] or "超买" in row["状态"]:
-            name = row.get("名称", row.get("标的", ""))
-            code = row.get("代码", "")
-            rsi_val = row[f"RSI({rsi_period})"]
-            alerts.append(f"{row['状态']} | {name} ({code}) | RSI: {rsi_val}")
+    for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
+        with tab:
+            sub_df = df[df["asset_type"] == type_key]
             
-    if alerts and feishu_webhook:
-        if st.button("📤 发送异常报警至飞书"):
-            send_feishu_msg(feishu_webhook, "\n\n".join(alerts))
-            st.success("已成功推送警报！")
+            if sub_df.empty:
+                st.caption("该类别下暂无标的资产。")
+                continue
+
+            st.markdown(f"##### {type_label} 列表")
+            
+            # 使用 Data Editor 实现表格内直接开关切换 (Streamlit 1.19+)
+            # 这里的 disabled 列表定义不可修改的列，enabled 列允许直接打钩
+            edited_df = st.data_editor(
+                sub_df,
+                column_config={
+                    "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                    "asset_type": None,  # 隐藏字段
+                    "code": st.column_config.TextColumn("标的代码", disabled=True),
+                    "name": st.column_config.TextColumn("标的名称", disabled=True),
+                    "enabled": st.column_config.CheckboxColumn("是否启用 🟢/🔴", default=True),
+                    "created_at": st.column_config.DatetimeColumn("添加时间", disabled=True, format="YYYY-MM-DD HH:mm"),
+                },
+                hide_index=True,
+                use_container_width=True,
+                key=f"editor_{type_key}"
+            )
+
+            # 监测表格中 enabled 状态的变化并批量提交修改
+            if st.button("💾 保存状态变更", key=f"save_{type_key}", type="primary"):
+                changes_count = 0
+                for _, row in edited_df.iterrows():
+                    # 对比原始状态是否有改变
+                    orig_row = sub_df[sub_df["id"] == row["id"]].iloc[0]
+                    if row["enabled"] != orig_row["enabled"]:
+                        update_asset_status(row["id"], row["enabled"])
+                        changes_count += 1
+                
+                if changes_count > 0:
+                    st.success(f"✅ 成功更新 {changes_count} 条标的状态！")
+                    st.rerun()
+                else:
+                    st.info("ℹ️ 未检测到状态变化。")
+
+            # 下方提供一个快捷删除区
+            with st.expander("🗑️ 删除该分类下的标的"):
+                del_id = st.selectbox(
+                    "选择要删除的标的",
+                    options=sub_df["id"].tolist(),
+                    format_func=lambda x: f"ID:{x} - {sub_df[sub_df['id']==x]['code'].values[0]} ({sub_df[sub_df['id']==x]['name'].values[0]})",
+                    key=f"del_select_{type_key}"
+                )
+                if st.button("确认彻底删除", key=f"del_btn_{type_key}"):
+                    if delete_asset(del_id):
+                        st.success("✅ 删除成功！")
+                        st.rerun()
