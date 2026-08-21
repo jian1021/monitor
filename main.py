@@ -66,7 +66,7 @@ def get_okx_rsi(symbol, interval="1H", length=14):
         print(f"❌ OKX [{symbol}] 获取失败: {e}")
     return None, None
 
-def get_a_share_rsi(code, length=14, max_retries=3):
+def get_a_share_rsi(code, length=5, max_retries=3):
     """【A股通用】适用于可转债和 ETF，自带失败重试机制"""
     for attempt in range(max_retries):
         try:
