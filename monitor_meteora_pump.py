@@ -1,8 +1,6 @@
 import os
 import json
 import requests
-from db import get_db_client
-
 # ================= 1. 数据库交互与策略加载 =================
 
 def load_active_strategies():
