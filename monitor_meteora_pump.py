@@ -2,6 +2,32 @@ import os
 import json
 import requests
 # ================= 1. 数据库交互与策略加载 =================
+def get_db_client():
+    raw_url = (
+        st.secrets.get("TURSO_DATABASE_URL")
+        or os.getenv("TURSO_DATABASE_URL")
+        or os.getenv("LIBSQL_URL", "https://monitor-db-jian1021.aws-ap-northeast-1.turso.io")
+    )
+    token = (
+        st.secrets.get("TURSO_AUTH_TOKEN") 
+        or os.getenv("TURSO_AUTH_TOKEN") 
+        or os.getenv("LIBSQL_TOKEN")
+    )
+
+    if not raw_url or not token:
+        st.error("❌ 缺失数据库 URL 或 Token 配置！")
+        return None
+
+    # 强制转换 libsql:// 为 https:// 避免 WebSocket (wss://) 400 异常
+    db_url = raw_url.replace("libsql://", "https://")
+    if not db_url.startswith("https://") and not db_url.startswith("http://"):
+        db_url = f"https://{db_url}"
+
+    try:
+        return create_client_sync(url=db_url, auth_token=token)
+    except Exception as e:
+        st.error(f"❌ 建立数据库连接失败: {e}")
+        return None
 
 def load_active_strategies():
     """从 sys_lp_config 表中读取所有已激活 (is_active = 1) 的策略配置"""
