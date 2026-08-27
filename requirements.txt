@@ -1,0 +1,6 @@
+requests
+pandas
+ta
+akshare
+baostock
+libsql-client
