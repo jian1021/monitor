@@ -13,38 +13,33 @@ headers = {'User-Agent': 'Mozilla/5.0'}
 
 # ================= 全局默认 RSI 参数配置 =================
 DEFAULT_SETTINGS = {
-    # 加密货币 (OKX)：使用 1 小时 K 线，RSI 周期 3
     "crypto": {
         "interval": "1H",
         "period": 3,
         "rsi_low": 10,
         "rsi_high": 90
     },
-    # Meteora 流动池：使用 1 小时 K 线，RSI 周期 3
     "meteora": {
-        "timeframe": "hour",  # GeckoTerminal: minute / hour / day
-        "aggregate": 1,       # 1hour
+        "timeframe": "hour",
+        "aggregate": 1,
         "period": 3,
         "rsi_low": 10,
         "rsi_high": 90
     },
-    # 可转债：使用日 K 线 (daily)，RSI 周期 3
     "bond": {
         "period": 3,
-        "rsi_low": 10,       # RSI < 10 进入超卖区（超跌反弹关注）
-        "rsi_high": 90       # RSI > 90 进入超买区
+        "rsi_low": 10,
+        "rsi_high": 90
     },
-    # ETF：使用日 K 线 (daily)，RSI 周期 3
     "etf": {
         "period": 3,
-        "rsi_low": 10,       # RSI < 10 进入超卖区
-        "rsi_high": 90       # RSI > 90 进入超买区
+        "rsi_low": 10,
+        "rsi_high": 90
     }
 }
 
 # ================= 1. 数据获取与 RSI 计算 =================
 def get_okx_rsi(symbol, interval="1H", length=14):
-    """【加密货币】获取 OKX K线与 RSI"""
     url = f"https://www.okx.com/api/v5/market/candles?instId={symbol}&bar={interval}&limit=100"
     try:
         res = requests.get(url, headers=headers, timeout=10).json()
@@ -52,7 +47,6 @@ def get_okx_rsi(symbol, interval="1H", length=14):
             df = pd.DataFrame(res['data'])
             df = df.iloc[::-1].reset_index(drop=True)
             df['close'] = df[4].astype(float)
-[4].astype(float)
             df['rsi'] = ta.momentum.rsi(df['close'], window=length)
             return df['rsi'].iloc[-1], df['close'].iloc[-1]
     except Exception as e:
@@ -63,7 +57,6 @@ def get_okx_rsi(symbol, interval="1H", length=14):
 
 
 def get_meteora_rsi(pool_address, timeframe="hour", aggregate=1, length=14):
-    """【Meteora 流动池】通过 GeckoTerminal API 获取 Solana 池子 OHLCV 并计算 RSI"""
     url = f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/{timeframe}?aggregate={aggregate}&limit=100"
     try:
         res = requests.get(url, headers=headers, timeout=10).json()
@@ -82,7 +75,6 @@ def get_meteora_rsi(pool_address, timeframe="hour", aggregate=1, length=14):
 
 
 def _to_bs_code(code):
-    """6 位纯数字代码转 baostock 格式：sh.XXXXXX / sz.XXXXXX"""
     c = str(code).strip().lower()
     if c.startswith(("sh.", "sz.")):
         return c
@@ -93,7 +85,6 @@ def _to_bs_code(code):
 
 
 def _get_tencent_rsi(code, length=5):
-    """腾讯 K 线降级源：覆盖可转债等 baostock 未收录品种"""
     try:
         c = str(code).strip().lower().zfill(6)
         mkt = 'sh' if c[0] in ('5', '6', '9') or c.startswith('11') else 'sz'
@@ -113,9 +104,6 @@ def _get_tencent_rsi(code, length=5):
 
 
 def get_a_share_rsi(code, bs_login_done: bool, length=5, max_retries=3):
-    """【A股通用·baostock主源+腾讯降级】适用于股票、可转债和 ETF，自带失败重试机制
-    bs_login_done: 外部统一登录，函数内部不再重复login/logout
-    """
     bs_code = _to_bs_code(code)
     start_date = (pd.Timestamp.now() - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
 
@@ -253,7 +241,6 @@ if __name__ == "__main__":
                 messages.append(f"⚠️ 【ETF RSI 超买】{cfg_name}({code}) 现价: {price:.3f} 元，RSI: {rsi:.2f} (高于 {e_set['rsi_high']})")
         time.sleep(random.uniform(0.8, 1.5))
 
-    # 释放baostock
     if bs_login_ok:
         bs.logout()
 
@@ -264,7 +251,6 @@ if __name__ == "__main__":
     else:
         print("所有标的 RSI 均处于正常区间，不触发推送。")
 
-    # ========== 调用 Turso Meteora pump策略监控 ==========
     print("\n====== 开始执行 meteora pump 策略监控 ======")
     try:
         monitor_meteora_pump.run_pump_strategy_monitor()
