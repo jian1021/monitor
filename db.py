@@ -8,55 +8,7 @@ LIBSQL_URL = os.getenv("TURSO_DATABASE_URL") or os.getenv("LIBSQL_URL") or "http
 LIBSQL_TOKEN = os.getenv("TURSO_AUTH_TOKEN") or os.getenv("LIBSQL_TOKEN")
 
 
-def init_db(seed_file="config.json"):
-    """建表；表为空且本地存在旧 config.json 时自动播种一次"""
-    if not LIBSQL_TOKEN:
-        print("❌ 错误：未配置 TURSO_AUTH_TOKEN / LIBSQL_TOKEN 环境变量")
-        return
 
-    client = create_client_sync(url=LIBSQL_URL, auth_token=LIBSQL_TOKEN)
-    try:
-        # 1. 创建 asset_config 表
-        client.execute("""
-            CREATE TABLE IF NOT EXISTS asset_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                asset_type TEXT NOT NULL,
-                code TEXT NOT NULL,
-                name TEXT,
-                enabled INTEGER DEFAULT 1,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # 2. 创建 rsi_records 历史与日志表
-        client.execute("""
-            CREATE TABLE IF NOT EXISTS rsi_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                asset_type TEXT NOT NULL,
-                code TEXT NOT NULL,
-                name TEXT,
-                price REAL NOT NULL,
-                rsi REAL NOT NULL,
-                period INTEGER DEFAULT 14,
-                status TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # 3. 创建索引（必须单独执行，不能拼接）
-        client.execute("""
-            CREATE INDEX IF NOT EXISTS idx_rsi_code_time ON rsi_records(code, created_at DESC)
-        """)
-        client.execute("""
-            CREATE INDEX IF NOT EXISTS idx_rsi_status ON rsi_records(status)
-        """)
-
-        # 4. 检查是否需要播种初始数据
-        rs = client.execute("SELECT COUNT(*) FROM asset_config")
-        if rs.rows[0][0] == 0:
-            _seed_from_config(client, seed_file)
-    finally:
-        client.close()
 
 
 def _seed_from_config(client, seed_file):

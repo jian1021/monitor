@@ -6,42 +6,6 @@ from libsql_client import create_client_sync
 # =============================================================================
 # 1. 设置页面属性（全程序仅保留这一个）
 # =============================================================================
-st.set_page_config(page_title="标的资产配置管理", page_icon="⚙️", layout="wide")
-
-# =============================================================================
-# 2. 身份验证与登录拦截机制
-# =============================================================================
-def check_password():
-    """验证用户登录状态，未登录时渲染登录界面并阻止后续页面加载"""
-    ADMIN_USER = os.getenv("ADMIN_USER")
-    ADMIN_PASS = os.getenv("ADMIN_PASS")
-
-    # 如果已经在 session 中标记为已登录，直接通过
-    if st.session_state.get("authenticated", False):
-        return True
-
-    # 未登录时展示登录表单
-    st.markdown("### 🔐 系统登录认证")
-    st.caption("请使用管理员账号登录以访问监控看板与配置页面。")
-
-    with st.form("login_form"):
-        username = st.text_input("账号 (Username)", value="admin")
-        password = st.text_input("密码 (Password)", type="password")
-        submit = st.form_submit_button("登录系统", type="primary")
-
-        if submit:
-            if username == ADMIN_USER and password == ADMIN_PASS:
-                st.session_state["authenticated"] = True
-                st.success("✅ 登录成功！正在跳转...")
-                st.rerun()  # 重新运行以加载主界面
-            else:
-                st.error("❌ 账号或密码错误，请重新输入！")
-
-    return False
-
-# 校验登录状态：未登录则直接 stop 结束程序
-if not check_password():
-    st.stop()
 
 # =============================================================================
 # 3. 数据库连接与 CRUD 操作函数
