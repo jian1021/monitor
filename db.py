@@ -32,11 +32,16 @@ def load_instruments():
     """读取启用中的标的，返回与原 config.json 同构的字典（已增加 meteora）"""
     cfg = {"crypto_okx": [], "meteora": [], "convertible_bonds": [], "etfs": []}
     
-    if not LIBSQL_TOKEN:
-        print("❌ 错误：未配置 TURSO_AUTH_TOKEN / LIBSQL_TOKEN 环境变量")
+    if not LIBSQL_URL or not LIBSQL_TOKEN:
+        print("❌ 错误：未配置 LIBSQL_URL / LIBSQL_TOKEN 环境变量")
         return cfg
 
-    client = create_client_sync(url=LIBSQL_URL, auth_token=LIBSQL_TOKEN)
+    # 强制转换 libsql:// 为 https:// 避免 WebSocket (wss://) 400 异常
+    db_url = LIBSQL_URL.replace("libsql://", "https://")
+    if not db_url.startswith("https://") and not db_url.startswith("http://"):
+        db_url = f"https://{db_url}"
+
+    client = create_client_sync(url=db_url, auth_token=LIBSQL_TOKEN)
     try:
         rs = client.execute(
             "SELECT asset_type, code, name FROM asset_config WHERE enabled = 1 ORDER BY id"
