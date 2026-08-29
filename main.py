@@ -8,9 +8,10 @@ import ta
 import baostock as bs
 from db import init_db, load_instruments
 import monitor_meteora_pump
-import send_feishu_msg
+from send_feishu_msg import send_feishu_msg
 import traceback
 import monitor_rsi
+from config import FEISHU_WEBHOOK
 
 headers = {'User-Agent': 'Mozilla/5.0'}
 
@@ -116,7 +117,7 @@ if __name__ == "__main__":
     # 5.发送RSI告警
     if messages:
         full_msg = "\n\n".join(messages)
-        send_feishu_msg.send_feishu_msg(send_feishu_msg.FEISHU_WEBHOOK, full_msg)
+        send_feishu_msg(FEISHU_WEBHOOK, full_msg)
     else:
         print("所有标的 RSI 均处于正常区间，不触发推送。")
 
@@ -129,4 +130,4 @@ if __name__ == "__main__":
 
     print("\n✅ main.py 全部任务执行完毕")
 
-    
+

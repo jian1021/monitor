@@ -2,31 +2,10 @@ import os
 import json
 import requests
 from libsql import create_client_sync  # 必须导入libsql客户端
-import send_feishu_msg
+from send_feishu_msg import send_feishu_msg
 from config import FEISHU_WEBHOOK
+from db import get_db_client
 # ================= 1. 数据库交互与策略加载 =================
-def get_db_client():
-    raw_url = (
-        os.getenv("TURSO_DATABASE_URL")
-        or os.getenv("LIBSQL_URL", "https://monitor-db-jian1021.aws-ap-northeast-1.turso.io")
-    )
-    token = (
-        os.getenv("TURSO_AUTH_TOKEN")
-        or os.getenv("LIBSQL_TOKEN")
-    )
-    if not raw_url or not token:
-        print("❌ 缺失数据库 URL 或 Token 环境变量配置！")
-        return None
-    # 强制转换 libsql:// 为 https:// 避免 WebSocket (wss://) 400 异常
-    db_url = raw_url.replace("libsql://", "https://")
-    if not db_url.startswith(("https://", "http://")):
-        db_url = f"https://{db_url}"
-    try:
-        return create_client_sync(url=db_url, auth_token=token)
-    except Exception as e:
-        print(f"❌ 建立数据库连接失败: {e}")
-        return None
-
 
 def load_active_strategies():
     """从 sys_lp_config 表中读取所有已激活 (is_active = 1) 的策略配置"""
@@ -168,7 +147,7 @@ def run_pump_strategy_monitor():
             f"========================================\n\n"
             + "\n\n----------------------------------------\n\n".join(all_push_messages)
         )
-        send_feishu_msg(send_feishuFEISHU_WEBHOOK, final_push_text)
+        send_feishu_msg(FEISHU_WEBHOOK, final_push_text)
         print(f"🎉 监控完毕，累计发现 {total_hits} 个符合策略的标的。")
     else:
         print("✨ 所有策略轮询完毕，当前没有满足阀值的新标的。")
@@ -184,6 +163,7 @@ if __name__ == "__main__":
         FROM sys_lp_config 
         WHERE is_active = 1
         """
+        client = get_db_client()
         rs = client.execute(sql)
         for row in rs.rows:
             # 兼容处理：确保解析出 dict 格式
@@ -198,7 +178,7 @@ if __name__ == "__main__":
     finally:
         client.close()
     
-    return strategies
+
 
 
 def fetch_tokens_by_strategy(strategy: dict):

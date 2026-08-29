@@ -6,21 +6,20 @@ from libsql_client import create_client_sync
 from config import LIBSQL_URL, LIBSQL_TOKEN
 
 def get_db_client():
-    
-    raw_url = LIBSQL_URL
-    token = LIBSQL_TOKEN
 
-    if not raw_url or not token:
+
+
+    if not LIBSQL_URL or not LIBSQL_TOKEN:
         st.error("❌ 缺失数据库 URL 或 Token 配置！")
         return None
 
     # 强制转换 libsql:// 为 https:// 避免 WebSocket (wss://) 400 异常
-    db_url = raw_url.replace("libsql://", "https://")
+    db_url = LIBSQL_URL.replace("libsql://", "https://")
     if not db_url.startswith("https://") and not db_url.startswith("http://"):
         db_url = f"https://{db_url}"
 
     try:
-        return create_client_sync(url=db_url, auth_token=token)
+        return create_client_sync(url=db_url, auth_token=LIBSQL_TOKEN)
     except Exception as e:
         st.error(f"❌ 建立数据库连接失败: {e}")
         return None
