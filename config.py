@@ -1,6 +1,5 @@
 # config.py
 import os
-from dotenv import load_dotenv
 
 
 # 读取数据库配置 (带空字符串默认值，防止未配置时报 ImportError)
