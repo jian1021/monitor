@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 from dotenv import load_dotenv
-
+from config import  ADMIN_PASS , ADMIN_USER
 # 自动加载当前目录下的 .env 文件（如果配置了 .env）
 load_dotenv()
 
@@ -13,10 +13,6 @@ if "logged_in" not in st.session_state:
 # ================= 2. 登录与退出视图函数 =================
 def login():
     st.title("🔐 监控系统登录")
-    
-    # 从环境变量获取管理员凭据（带默认兜底）
-    ADMIN_USER = os.getenv("ADMIN_USER", "admin")
-    ADMIN_PASS = os.getenv("ADMIN_PASS", "123456")
 
     with st.form("login_form"):
         username = st.text_input("账号", placeholder="请输入管理员账号")
