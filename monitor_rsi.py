@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import ta
 import baostock as bs
-from db import init_db, load_instruments
+from db import get_db_client
 headers = {'User-Agent': 'Mozilla/5.0'}
 # ================= 全局默认 RSI 参数配置 =================
 DEFAULT_SETTINGS = {

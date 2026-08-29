@@ -1,9 +1,7 @@
 import os
 import streamlit as st
-from dotenv import load_dotenv
 from config import  ADMIN_PASS , ADMIN_USER
-# 自动加载当前目录下的 .env 文件（如果配置了 .env）
-load_dotenv()
+
 
 # ================= 1. 初始化 Session 状态 =================
 if "logged_in" not in st.session_state:

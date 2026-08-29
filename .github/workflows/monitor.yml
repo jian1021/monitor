@@ -27,5 +27,6 @@ jobs:
       - name: 4. 执行监控脚本
         env:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          LIBSQL_URL: ${{ secrets.LIBSQL_URL }}
           LIBSQL_TOKEN: ${{ secrets.LIBSQL_TOKEN }} 
         run: python main.py
