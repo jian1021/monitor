@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-from libsql import create_client_sync  # 必须导入libsql客户端
+from libsql_client import create_client_sync
 from send_feishu_msg import send_feishu_msg
 from config import FEISHU_WEBHOOK
 from db import get_db_client
