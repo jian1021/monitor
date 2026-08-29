@@ -273,6 +273,3 @@ else:
                         st.success("✅ 删除成功！")
                         st.rerun()
 
-if st.button("👉 前往策略配置页面 (B)"):
-    # 路径填写从项目根目录开始的相对路径
-    st.switch_page("pages/discover_lp.py")
