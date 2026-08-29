@@ -2,7 +2,8 @@ import os
 import json
 import requests
 from libsql import create_client_sync  # 必须导入libsql客户端
-
+import send_feishu_msg
+from config import FEISHU_WEBHOOK
 # ================= 1. 数据库交互与策略加载 =================
 def get_db_client():
     raw_url = (
@@ -120,30 +121,11 @@ def fetch_tokens_by_strategy(strategy: dict):
     return hit_tokens
 
 
-# ================= 2. 飞书消息推送 =================
-def send_feishu_msg(webhook: str, msg: str):
-    """发送飞书文本消息，飞书webhook文本上限约2000字符"""
-    if not webhook:
-        print(f"⚠️ 未配置 FEISHU_WEBHOOK，跳过推送。控制台打印:\n\n{msg}")
-        return
-    try:
-        payload = {
-            "msg_type": "text",
-            "content": {"text": msg}
-        }
-        resp = requests.post(webhook, json=payload, timeout=10)
-        data = resp.json()
-        if data.get("code") == 0:
-            print("✅ 飞书消息推送成功！")
-        else:
-            print(f"⚠️ 飞书推送返回异常: code={data.get('code')}, msg={data.get('msg')}")
-    except Exception as e:
-        print(f"❌ 飞书推送失败: {e}")
 
 
 # ================= 3. 主引擎入口 =================
 def run_pump_strategy_monitor():
-    FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
+    
 
     print("🚀 [Meteora 策略监控引擎] 正在从 Turso 读取激活策略...")
     strategies = load_active_strategies()
@@ -186,7 +168,7 @@ def run_pump_strategy_monitor():
             f"========================================\n\n"
             + "\n\n----------------------------------------\n\n".join(all_push_messages)
         )
-        send_feishu_msg(FEISHU_WEBHOOK, final_push_text)
+        send_feishu_msg(send_feishuFEISHU_WEBHOOK, final_push_text)
         print(f"🎉 监控完毕，累计发现 {total_hits} 个符合策略的标的。")
     else:
         print("✨ 所有策略轮询完毕，当前没有满足阀值的新标的。")
@@ -284,31 +266,10 @@ def fetch_tokens_by_strategy(strategy: dict):
     return hit_tokens
 
 
-# ================= 2. 飞书消息推送 =================
-
-def send_feishu_msg(webhook: str, msg: str):
-    """发送飞书文本消息"""
-    if not webhook:
-        print(f"⚠️ 未配置 FEISHU_WEBHOOK，跳过推送。控制台打印:\n\n{msg}")
-        return
-    try:
-        payload = {
-            "msg_type": "text",
-            "content": {"text": msg}
-        }
-        resp = requests.post(webhook, json=payload, timeout=10)
-        if resp.status_code == 200:
-            print("✅ 飞书消息推送成功！")
-        else:
-            print(f"⚠️ 飞书推送返回异常: {resp.text}")
-    except Exception as e:
-        print(f"❌ 飞书推送失败: {e}")
-
 
 # ================= 3. 主引擎入口 =================
 
 def run_pump_strategy_monitor():
-    FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
     
     print("🚀 [Meteora 策略监控引擎] 正在从 Turso 读取激活策略...")
     strategies = load_active_strategies()

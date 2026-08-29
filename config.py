@@ -1,0 +1,4 @@
+import  os
+FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
+TURSO_AUTH_TOKEN=os.getenv("TURSO_AUTH_TOKEN")
+LIBSQL_TOKEN=os.getenv("LIBSQL_TOKEN")

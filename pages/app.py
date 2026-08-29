@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import streamlit as st
 from libsql_client import create_client_sync
-
+from config import FEISHU_WEBHOOK
 # =============================================================================
 # 1. 设置页面属性（全程序仅保留这一个）
 # =============================================================================
