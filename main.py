@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import ta
 import baostock as bs
-from db import init_db, load_instruments
+from db import  get_db_client
 import monitor_meteora_pump
 from send_feishu_msg import send_feishu_msg
 import traceback
