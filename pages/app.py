@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 from libsql_client import create_client_sync
 from config import FEISHU_WEBHOOK
-from db import get_db_client, load_instruments, fetch_all_assets, update_asset_status, batch_update_status_by_type, add_new_asset, delete_asset
+from db import get_db_client
 # =============================================================================
 # 1. 设置页面属性（全程序仅保留这一个）
 # =============================================================================
