@@ -1,6 +1,5 @@
 import os
 import streamlit as st
-from dotenv import load_dotenv
 from config import  ADMIN_PASS , ADMIN_USER
 
 
