@@ -1,7 +1,6 @@
 """远程标的库：Turso (libSQL) 的 asset_config 表取代本地 config.json"""
 import os
 import json
-import streamlit as st
 from libsql_client import create_client_sync
 from config import LIBSQL_URL, LIBSQL_TOKEN
 
@@ -10,7 +9,7 @@ def get_db_client():
 
 
     if not LIBSQL_URL or not LIBSQL_TOKEN:
-        st.error("❌ 缺失数据库 URL 或 Token 配置！")
+        print("❌ 缺失数据库 URL 或 Token 配置！")
         return None
 
     # 强制转换 libsql:// 为 https:// 避免 WebSocket (wss://) 400 异常
@@ -21,7 +20,7 @@ def get_db_client():
     try:
         return create_client_sync(url=db_url, auth_token=LIBSQL_TOKEN)
     except Exception as e:
-        st.error(f"❌ 建立数据库连接失败: {e}")
+        print(f"❌ 建立数据库连接失败: {e}")
         return None
 
 
