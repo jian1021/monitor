@@ -1,46 +1,33 @@
 """远程标的库：Turso (libSQL) 的 asset_config 表取代本地 config.json"""
 import os
 import json
+import streamlit as st
 from libsql_client import create_client_sync
+from config import LIBSQL_URL, LIBSQL_TOKEN
 
-# 环境变量读取，优先读取 TURSO_AUTH_TOKEN 或 LIBSQL_TOKEN
-LIBSQL_URL = os.getenv("TURSO_DATABASE_URL") or os.getenv("LIBSQL_URL") or "https://monitor-db-jian1021.aws-ap-northeast-1.turso.io"
-LIBSQL_TOKEN = os.getenv("TURSO_AUTH_TOKEN") or os.getenv("LIBSQL_TOKEN")
+def get_db_client():
+    
+    raw_url = LIBSQL_URL
+    token = LIBSQL_TOKEN
 
+    if not raw_url or not token:
+        st.error("❌ 缺失数据库 URL 或 Token 配置！")
+        return None
 
+    # 强制转换 libsql:// 为 https:// 避免 WebSocket (wss://) 400 异常
+    db_url = raw_url.replace("libsql://", "https://")
+    if not db_url.startswith("https://") and not db_url.startswith("http://"):
+        db_url = f"https://{db_url}"
 
-
-
-def _seed_from_config(client, seed_file):
-    """一次性迁移：把旧 config.json 的标的写入远程库（仅表为空时触发）"""
     try:
-        with open(seed_file, encoding="utf-8") as f:
-            cfg = json.load(f)
-    except FileNotFoundError:
-        print(f"⚠️ 表为空且未找到 {seed_file}，跳过播种")
-        return
-        
-    # 增加 meteora 的映射关系
-    type_map = {
-        "crypto_okx": "crypto", 
-        "meteora": "meteora", 
-        "convertible_bonds": "bond", 
-        "etfs": "etf"
-    }
-    inserted_count = 0
+        return create_client_sync(url=db_url, auth_token=token)
+    except Exception as e:
+        st.error(f"❌ 建立数据库连接失败: {e}")
+        return None
 
-    for key, asset_type in type_map.items():
-        for item in cfg.get(key, []):
-            code = str(item.get("symbol") or item.get("code") or item.get("address") or "").strip()
-            if code:
-                # 参数必须是 List [...]
-                client.execute(
-                    "INSERT INTO asset_config(asset_type, code, name) VALUES (?, ?, ?)",
-                    [asset_type, code, item.get("name", code)]
-                )
-                inserted_count += 1
-                
-    print(f"✅ 成功从 {seed_file} 迁移播种了 {inserted_count} 条标的数据")
+
+
+
 
 
 def load_instruments():
