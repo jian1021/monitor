@@ -1,0 +1,22 @@
+# Python缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 密钥、环境变量【最重要】
+.env
+.env.*
+
+# VSCode本地配置
+.vscode/
+
+# 系统垃圾文件
+.DS_Store
+
+# 日志文件
+*.log
+logs/
+
+# Streamlit缓存
+.streamlit/cache/
