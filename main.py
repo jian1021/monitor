@@ -50,7 +50,7 @@ if __name__ == "__main__":
         symbol = coin.get("symbol")
         if not symbol:
             continue
-        rsi, price = monitor_rsi.mget_okx_rsi(symbol, c_set["interval"], c_set["period"])
+        rsi, price = monitor_rsi.get_okx_rsi(symbol, c_set["interval"], c_set["period"])
         if rsi is not None and price is not None:
             print(f"✅ [OKX] {symbol} 现价: ${price:.4f}, RSI({c_set['period']}): {rsi:.2f}")
             if rsi < c_set["rsi_low"]:
