@@ -4,3 +4,4 @@ ta
 akshare
 baostock
 libsql-client
+python-dotenv
