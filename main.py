@@ -13,6 +13,7 @@ import traceback
 import monitor_rsi
 from config import FEISHU_WEBHOOK
 from monitor_meteora_pump import run_pump_strategy_monitor
+from monitor_robinhood_pump import run_monitor
 headers = {'User-Agent': 'Mozilla/5.0'}
 
 
@@ -128,6 +129,13 @@ if __name__ == "__main__":
         run_pump_strategy_monitor()
     except Exception as e:
         print(f"❌ run_pump_strategy_monitor() 发生异常：{e}")
+        traceback.print_exc()
+
+    print("\n====== 开始执行 RobinHood pump 策略监控 ======")
+    try:
+        run_monitor()
+    except Exception as e:
+        print(f"❌ run_monitor() 发生异常：{e}")
         traceback.print_exc()
 
     print("\n✅ main.py 全部任务执行完毕")
