@@ -167,8 +167,8 @@ def run_monitor():
         except Exception as e:
             print(f"❌ 主循环异常: {e}")
 
-        print(f"\n⏳ 等待 {SCAN_INTERVAL} 秒后继续扫描...\n")
-        time.sleep(SCAN_INTERVAL)
+        # print(f"\n⏳ 等待 {SCAN_INTERVAL} 秒后继续扫描...\n")
+        # time.sleep(SCAN_INTERVAL)
 
 
 if __name__ == "__main__":
