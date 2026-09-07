@@ -46,6 +46,7 @@ logout_page = st.Page(logout, title="退出登录", icon=":material/logout:")
 # 业务页面（指向 pages/ 目录下的独立文件）
 dashboard = st.Page("pages/app.py", title="监控看板", icon=":material/dashboard:", default=True)
 discover_lp = st.Page("pages/discover_lp.py", title="LP 策略探索", icon=":material/find_in_page:")
+lp_bands = st.Page("pages/lp_bands.py", title="LP 区间可视化", icon=":material/ssid_chart:")
 
 
 # ================= 4. 路由守卫与导航挂载 =================
@@ -53,7 +54,7 @@ if st.session_state.logged_in:
     # 登录成功：挂载所有监控业务模块与退出页面
     pg = st.navigation(
         {
-            "策略与数据": [dashboard, discover_lp],
+            "策略与数据": [dashboard, discover_lp, lp_bands],
             "系统管理": [logout_page],
         }
     )

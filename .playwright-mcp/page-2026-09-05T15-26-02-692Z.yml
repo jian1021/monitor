@@ -1,0 +1,84 @@
+- generic [ref=e2]:
+  - generic [ref=e73]:
+    - button "keyboard_double_arrow_left" [ref=e355] [cursor=pointer]
+    - list [ref=e76]:
+      - generic [ref=e77]:
+        - paragraph [ref=e81] [cursor=pointer]: 策略与数据
+        - listitem [ref=e82]:
+          - link "dashboard 监控看板" [ref=e84] [cursor=pointer]:
+            - /url: http://localhost:8599/
+            - generic [ref=e85]: dashboard
+            - paragraph [ref=e90]: 监控看板
+        - listitem [ref=e91]:
+          - link "find_in_page LP 策略探索" [ref=e93] [cursor=pointer]:
+            - /url: http://localhost:8599/discover_lp
+            - generic [ref=e94]: find_in_page
+            - paragraph [ref=e99]: LP 策略探索
+        - listitem [ref=e100]:
+          - link "ssid_chart LP 区间可视化" [active] [ref=e102] [cursor=pointer]:
+            - /url: http://localhost:8599/lp_bands
+            - generic [ref=e103]: ssid_chart
+            - paragraph [ref=e108]: LP 区间可视化
+      - generic [ref=e109]:
+        - paragraph [ref=e113] [cursor=pointer]: 系统管理
+        - listitem [ref=e114]:
+          - link "logout 退出登录" [ref=e116] [cursor=pointer]:
+            - /url: http://localhost:8599/logout
+            - generic [ref=e117]: logout
+            - paragraph [ref=e122]: 退出登录
+    - generic [ref=e126]:
+      - heading "参数" [level=2] [ref=e362]
+      - generic [ref=e364]:
+        - paragraph [ref=e368]: Token 地址
+        - textbox "Token 地址" [ref=e371]:
+          - /placeholder: So11111111111111111111111111111111111111112
+      - generic [ref=e373]:
+        - paragraph [ref=e377]: 链
+        - generic [ref=e379]:
+          - generic [ref=e380]:
+            - generic [ref=e381]: sol
+            - combobox "Selected sol. 链" [ref=e383]
+          - img "open" [ref=e385]
+      - generic [ref=e388]:
+        - paragraph [ref=e392]: K线周期
+        - generic [ref=e394]:
+          - generic [ref=e395]:
+            - generic [ref=e396]: 1h
+            - combobox "Selected 1h. K线周期" [ref=e398]
+          - img "open" [ref=e400]
+      - generic [ref=e403]:
+        - paragraph [ref=e407]: 天数 (0=按周期自动取满100根)
+        - generic [ref=e408]:
+          - spinbutton "天数 (0=按周期自动取满100根)" [ref=e411]: "0.00"
+          - generic [ref=e412]:
+            - button [disabled] [ref=e413]
+            - button [ref=e416] [cursor=pointer]
+      - generic [ref=e420]:
+        - paragraph [ref=e424]: lam · 期望段长
+        - generic [ref=e425]:
+          - spinbutton "lam · 期望段长" [ref=e428]: "120.00"
+          - generic [ref=e429]:
+            - button [ref=e430] [cursor=pointer]
+            - button [ref=e433] [cursor=pointer]
+      - generic [ref=e437]:
+        - paragraph [ref=e441]: 宽度系数 C
+        - generic [ref=e442]:
+          - spinbutton "宽度系数 C" [ref=e445]: "2.00"
+          - generic [ref=e446]:
+            - button [ref=e447] [cursor=pointer]
+            - button [ref=e450] [cursor=pointer]
+      - button [ref=e455] [cursor=pointer]:
+        - paragraph [ref=e459]: 生成区间
+  - generic [ref=e3]:
+    - banner [ref=e6]:
+      - generic [ref=e9]:
+        - button "Deploy" [ref=e11] [cursor=pointer]
+        - button "Main menu" [ref=e15] [cursor=pointer]
+    - generic [ref=e19]:
+      - heading "LP 自适应区间可视化" [level=1] [ref=e464]:
+        - text: LP 自适应区间可视化
+        - generic [ref=e465]:
+          - link "Link to heading":
+            - /url: "#lp"
+      - alert [ref=e468]:
+        - paragraph [ref=e473]: 左侧输入 Token 地址后点击「生成区间」

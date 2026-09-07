@@ -1,0 +1,31 @@
+- generic [ref=e3]:
+  - banner [ref=e6]:
+    - generic [ref=e9]:
+      - button "Deploy" [ref=e11] [cursor=pointer]
+      - button "Main menu" [ref=e15] [cursor=pointer]
+  - generic [ref=e19]:
+    - heading "🔐 监控系统登录" [level=1] [ref=e24]:
+      - text: 🔐 监控系统登录
+      - generic [ref=e25]:
+        - link "Link to heading":
+          - /url: "#e7004575"
+    - generic [ref=e28]:
+      - generic [ref=e30]:
+        - paragraph [ref=e34]: 账号
+        - textbox "账号" [ref=e37]:
+          - /placeholder: 请输入管理员账号
+          - text: admin
+      - generic [ref=e39]:
+        - paragraph [ref=e43]: 密码
+        - generic [ref=e45]:
+          - textbox "密码" [ref=e46]:
+            - /placeholder: 请输入密码
+            - text: "123456"
+          - button "Hide password text" [ref=e69] [cursor=pointer]:
+            - img "Hide password text" [ref=e70]
+      - button [active] [ref=e53] [cursor=pointer]:
+        - paragraph [ref=e57]: 登录系统
+    - alert [ref=e60]:
+      - generic [ref=e63]:
+        - generic [aria-hidden] [ref=e66]: ❌
+        - paragraph [ref=e68]: 账号或密码错误

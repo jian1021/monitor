@@ -5,3 +5,5 @@ akshare
 baostock
 libsql-client
 python-dotenv
+
+plotly

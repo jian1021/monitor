@@ -1,0 +1,72 @@
+- generic [ref=e2]:
+  - generic [ref=e73]:
+    - list [ref=e76]:
+      - generic [ref=e77]:
+        - paragraph [ref=e81] [cursor=pointer]: 策略与数据
+        - listitem [ref=e82]:
+          - link "dashboard 监控看板" [ref=e84] [cursor=pointer]:
+            - /url: http://localhost:8599/
+            - generic [ref=e85]: dashboard
+            - paragraph [ref=e90]: 监控看板
+        - listitem [ref=e91]:
+          - link "find_in_page LP 策略探索" [ref=e93] [cursor=pointer]:
+            - /url: http://localhost:8599/discover_lp
+            - generic [ref=e94]: find_in_page
+            - paragraph [ref=e99]: LP 策略探索
+        - listitem [ref=e100]:
+          - link "ssid_chart LP 区间可视化" [ref=e102] [cursor=pointer]:
+            - /url: http://localhost:8599/lp_bands
+            - generic [ref=e103]: ssid_chart
+            - paragraph [ref=e108]: LP 区间可视化
+      - generic [ref=e109]:
+        - paragraph [ref=e113] [cursor=pointer]: 系统管理
+        - listitem [ref=e114]:
+          - link "logout 退出登录" [ref=e116] [cursor=pointer]:
+            - /url: http://localhost:8599/logout
+            - generic [ref=e117]: logout
+            - paragraph [ref=e122]: 退出登录
+    - generic [ref=e126]:
+      - paragraph [ref=e131]:
+        - text: 👤
+        - strong [ref=e132]: 当前登录：管理员
+      - button [ref=e135] [cursor=pointer]:
+        - paragraph [ref=e139]: 🚪 退出登录
+      - separator [ref=e144]
+      - heading "➕ 添加新标的" [level=2] [ref=e148]
+      - generic [ref=e151]:
+        - generic [ref=e153]:
+          - paragraph [ref=e157]: 资产类别
+          - generic [ref=e159]:
+            - generic [ref=e160]:
+              - generic [ref=e161]: 🪙 加密货币 (OKX)
+              - combobox "Selected 🪙 加密货币 (OKX). 资产类别" [ref=e163]
+            - img "open" [ref=e165]
+        - generic [ref=e168]:
+          - paragraph [ref=e172]: 标的代码 / 池子 Address
+          - textbox "标的代码 / 池子 Address" [ref=e175]:
+            - /placeholder: "例如: BTC-USDT 或 113052"
+        - generic [ref=e177]:
+          - paragraph [ref=e181]: 标的名称 (可选)
+          - textbox "标的名称 (可选)" [ref=e184]:
+            - /placeholder: "例如: 兴业转债"
+        - button [ref=e188] [cursor=pointer]:
+          - paragraph [ref=e192]: 添加标的
+  - generic [ref=e3]:
+    - banner [ref=e6]:
+      - generic [ref=e9]:
+        - generic [ref=e196]:
+          - img "Running..." [ref=e197]
+          - button "Stop" [ref=e203] [cursor=pointer]
+        - button "Deploy" [ref=e11] [cursor=pointer]
+        - button "Main menu" [ref=e15] [cursor=pointer]
+    - generic [ref=e19]:
+      - heading "⚙️ 监控标的配置管理" [level=1] [ref=e204]:
+        - text: ⚙️ 监控标的配置管理
+        - generic [ref=e25]:
+          - link "Link to heading":
+            - /url: "#e7004575"
+      - paragraph [ref=e209]: 在此页面配置需监控的资产标的及其启用/禁用状态，支持一键批量修改，变更实时同步至 Turso 数据库。
+      - alert [ref=e60]:
+        - generic [ref=e63]:
+          - generic [aria-hidden] [ref=e66]: ❌
+          - paragraph [ref=e68]: 账号或密码错误
