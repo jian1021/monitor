@@ -288,7 +288,7 @@ columns_cfg = {
 st.dataframe(
     view_df[list(show_cols.keys())].rename(columns=show_cols),
     column_config=columns_cfg,
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
 )
 
@@ -361,24 +361,24 @@ with st.expander("⚙️ 启用 / 停用 / 重置 / 删除", expanded=True):
     m1, m2, m3, m4 = st.columns(4)
     with m1:
         if rule_row["enabled"]:
-            if st.button("⏸️ 停用", use_container_width=True):
+            if st.button("⏸️ 停用", width=stretch):
                 if update_rule_status(manage_id, False):
                     st.toast("已停用", icon="⏸️")
                     st.rerun()
         else:
-            if st.button("▶️ 启用", use_container_width=True):
+            if st.button("▶️ 启用", width=stretch):
                 if update_rule_status(manage_id, True):
                     st.toast("已启用", icon="▶️")
                     st.rerun()
     with m2:
-        if st.button("🔓 重置告警", use_container_width=True, help="重置后将可再次触发推送"):
+        if st.button("🔓 重置告警", width=stretch, help="重置后将可再次触发推送"):
             if reset_alert(manage_id):
                 st.toast("告警标志已重置", icon="🔓")
                 st.rerun()
     with m3:
         st.caption(f"当前: {'已触发' if rule_row['alerted'] else '未触发'} / 目标 {'≥' if rule_row['direction']=='gte' else '≤'} {rule_row['target_price']}")
     with m4:
-        with st.popover("🗑️ 删除规则", use_container_width=True):
+        with st.popover("🗑️ 删除规则", width=stretch):
             st.write("⚠️ 删除后不可恢复，确认删除该规则？")
             if st.button("确认删除", type="primary"):
                 if delete_rule(manage_id):

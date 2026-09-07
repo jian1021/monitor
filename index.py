@@ -47,6 +47,7 @@ logout_page = st.Page(logout, title="退出登录", icon=":material/logout:")
 dashboard = st.Page("pages/app.py", title="监控看板", icon=":material/dashboard:", default=True)
 discover_lp = st.Page("pages/discover_lp.py", title="LP 策略探索", icon=":material/find_in_page:")
 price_monitor = st.Page("pages/st_monitor_price.py", title="价格监控", icon=":material/track_changes:")
+pool_simulator = st.Page("pages/st_pool_simulator.py", title="池子价格模拟", icon=":material/science:")
 
 
 # ================= 4. 路由守卫与导航挂载 =================
@@ -54,7 +55,7 @@ if st.session_state.logged_in:
     # 登录成功：挂载所有监控业务模块与退出页面
     pg = st.navigation(
         {
-            "策略与数据": [dashboard, discover_lp, price_monitor],
+            "策略与数据": [dashboard, discover_lp, price_monitor, pool_simulator],
             "系统管理": [logout_page],
         }
     )
