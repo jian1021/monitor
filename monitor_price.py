@@ -12,15 +12,13 @@
 """
 import os
 import sys
-import json
 import time
-import subprocess
 import traceback
 
 from db import get_db_client
 from config import FEISHU_WEBHOOK
 from send_feishu_msg import send_feishu_msg
-from gmgn_cli import GMGN_CLI_MISSING_MSG, build_env, get_gmgn_cli
+from gmgn_cli import fetch_token_info
 
 # Windows 控制台默认 cp1252 无法打印 emoji，强制 UTF-8 输出
 if os.name == "nt":
@@ -29,7 +27,7 @@ if os.name == "nt":
         if callable(_rer):
             _rer(encoding="utf-8", errors="replace")
 
-# gmgn-cli 走代理的逻辑 (HTTPS_PROXY/HTTP_PROXY) 在 gmgn_cli.build_env() 中统一处理
+# 数据拉取逻辑 (CLI 优先 / 直连 OpenAPI 兜底 / 代理与 PATH) 全部在 gmgn_cli.fetch_token_info 中统一处理
 CHAIN_ALIASES = {
     "sol": "SOL", "bsc": "BSC", "base": "BASE", "eth": "ETH",
     "robinhood": "ROBINHOOD", "arc": "ARC", "stable": "STABLE",
@@ -82,43 +80,17 @@ def ensure_table():
 
 
 # ============================================================
-# 查询价格（gmgn-cli）
+# 查询价格（gmgn-cli 优先, 直连 OpenAPI 兜底）
 # ============================================================
 def fetch_price(chain: str, address: str):
-    """调用 gmgn-cli token info 获取当前价格, 返回 (price, symbol) 或 (None, None)"""
-    gcli = get_gmgn_cli()
-    if not gcli:
-        print(f"❌ [gmgn-cli] {GMGN_CLI_MISSING_MSG}")
-        return None, None
-    cmd = [gcli, "token", "info", "--chain", chain, "--address", address.strip()]
-    env = build_env()
-    try:
-        # Windows 下 npm 的 gmgn-cli 是 .cmd 垫片，必须经由 cmd.exe (shell=True) 派发
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30, env=env, shell=os.name == "nt"
-        )
-    except Exception as e:
-        print(f"❌ [gmgn-cli] 调用失败: {e}")
-        return None, None
+    """拉取当前价格, 返回 (price, symbol) 或 (None, None).
 
-    if proc.returncode != 0:
-        err = proc.stderr.strip() or proc.stdout.strip()
-        print(f"❌ [gmgn-cli] 返回码 {proc.returncode}: {err}")
+    gmgn-cli 缺失/失败时自动降级为直连 GMGN OpenAPI, 无需依赖 node 环境。
+    """
+    data, source = fetch_token_info(chain, address)
+    if data is None:
+        print(f"❌ 拉取失败 ({source})")
         return None, None
-
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        # 兼容 --raw 或非纯 JSON 输出（去掉可能的 gmgn-cli 提示行）
-        lines = [ln for ln in proc.stdout.splitlines() if ln.strip().startswith("{")]
-        if not lines:
-            print(f"❌ [gmgn-cli] 无法解析输出: {proc.stdout[:300]}")
-            return None, None
-        try:
-            data = json.loads("".join(lines))
-        except json.JSONDecodeError:
-            print(f"❌ [gmgn-cli] JSON 解析失败: {e}")
-            return None, None
 
     symbol = data.get("symbol") or ""
     price = None
@@ -129,7 +101,7 @@ def fetch_price(chain: str, address: str):
     try:
         price = float(raw)
     except (TypeError, ValueError):
-        print(f"❌ [gmgn-cli] 无法读取价格字段: {raw}")
+        print(f"❌ 无法读取价格字段: {raw}")
         return None, symbol
     return price, symbol
 

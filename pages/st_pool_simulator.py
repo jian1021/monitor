@@ -11,14 +11,12 @@
 """
 import os
 import sys
-import json
-import subprocess
 
 # 支持独立运行 (python pages/st_pool_simulator.py): 仓库根加入 sys.path
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gmgn_cli import GMGN_CLI_MISSING_MSG, build_env, get_gmgn_cli
+from gmgn_cli import fetch_token_info
 
 # Windows 控制台默认 cp1252 无法打印中文/emoji，强制 UTF-8 输出
 if os.name == "nt":
@@ -36,23 +34,10 @@ def normalize_chain(chain: str) -> str:
 
 
 def fetch_pool(chain: str, address: str):
-    """调用 gmgn-cli token info, 返回解析后的池子数据字典或 None"""
-    gcli = get_gmgn_cli()
-    if not gcli:
-        return {"error": GMGN_CLI_MISSING_MSG}
-    cmd = [gcli, "token", "info", "--chain", chain, "--address", address.strip(), "--raw"]
-    env = build_env()
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
-                              env=env, shell=os.name == "nt")
-    except Exception as e:
-        return {"error": f"gmgn-cli 调用失败: {e}"}
-    if proc.returncode != 0:
-        return {"error": (proc.stderr.strip() or proc.stdout.strip())[:300]}
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        return {"error": f"JSON 解析失败: {e}"}
+    """拉取池子数据 (gmgn-cli 优先, 直连 OpenAPI 兜底), 返回解析后的字典或 {"error": ...}"""
+    data, source = fetch_token_info(chain, address)
+    if data is None:
+        return {"error": source}
 
     try:
         price = float((data.get("price") or {}).get("price"))

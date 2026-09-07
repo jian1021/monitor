@@ -13,7 +13,7 @@ import pandas as pd
 from config import FEISHU_WEBHOOK
 from db import get_db_client
 from send_feishu_msg import send_feishu_msg
-from gmgn_cli import GMGN_CLI_MISSING_MSG, build_env, get_gmgn_cli
+from gmgn_cli import fetch_token_info
 
 CHAIN_OPTIONS = ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"]
 CHAIN_LABELS = {
@@ -298,7 +298,7 @@ st.divider()
 # ================= 管理操作 =================
 st.markdown("#### 🛠️ 规则管理")
 
-# 手动触发一次查价（调 gmgn-cli）
+# 手动触发一次查价（gmgn-cli 优先, 直连 OpenAPI 兜底)
 with st.expander("🔍 立即检查选中规则价格"):
     check_sel = st.selectbox(
         "选择要检查的规则",
@@ -306,47 +306,34 @@ with st.expander("🔍 立即检查选中规则价格"):
         format_func=lambda i: f"[{i}] {df.loc[df['id']==i,'symbol'].iloc[0] or df.loc[df['id']==i,'address'].iloc[0][:16]}... ({df.loc[df['id']==i,'chain'].iloc[0]})",
     )
     if st.button("检查价格"):
-        import subprocess
-        import json as _json
-
         check_id = int(check_sel)
         rule = df[df["id"] == check_id].iloc[0]
-        gcli = get_gmgn_cli()
-        if not gcli:
-            st.error(GMGN_CLI_MISSING_MSG)
+        data, source = fetch_token_info(rule["chain"], rule["address"])
+        if data is None:
+            st.error(f"拉取失败:\n{source}")
         else:
-            cmd = [gcli, "token", "info", "--chain", rule["chain"], "--address", rule["address"], "--raw"]
-            env = build_env()
+            price = None
+            pobj = data.get("price") or {}
+            raw = pobj.get("price")
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env, shell=os.name == "nt")
-                if proc.returncode != 0:
-                    st.error(f"gmgn-cli 调用失败: {proc.stderr.strip()[:200]}")
-                else:
-                    data = _json.loads(proc.stdout)
-                    price = None
-                    pobj = data.get("price") or {}
-                    raw = pobj.get("price")
+                price = float(raw)
+            except (TypeError, ValueError):
+                pass
+            if price is not None:
+                sym = data.get("symbol") or rule["symbol"]
+                st.success(f"✅ {sym} 当前价格: {price}")
+                # 回写
+                client = get_client()
+                if client:
                     try:
-                        price = float(raw)
-                    except (TypeError, ValueError):
-                        pass
-                    if price is not None:
-                        sym = data.get("symbol") or rule["symbol"]
-                        st.success(f"✅ {sym} 当前价格: {price}")
-                        # 回写
-                        client = get_client()
-                        if client:
-                            try:
-                                client.execute(
-                                    "UPDATE price_alert SET last_price = ?, last_checked_at = datetime('now') WHERE id = ?",
-                                    [price, check_id],
-                                )
-                            finally:
-                                client.close()
-                    else:
-                        st.error(f"无法解析价格字段: {raw}")
-            except Exception as e:
-                st.error(f"检查失败: {e}")
+                        client.execute(
+                            "UPDATE price_alert SET last_price = ?, last_checked_at = datetime('now') WHERE id = ?",
+                            [price, check_id],
+                        )
+                    finally:
+                        client.close()
+            else:
+                st.error(f"无法解析价格字段: {raw}")
 
 with st.expander("⚙️ 启用 / 停用 / 重置 / 删除", expanded=True):
     manage_sel = st.selectbox(
