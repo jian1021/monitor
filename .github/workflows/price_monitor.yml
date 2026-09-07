@@ -1,0 +1,42 @@
+name: Price Alert Monitor
+
+on:
+  schedule:
+    # 每 5 分钟检查一次价格（GitHub Actions cron 最小粒度）
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # 允许网页端手动触发
+
+jobs:
+  run-price-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. 拉取仓库代码
+        uses: actions/checkout@v4
+
+      - name: 2. 安装 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 3. 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 4. 安装 gmgn-cli
+        run: npm install -g gmgn-cli
+
+      - name: 5. 生成 GMGN keypair 并配置 API Key
+        run: |
+          gmgn-cli config || true
+          gmgn-cli config --apply "$GMGN_API_KEY" || true
+        env:
+          GMGN_API_KEY: ${{ secrets.GMGN_API_KEY }}
+
+      - name: 6. 执行价格监控
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          LIBSQL_URL: ${{ secrets.LIBSQL_URL }}
+          LIBSQL_TOKEN: ${{ secrets.LIBSQL_TOKEN }}
+          GMGN_PROXY: ${{ secrets.GMGN_PROXY }}
+        run: python monitor_price.py
