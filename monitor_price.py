@@ -20,6 +20,7 @@ import traceback
 from db import get_db_client
 from config import FEISHU_WEBHOOK
 from send_feishu_msg import send_feishu_msg
+from gmgn_cli import GMGN_CLI_MISSING_MSG, build_env, get_gmgn_cli
 
 # Windows 控制台默认 cp1252 无法打印 emoji，强制 UTF-8 输出
 if os.name == "nt":
@@ -28,8 +29,7 @@ if os.name == "nt":
         if callable(_rer):
             _rer(encoding="utf-8", errors="replace")
 
-# gmgn-cli 必须走代理才能连通 GMGN (直连被网络屏蔽)
-PROXY = os.getenv("GMGN_PROXY", "http://127.0.0.1:7897")
+# gmgn-cli 走代理的逻辑 (HTTPS_PROXY/HTTP_PROXY) 在 gmgn_cli.build_env() 中统一处理
 CHAIN_ALIASES = {
     "sol": "SOL", "bsc": "BSC", "base": "BASE", "eth": "ETH",
     "robinhood": "ROBINHOOD", "arc": "ARC", "stable": "STABLE",
@@ -86,13 +86,14 @@ def ensure_table():
 # ============================================================
 def fetch_price(chain: str, address: str):
     """调用 gmgn-cli token info 获取当前价格, 返回 (price, symbol) 或 (None, None)"""
-    cmd = ["gmgn-cli", "token", "info", "--chain", chain, "--address", address.strip()]
-    env = dict(os.environ)
-    if PROXY:
-        env["HTTPS_PROXY"] = PROXY
-        env["HTTP_PROXY"] = PROXY
+    gcli = get_gmgn_cli()
+    if not gcli:
+        print(f"❌ [gmgn-cli] {GMGN_CLI_MISSING_MSG}")
+        return None, None
+    cmd = [gcli, "token", "info", "--chain", chain, "--address", address.strip()]
+    env = build_env()
     try:
-        # Windows 下 npm 安装的 gmgn-cli 是 .cmd 垫片，必须启用 shell
+        # Windows 下 npm 的 gmgn-cli 是 .cmd 垫片，必须经由 cmd.exe (shell=True) 派发
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=30, env=env, shell=os.name == "nt"
         )

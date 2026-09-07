@@ -13,6 +13,7 @@ import pandas as pd
 from config import FEISHU_WEBHOOK
 from db import get_db_client
 from send_feishu_msg import send_feishu_msg
+from gmgn_cli import GMGN_CLI_MISSING_MSG, build_env, get_gmgn_cli
 
 CHAIN_OPTIONS = ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"]
 CHAIN_LABELS = {
@@ -307,46 +308,45 @@ with st.expander("🔍 立即检查选中规则价格"):
     if st.button("检查价格"):
         import subprocess
         import json as _json
-        import os as _os
 
         check_id = int(check_sel)
         rule = df[df["id"] == check_id].iloc[0]
-        cmd = ["gmgn-cli", "token", "info", "--chain", rule["chain"], "--address", rule["address"], "--raw"]
-        env = dict(_os.environ)
-        proxy = _os.getenv("GMGN_PROXY", "http://127.0.0.1:7897")
-        if proxy:
-            env["HTTPS_PROXY"] = proxy
-            env["HTTP_PROXY"] = proxy
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env, shell=os.name == "nt")
-            if proc.returncode != 0:
-                st.error(f"gmgn-cli 调用失败: {proc.stderr.strip()[:200]}")
-            else:
-                data = _json.loads(proc.stdout)
-                price = None
-                pobj = data.get("price") or {}
-                raw = pobj.get("price")
-                try:
-                    price = float(raw)
-                except (TypeError, ValueError):
-                    pass
-                if price is not None:
-                    sym = data.get("symbol") or rule["symbol"]
-                    st.success(f"✅ {sym} 当前价格: {price}")
-                    # 回写
-                    client = get_client()
-                    if client:
-                        try:
-                            client.execute(
-                                "UPDATE price_alert SET last_price = ?, last_checked_at = datetime('now') WHERE id = ?",
-                                [price, check_id],
-                            )
-                        finally:
-                            client.close()
+        gcli = get_gmgn_cli()
+        if not gcli:
+            st.error(GMGN_CLI_MISSING_MSG)
+        else:
+            cmd = [gcli, "token", "info", "--chain", rule["chain"], "--address", rule["address"], "--raw"]
+            env = build_env()
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env, shell=os.name == "nt")
+                if proc.returncode != 0:
+                    st.error(f"gmgn-cli 调用失败: {proc.stderr.strip()[:200]}")
                 else:
-                    st.error(f"无法解析价格字段: {raw}")
-        except Exception as e:
-            st.error(f"检查失败: {e}")
+                    data = _json.loads(proc.stdout)
+                    price = None
+                    pobj = data.get("price") or {}
+                    raw = pobj.get("price")
+                    try:
+                        price = float(raw)
+                    except (TypeError, ValueError):
+                        pass
+                    if price is not None:
+                        sym = data.get("symbol") or rule["symbol"]
+                        st.success(f"✅ {sym} 当前价格: {price}")
+                        # 回写
+                        client = get_client()
+                        if client:
+                            try:
+                                client.execute(
+                                    "UPDATE price_alert SET last_price = ?, last_checked_at = datetime('now') WHERE id = ?",
+                                    [price, check_id],
+                                )
+                            finally:
+                                client.close()
+                    else:
+                        st.error(f"无法解析价格字段: {raw}")
+            except Exception as e:
+                st.error(f"检查失败: {e}")
 
 with st.expander("⚙️ 启用 / 停用 / 重置 / 删除", expanded=True):
     manage_sel = st.selectbox(
@@ -361,24 +361,24 @@ with st.expander("⚙️ 启用 / 停用 / 重置 / 删除", expanded=True):
     m1, m2, m3, m4 = st.columns(4)
     with m1:
         if rule_row["enabled"]:
-            if st.button("⏸️ 停用", width=stretch):
+            if st.button("⏸️ 停用", width="stretch"):
                 if update_rule_status(manage_id, False):
                     st.toast("已停用", icon="⏸️")
                     st.rerun()
         else:
-            if st.button("▶️ 启用", width=stretch):
+            if st.button("▶️ 启用", width="stretch"):
                 if update_rule_status(manage_id, True):
                     st.toast("已启用", icon="▶️")
                     st.rerun()
     with m2:
-        if st.button("🔓 重置告警", width=stretch, help="重置后将可再次触发推送"):
+        if st.button("🔓 重置告警", width="stretch", help="重置后将可再次触发推送"):
             if reset_alert(manage_id):
                 st.toast("告警标志已重置", icon="🔓")
                 st.rerun()
     with m3:
         st.caption(f"当前: {'已触发' if rule_row['alerted'] else '未触发'} / 目标 {'≥' if rule_row['direction']=='gte' else '≤'} {rule_row['target_price']}")
     with m4:
-        with st.popover("🗑️ 删除规则", width=stretch):
+        with st.popover("🗑️ 删除规则", width="stretch"):
             st.write("⚠️ 删除后不可恢复，确认删除该规则？")
             if st.button("确认删除", type="primary"):
                 if delete_rule(manage_id):

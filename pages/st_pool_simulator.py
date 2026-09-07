@@ -14,10 +14,18 @@ import sys
 import json
 import subprocess
 
-# ============================================================
-# GMGN 数据获取（复用与 monitor_price 相同的代理/调用机制）
-# ============================================================
-PROXY = os.getenv("GMGN_PROXY", "http://127.0.0.1:7897")
+# 支持独立运行 (python pages/st_pool_simulator.py): 仓库根加入 sys.path
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from gmgn_cli import GMGN_CLI_MISSING_MSG, build_env, get_gmgn_cli
+
+# Windows 控制台默认 cp1252 无法打印中文/emoji，强制 UTF-8 输出
+if os.name == "nt":
+    for _stream in (sys.stdout, sys.stderr):
+        _rer = getattr(_stream, "reconfigure", None)
+        if callable(_rer):
+            _rer(encoding="utf-8", errors="replace")
 
 
 def normalize_chain(chain: str) -> str:
@@ -29,11 +37,11 @@ def normalize_chain(chain: str) -> str:
 
 def fetch_pool(chain: str, address: str):
     """调用 gmgn-cli token info, 返回解析后的池子数据字典或 None"""
-    cmd = ["gmgn-cli", "token", "info", "--chain", chain, "--address", address.strip(), "--raw"]
-    env = dict(os.environ)
-    if PROXY:
-        env["HTTPS_PROXY"] = PROXY
-        env["HTTP_PROXY"] = PROXY
+    gcli = get_gmgn_cli()
+    if not gcli:
+        return {"error": GMGN_CLI_MISSING_MSG}
+    cmd = [gcli, "token", "info", "--chain", chain, "--address", address.strip(), "--raw"]
+    env = build_env()
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
                               env=env, shell=os.name == "nt")
