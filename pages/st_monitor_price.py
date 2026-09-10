@@ -13,7 +13,7 @@ import pandas as pd
 from config import FEISHU_WEBHOOK
 from db import get_db_client
 from send_feishu_msg import send_feishu_msg
-from gmgn_cli import fetch_token_info
+from dex_client import fetch_token_info
 
 CHAIN_OPTIONS = ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"]
 CHAIN_LABELS = {
@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS price_alert (
     alerted       INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);
 """
+CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);"
 
 # ============================================================
 # 通用工具
@@ -55,7 +55,7 @@ def ensure_table():
     if not client:
         return False
     try:
-        client.batch([CREATE_TABLE_SQL])
+        client.batch([CREATE_TABLE_SQL, CREATE_INDEX_SQL])
         return True
     except Exception as e:
         st.error(f"❌ 初始化 price_alert 表失败: {e}")
@@ -181,8 +181,7 @@ if FEISHU_WEBHOOK:
 else:
     st.warning("⚠️ 未配置 FEISHU_WEBHOOK，告警仅打印到控制台", icon="🔕")
 
-if os.getenv("GMGN_PROXY"):
-    st.caption(f"GMGN 代理: {os.getenv('GMGN_PROXY')}")
+st.caption("数据源: Dexscreener API (无需代理/API Key)")
 
 st.divider()
 
@@ -298,7 +297,7 @@ st.divider()
 # ================= 管理操作 =================
 st.markdown("#### 🛠️ 规则管理")
 
-# 手动触发一次查价（gmgn-cli 优先, 直连 OpenAPI 兜底)
+# 手动触发一次查价 (Dexscreener)
 with st.expander("🔍 立即检查选中规则价格"):
     check_sel = st.selectbox(
         "选择要检查的规则",
@@ -391,7 +390,6 @@ python monitor_price.py --loop --interval 300   # 自定义间隔(秒)
 **告警去重**：同一规则首次触发后标记为「已触发」，避免重复轰炸；
 需再次提醒可点「重置告警」。
 
-**网络要求**：gmgn-cli 需走代理连通 GMGN（HTTPS_PROXY），
-本地默认 `http://127.0.0.1:7897`，可用 `GMGN_PROXY` 环境变量覆盖。
+**数据源**：Dexscreener API，无需配置 API Key 或代理。
 """
     )

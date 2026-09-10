@@ -1,11 +1,11 @@
 """流动性池价格模拟器 (st_pool_simulator)
 
 功能:
-  - 输入 Token 地址 + 所属公链，通过 GMGN 拉取实时池子数据
-    (现价 / 成交量24h / 费用比率 trade_fee / 流动性 / 市值 / 持有人数 等)
+  - 输入 Token 地址 + 所属公链，通过 Dexscreener 拉取实时池子数据
+    (现价 / 成交量24h / 流动性 / 市值 等)
   - 预设下跌 / 上涨幅度(%), 结合用户持仓数量 + 成本价，
     自动计算对应目标价、持仓市值、预估盈亏金额与盈亏比例
-数据源: gmgn-cli (GMGN OpenAPI)
+数据源: Dexscreener API
 
 用法(独立脚本): python pages/st_pool_simulator.py --address <ADDR> --chain <sol>
 """
@@ -16,7 +16,7 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gmgn_cli import fetch_token_info
+from dex_client import fetch_token_info
 
 # Windows 控制台默认 cp1252 无法打印中文/emoji，强制 UTF-8 输出
 if os.name == "nt":
@@ -34,7 +34,7 @@ def normalize_chain(chain: str) -> str:
 
 
 def fetch_pool(chain: str, address: str):
-    """拉取池子数据 (gmgn-cli 优先, 直连 OpenAPI 兜底), 返回解析后的字典或 {"error": ...}"""
+    """拉取池子数据 (Dexscreener, 无需 API Key), 返回解析后的字典或 {"error": ...}"""
     data, source = fetch_token_info(chain, address)
     if data is None:
         return {"error": source}

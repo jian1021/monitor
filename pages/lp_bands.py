@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """pages/lp_bands.py — LP 自适应区间可视化 (Streamlit + plotly)"""
-import contextlib
-import io
 import os
 import sys
 
@@ -39,20 +37,12 @@ if not token.strip():
     st.error('请输入 Token 合约地址')
     st.stop()
 
-buf = io.StringIO()
-with contextlib.redirect_stderr(buf):
-    try:
-        tool.gmgn_config_check()
-    except SystemExit:
-        st.error(buf.getvalue() or 'GMGN 未配置 API Key，请先完成配置')
-        st.stop()
-
 try:
     if days and days > 0:
         t, o, h, l, c, v = tool.load_gmgn(chain, token.strip(), res, days)
     else:
         t, o, h, l, c, v = tool.load_gmgn(chain, token.strip(), res)
-except SystemExit as e:
+except (SystemExit, ValueError) as e:
     st.error(str(e))
     st.stop()
 

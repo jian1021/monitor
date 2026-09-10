@@ -13,6 +13,10 @@ LIBSQL_TOKEN = os.getenv("LIBSQL_TOKEN", "")
 # ========== 飞书告警推送 ==========
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
 
+# ========== The Graph API Key (Uniswap V3 子图数据) ==========
+# 免费申请: https://thegraph.com/studio/apikeys/
+THE_GRAPH_API_KEY = os.getenv("THE_GRAPH_API_KEY", "")
+
 # ========== Streamlit 后台管理员账号 ==========
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASS = os.getenv("ADMIN_PASS", "123456")

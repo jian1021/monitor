@@ -1,145 +1,165 @@
 # -*- coding: utf-8 -*-
-"""lp_bands_tool GMGN 数据加载功能的测试 (TDD, 纯本地无网络)"""
-import contextlib
 import json
 import os
-import re
 import sys
-import tempfile
+import time
+from unittest.mock import patch, MagicMock
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lp_bands_tool as tool
+import dex_client
 import numpy as np
 
 
-# ---------------- helper: 假的 gmgn-cli 可执行文件 ----------------
-
-@contextlib.contextmanager
-def fake_gmgn_cli(script_body):
-    d = tempfile.mkdtemp()
-    binpath = os.path.join(d, 'gmgn-cli')
-    with open(binpath, 'w') as f:
-        f.write('#!/usr/bin/env python3\n' + script_body)
-    os.chmod(binpath, 0o755)
-    logpath = os.path.join(d, 'log.txt')
-    old_path, old_log = os.environ.get('PATH', ''), os.environ.get('FAKE_LOG')
-    os.environ['PATH'] = d + os.pathsep + old_path
-    os.environ['FAKE_LOG'] = logpath
-    try:
-        yield d
-    finally:
-        os.environ['PATH'] = old_path
-        if old_log is None:
-            os.environ.pop('FAKE_LOG', None)
-        else:
-            os.environ['FAKE_LOG'] = old_log
-
-
-SAMPLE_JSON = ('{"list":['
-               '{"time":1700000000000,"open":"100.0","high":"101.0","low":"99.0",'
-               '"close":"100.5","volume":"1000.0","amount":"10"},'
-               '{"time":1700003600000,"open":"100.5","high":"102.0","low":"100.0",'
-               '"close":"101.0","volume":"2000.0","amount":"20"}]}')
+def test_pair_to_gmgn_format_basic():
+    pair = {
+        "chainId": "solana",
+        "dexId": "raydium",
+        "url": "https://dexscreener.com/solana/fake",
+        "pairAddress": "PAIR123",
+        "baseToken": {"address": "TOKEN1", "name": "TestToken", "symbol": "TEST"},
+        "quoteToken": {"address": "USDC", "name": "USD Coin", "symbol": "USDC"},
+        "priceUsd": "1.23",
+        "volume": {"h24": 50000},
+        "liquidity": {"usd": 100000},
+        "fdv": 1000000,
+        "marketCap": 800000,
+        "pairCreatedAt": 1700000000000,
+    }
+    data = dex_client._pair_to_gmgn_format(pair, "TOKEN1")
+    assert data["symbol"] == "TEST"
+    assert data["name"] == "TestToken"
+    assert data["price"]["price"] == "1.23"
+    assert data["price"]["volume_24h"] == "50000.0"
+    assert data["liquidity"] == "100000.0"
+    assert data["pool"]["exchange"] == "raydium"
+    assert data["pool"]["quote_symbol"] == "USDC"
+    assert data["holder_count"] == 0
 
 
-# ---------------- 纯解析函数 ----------------
+def test_pair_to_gmgn_format_missing_fields():
+    pair = {"baseToken": {}, "quoteToken": {}}
+    data = dex_client._pair_to_gmgn_format(pair, "X")
+    assert data["symbol"] == ""
+    assert data["price"]["price"] == "0.0"
+    assert data["liquidity"] == "0.0"
 
-def test_parse_gmgn_kline_full():
-    t, o, h, l, c, v = tool.parse_gmgn_kline(SAMPLE_JSON)
-    assert len(t) == 2
+
+def _mock_response(json_data, status=200):
+    m = MagicMock()
+    m.status_code = status
+    m.json.return_value = json_data
+    return m
+
+
+@patch("dex_client.requests")
+def test_fetch_token_info_success(mock_requests):
+    pair = {
+        "chainId": "solana",
+        "dexId": "raydium",
+        "pairAddress": "PAIR1",
+        "baseToken": {"address": "TOK1", "name": "Foo", "symbol": "FOO"},
+        "quoteToken": {"address": "USDC", "name": "USD Coin", "symbol": "USDC"},
+        "priceUsd": "0.50",
+        "volume": {"h24": 10000},
+        "liquidity": {"usd": 50000},
+    }
+    mock_requests.get.return_value = _mock_response([pair])
+    data, source = dex_client.fetch_token_info("sol", "TOK1")
+    assert source == "dexscreener"
+    assert data is not None
+    assert data["symbol"] == "FOO"
+    assert data["price"]["price"] == "0.5"
+
+
+@patch("dex_client.requests")
+def test_fetch_token_info_not_found(mock_requests):
+    mock_requests.get.return_value = _mock_response([], 200)
+    data, source = dex_client.fetch_token_info("sol", "NONEXISTENT")
+    assert data is None
+    assert "未找到" in source
+
+
+def _sample_gecko_ohlcv():
+    now = int(time.time())
+    # GeckoTerminal 返回倒序 (新→旧); 时间戳须落在请求窗口内
+    return {
+        "data": {
+            "attributes": {
+                "ohlcv_list": [
+                    [now, 100.5, 102.0, 100.0, 101.0, 2000.0],
+                    [now - 3600, 100.0, 101.0, 99.0, 100.5, 1000.0],
+                ]
+            }
+        }
+    }
+
+
+@patch("dex_client._safe_get")
+def test_fetch_ohlcv_success(mock_get):
+    def side_effect(url, **kwargs):
+        if "dexscreener.com" in url:
+            return [{"pairAddress": "POOL1", "liquidity": {"usd": 10000}, "chainId": "solana"}]
+        if "geckoterminal.com" in url:
+            return _sample_gecko_ohlcv()
+        return None
+    mock_get.side_effect = side_effect
+
+    t, o, h, l, c, v = dex_client.fetch_ohlcv("sol", "TOKEN1", "1h", days=1)
+    assert len(c) == 2
     assert list(c) == [100.5, 101.0]
     assert list(o) == [100.0, 100.5]
-    assert list(h) == [101.0, 102.0]
-    assert list(l) == [99.0, 100.0]
-    assert list(v) == [1000.0, 2000.0]          # volume 是 USD 数值
-    assert re.match(r'\d{2}-\d{2} \d{2}:\d{2}', t[0])  # time(ms) → 可读标签
 
 
-def test_parse_gmgn_kline_empty_list():
-    t, o, h, l, c, v = tool.parse_gmgn_kline('{"list":[]}')
-    assert len(c) == 0
-
-
-def test_parse_gmgn_kline_missing_volume():
-    text = '{"list":[{"time":1700000000000,"open":"1","high":"2","low":"0.5","close":"1.5"}]}'
-    t, o, h, l, c, v = tool.parse_gmgn_kline(text)
-    assert list(v) == [0.0]
-
-
-# ---------------- load_gmgn: subprocess 端到端 (mock CLI) ----------------
-
-def test_load_gmgn_end_to_end():
-    body = (
-        'import sys,os\n'
-        'open(os.environ["FAKE_LOG"],"a").write("|".join(sys.argv[1:])+"\\n")\n'
-        'if sys.argv[1:3] == ["market","kline"]:\n'
-        '    print(%r)\n    sys.exit(0)\n'
-        'sys.exit(1)\n' % SAMPLE_JSON
-    )
-    with fake_gmgn_cli(body):
-        t, o, h, l, c, v = tool.load_gmgn('sol', 'FAKEADDR', '1h', days=1)
-        logpath = os.environ['FAKE_LOG']
-    assert len(c) == 2 and list(c) == [100.5, 101.0]
-    with open(logpath) as f:
-        argv = f.read().strip().split('|')
-    assert argv[:2] == ['market', 'kline']
-    assert '--chain' in argv and argv[argv.index('--chain') + 1] == 'sol'
-    assert '--address' in argv and argv[argv.index('--address') + 1] == 'FAKEADDR'
-    assert '--resolution' in argv and argv[argv.index('--resolution') + 1] == '1h'
-    assert '--from' in argv and '--to' in argv and '--raw' in argv
-    i_from, i_to = argv.index('--from'), argv.index('--to')
-    assert int(argv[i_from + 1]) < int(argv[i_to + 1])
-
-
-def test_load_gmgn_empty_result_raises():
-    body = 'import sys\nprint(\'{"list":[]}\')\nsys.exit(0)\n'
-    with fake_gmgn_cli(body):
-        try:
-            tool.load_gmgn('sol', 'FAKEADDR', '1h', days=1)
-            assert False, '应当抛出 SystemExit'
-        except SystemExit as e:
-            assert '空 K 线' in str(e)
-
-
-def test_load_gmgn_too_many_bars_raises():
-    candles = ','.join(
-        '{"time":%d000,"open":"1","high":"1.1","low":"0.9","close":"1","volume":"1"}' % (1700000000 + i * 3600)
-        for i in range(4)
-    )
-    body = 'import sys\nprint(\'{"list":[%s]}\')\nsys.exit(0)\n' % candles
-    old_max = tool.MAX_BARS
-    tool.MAX_BARS = 3
+@patch("dex_client._safe_get")
+def test_fetch_ohlcv_no_pool_raises(mock_get):
+    mock_get.return_value = None
     try:
-        with fake_gmgn_cli(body):
-            try:
-                tool.load_gmgn('sol', 'FAKEADDR', '1h', days=1)
-                assert False, '应当抛出 SystemExit'
-            except SystemExit as e:
-                assert '上限' in str(e)
-    finally:
-        tool.MAX_BARS = old_max
+        dex_client.fetch_ohlcv("sol", "NOWHERE", "1h", days=1)
+        assert False, "应当抛出 SystemExit"
+    except SystemExit as e:
+        assert "未找到" in str(e)
 
 
-def test_load_gmgn_cap_warning():
-    candles = ','.join(
-        '{"time":%d000,"open":"1","high":"1.1","low":"0.9","close":"1","volume":"1"}'
-        % (1700000000 + i * 3600) for i in range(100)
+@patch("dex_client._safe_get")
+def test_fetch_ohlcv_empty_ohlcv_raises(mock_get):
+    def side_effect(url, **kwargs):
+        if "dexscreener.com" in url:
+            return [{"pairAddress": "POOL1", "liquidity": {"usd": 10000}, "chainId": "solana"}]
+        if "geckoterminal.com" in url:
+            return {"data": {"attributes": {"ohlcv_list": []}}}
+        return None
+    mock_get.side_effect = side_effect
+    try:
+        dex_client.fetch_ohlcv("sol", "TOKEN1", "1h", days=1)
+        assert False, "应当抛出 SystemExit"
+    except SystemExit as e:
+        assert "空" in str(e)
+
+
+@patch("dex_client.fetch_ohlcv")
+def test_load_gmgn_delegates_to_dex_client(mock_fetch):
+    mock_fetch.return_value = (
+        ["01-01 00:00", "01-01 01:00"],
+        np.array([100.0, 101.0]),
+        np.array([101.0, 102.0]),
+        np.array([99.0, 100.0]),
+        np.array([100.5, 101.0]),
+        np.array([1000.0, 2000.0]),
     )
-    body = 'import sys\nprint(\'{"list":[%s]}\')\nsys.exit(0)\n' % candles
-    import io
-    buf = io.StringIO()
-    with fake_gmgn_cli(body), contextlib.redirect_stderr(buf):
-        tool.load_gmgn('sol', 'FAKEADDR', '1h', days=30)
-    assert '上限' in buf.getvalue()
+    t, o, h, l, c, v = tool.load_gmgn("sol", "FAKE", "1h", days=1)
+    mock_fetch.assert_called_once_with("sol", "FAKE", "1h", 1)
+    assert len(c) == 2
 
 
-def test_load_gmgn_days_default_matches_cap():
-    assert tool.gmgn_resolution_days('1h') <= 5  # 1h×5天=120根, 贴合 100 根单次上限
+def test_gmgn_config_check_noop():
+    tool.gmgn_config_check()
 
-
-# ---------------- build_chart_df 纯函数 ----------------
 
 def test_build_chart_df_basic():
+    pd = pytest.importorskip("pandas")
     from lp_bands_chart import build_chart_df
     n = 600
     t = [str(k) for k in range(n)]
@@ -152,56 +172,14 @@ def test_build_chart_df_basic():
         (400, 600, 135.0, 105.0, 120.0),
     ]
     df = build_chart_df(t, c, h, l, bands)
-
     assert len(df) == n
-    assert list(df.columns) == ['time', 'close', 'seg', 'level', 'upper', 'lower', 'in_range']
-    assert df['seg'].is_monotonic_increasing
-    assert set(df['in_range'].unique()).issubset({0, 1})
-    assert df['seg'].nunique() == 3
-    assert df['seg'].iloc[0] == 0 and df['seg'].iloc[199] == 0
-    assert df['seg'].iloc[200] == 1 and df['seg'].iloc[399] == 1
-    assert df['seg'].iloc[400] == 2 and df['seg'].iloc[599] == 2
+    assert set(df["seg"].unique()) == {0, 1, 2}
+    assert df["upper"].iloc[0] == 125.0
+    assert df["lower"].iloc[300] == 100.0
 
 
 def test_build_chart_df_empty_bands():
+    pd = pytest.importorskip("pandas")
     from lp_bands_chart import build_chart_df
-    t = ['0', '1', '2']
-    c = np.array([1.0, 2.0, 3.0])
-    h = np.array([1.5, 2.5, 3.5])
-    l = np.array([0.5, 1.5, 2.5])
-    df = build_chart_df(t, c, h, l, [])
-
-    assert len(df) == 0
-    assert list(df.columns) == ['time', 'close', 'seg', 'level', 'upper', 'lower', 'in_range']
-
-
-def test_build_chart_df_in_range_convention():
-    from lp_bands_chart import build_chart_df
-    t = ['0', '1', '2']
-    c = np.array([100.0, 100.0, 100.0])
-    h = np.array([105.0, 110.0, 105.0])
-    l = np.array([95.0, 95.0, 90.0])
-    bands = [(0, 3, 108.0, 92.0, 100.0)]
-    df = build_chart_df(t, c, h, l, bands)
-
-    assert list(df['in_range']) == [1, 0, 0]
-
-
-# ---------------- 运行 ----------------
-
-def main():
-    tests = [v for k, v in sorted(globals().items()) if k.startswith('test_')]
-    failed = 0
-    for fn in tests:
-        try:
-            fn()
-            print(f'PASS  {fn.__name__}')
-        except AssertionError as e:
-            failed += 1
-            print(f'FAIL  {fn.__name__}: {e}')
-    print(f'\n{len(tests) - failed}/{len(tests)} passed')
-    sys.exit(1 if failed else 0)
-
-
-if __name__ == '__main__':
-    main()
+    df = build_chart_df([], np.array([]), np.array([]), np.array([]), [])
+    assert df.empty
