@@ -8,7 +8,7 @@ lp_bands_tool.py — 流动池自适应上下区间生成器
 数据源:
   --file <csv>        本地CSV (time,open,high,low,close,volume)
   --input             手动键入
-  --token <地址>      自动从 GMGN 拉取K线 (需先配置 gmgn-cli API Key)
+  --token <地址>      自动从 GeckoTerminal 拉取K线 (无需 API Key)
 """
 import argparse, csv, sys, os, json, subprocess, time, datetime
 from math import lgamma, log, pi, sqrt, exp
@@ -95,71 +95,16 @@ def load_demo():
     v = 1000*(1+40*np.abs(np.diff(c,prepend=c[0]))/c)*rng.lognormal(0,0.4,n); v[300]*=6
     return [str(k) for k in range(n)], o,h,l,c,v
 
-# ---------------- GMGN 数据拉取 ----------------
-
-RESOLUTION_DAYS = {'30s': 0.034, '1m': 0.069, '5m': 0.34, '15m': 1.04, '1h': 4.16, '4h': 16.6, '1d': 100}
 MAX_BARS = 5000
-_BAR_SECONDS = {'30s': 30, '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400}
 
-def gmgn_resolution_days(resolution):
-    return RESOLUTION_DAYS.get(resolution, 30)
-
-def _gmgn_cli(args_list, timeout=120):
-    try:
-        r = subprocess.run(['gmgn-cli'] + args_list, capture_output=True, text=True, timeout=timeout)
-        return r.returncode, r.stdout, r.stderr
-    except FileNotFoundError:
-        sys.exit('未找到 gmgn-cli: 请先运行 npm install -g gmgn-cli')
-    except subprocess.TimeoutExpired:
-        sys.exit(f'gmgn-cli 超时({timeout}s): {" ".join(args_list)}')
 
 def gmgn_config_check():
-    code, out, err = _gmgn_cli(['config', '--check'])
-    if code == 0:
-        return
-    print('⚠️ GMGN 未配置 API Key: 请打开下面链接创建, 然后把 Key 发给我配置', file=sys.stderr)
-    _, out2, _ = _gmgn_cli(['config'])
-    print(out2, file=sys.stderr)
-    sys.exit(2)
+    pass  # Dexscreener/GeckoTerminal 无需 API Key
 
-def parse_gmgn_kline(text):
-    """gmgn-cli market kline --raw 的 JSON → (t,o,h,l,c,v)。volume 字段是 USD 成交额"""
-    data = json.loads(text)
-    lst = data.get('list') or []
-    t, o, h, l, c, v = [], [], [], [], [], []
-    for k in lst:
-        ts_ms = int(k['time'])
-        t.append(datetime.datetime.fromtimestamp(ts_ms / 1000.0).strftime('%m-%d %H:%M'))
-        o.append(float(k['open'])); h.append(float(k['high']))
-        l.append(float(k['low']));  c.append(float(k['close']))
-        v.append(float(k.get('volume') or 0.0))
-    return t, np.array(o), np.array(h), np.array(l), np.array(c), np.array(v)
 
 def load_gmgn(chain, address, resolution, days=None):
-    if days is None:
-        days = gmgn_resolution_days(resolution)
-    to_ts = int(time.time())
-    from_ts = to_ts - int(days * 86400)
-    code, out, err = _gmgn_cli(['market', 'kline', '--chain', chain, '--address', address,
-                                '--resolution', resolution, '--from', str(from_ts),
-                                '--to', str(to_ts), '--raw'])
-    if code != 0:
-        sys.exit(f'gmgn-cli kline 失败:\n{err or out}')
-    try:
-        t, o, h, l, c, v = parse_gmgn_kline(out)
-    except (ValueError, KeyError, json.JSONDecodeError) as e:
-        sys.exit(f'解析 gmgn-cli 输出失败 ({e}): {out[:300]}')
-    if len(c) == 0:
-        sys.exit('GMGN 返回空 K 线 (检查 --address / --chain / --resolution)')
-    if len(c) > MAX_BARS:
-        sys.exit(f'K线数量 {len(c)} 超过上限 {MAX_BARS} (BOCPD 是 O(T²), 请用 --days 缩短窗口)')
-    expected = int(days * 86400 / _BAR_SECONDS.get(resolution, 3600))
-    if len(c) < expected:
-        hrs = len(c) * _BAR_SECONDS.get(resolution, 3600) / 3600
-        print(f'  ⚠️ GMGN kline 单次返回上限 100 根: 实际仅覆盖最近 {hrs:.1f} 小时'
-              f' (请求窗口为 {days:.0f} 天)', file=sys.stderr)
-    print(f'✅ 已从 GMGN 拉取 {len(c)} 根 {resolution} K线 ({chain})', file=sys.stderr)
-    return t, o, h, l, c, v
+    from dex_client import fetch_ohlcv
+    return fetch_ohlcv(chain, address, resolution, days)
 
 # ---------------- BOCPD 分段 (numpy-only) ----------------
 

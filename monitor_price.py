@@ -2,7 +2,7 @@
 到达设定目标价时通过飞书 Webhook 告警。
 
 数据库: Turso (libSQL) 中的 price_alert 表
-数据源: gmgn-cli (GMGN OpenAPI)，按 token 地址 + 公链查询实时价格
+数据源: Dexscreener API，按 token 地址 + 公链查询实时价格
 告警  : 飞书 Webhook (send_feishu_msg)
 
 用法:
@@ -18,7 +18,7 @@ import traceback
 from db import get_db_client
 from config import FEISHU_WEBHOOK
 from send_feishu_msg import send_feishu_msg
-from gmgn_cli import fetch_token_info
+from dex_client import fetch_token_info
 
 # Windows 控制台默认 cp1252 无法打印 emoji，强制 UTF-8 输出
 if os.name == "nt":
@@ -27,7 +27,7 @@ if os.name == "nt":
         if callable(_rer):
             _rer(encoding="utf-8", errors="replace")
 
-# 数据拉取逻辑 (CLI 优先 / 直连 OpenAPI 兜底 / 代理与 PATH) 全部在 gmgn_cli.fetch_token_info 中统一处理
+# 数据拉取逻辑 (Dexscreener, 无需 API Key) 全部在 dex_client.fetch_token_info 中统一处理
 CHAIN_ALIASES = {
     "sol": "SOL", "bsc": "BSC", "base": "BASE", "eth": "ETH",
     "robinhood": "ROBINHOOD", "arc": "ARC", "stable": "STABLE",
@@ -58,8 +58,8 @@ CREATE TABLE IF NOT EXISTS price_alert (
     alerted       INTEGER NOT NULL DEFAULT 0,    -- 1=该规则已触发过告警(避免重复轰炸)
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);
 """
+CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);"
 
 
 def ensure_table():
@@ -68,8 +68,8 @@ def ensure_table():
         print("❌ 无法连接数据库，跳过建表")
         return False
     try:
-        # libsql-client 允许多条语句批量执行
-        client.batch([CREATE_TABLE_SQL])
+        # pipeline API 的每个 batch 元素必须是单条语句
+        client.batch([CREATE_TABLE_SQL, CREATE_INDEX_SQL])
         print("✅ price_alert 表已就绪")
         return True
     except Exception as e:
@@ -80,12 +80,12 @@ def ensure_table():
 
 
 # ============================================================
-# 查询价格（gmgn-cli 优先, 直连 OpenAPI 兜底）
+# 查询价格 (Dexscreener)
 # ============================================================
 def fetch_price(chain: str, address: str):
     """拉取当前价格, 返回 (price, symbol) 或 (None, None).
 
-    gmgn-cli 缺失/失败时自动降级为直连 GMGN OpenAPI, 无需依赖 node 环境。
+    Dexscreener 无需 API Key, 直接 HTTP 调用。
     """
     data, source = fetch_token_info(chain, address)
     if data is None:
