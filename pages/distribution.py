@@ -35,12 +35,14 @@ CHAIN_RPCS = {
     "base": ("Base", "https://base.publicnode.com"),
     "polygon": ("Polygon", "https://polygon-bor-rpc.publicnode.com"),
     "bsc": ("BSC", "https://bsc-rpc.publicnode.com"),
+    "robinhood": ("Robinhood", "https://rpc.mainnet.chain.robinhood.com"),
 }
 
 # 不同 RPC 节点的限流策略不同: (每批 eth_call 数, 批次间隔秒数)。
-# Arbitrum 官方 RPC 对大批次会直接拒绝，需小批量 + 稍长间隔。
+# Arbitrum / Robinhood 官方 RPC 对大批次会直接拒绝，需小批量 + 稍长间隔。
 RPC_PACING = {
     "https://arb1.arbitrum.io/rpc": (25, 0.3),
+    "https://rpc.mainnet.chain.robinhood.com": (25, 0.3),
 }
 DEFAULT_BATCH, DEFAULT_GAP = 100, 0.15
 
