@@ -6,5 +6,6 @@ baostock
 libsql-client
 python-dotenv
 matplotlib
+pycryptodome
 
 plotly
