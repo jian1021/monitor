@@ -114,7 +114,7 @@ V4_LOG_FROM = {
     "base": 21300000,
     "polygon": 67000000,
     "bsc": 44000000,
-    "robinhood": 60342448,
+    "robinhood": 1,  # 旧值 60342448 是基于该节点不可靠的历史 getCode 推断的, 实测池子在 59,751,324 即已初始化
 }
 
 V4_ZERO_ADDR = "0x0000000000000000000000000000000000000000"
@@ -251,6 +251,11 @@ def fetch_v4_pool_key_via_logs(rpc_url: str, chain: str, pool_id: str):
                              [V4_INIT_TOPIC, pool_id.lower()], V4_LOG_FROM.get(chain, 0))
     if err:
         return None, err
+    if not logs and V4_LOG_FROM.get(chain, 0) > 0:
+        logs, err = rpc_get_logs(rpc_url, V4_POOL_MANAGERS[chain],
+                                 [V4_INIT_TOPIC, pool_id.lower()], 0)
+        if err:
+            return None, err
     if not logs:
         return None, "该链上找不到此 poolId 的 Initialize 事件 (poolId 与链不匹配，或池子已不存在)"
 
