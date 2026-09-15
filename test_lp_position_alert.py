@@ -238,3 +238,86 @@ def test_ensure_table_and_crud_roundtrip():
 
     assert lpa.delete_rule(rid) is True
     assert [r for r in lpa.load_rules(enabled_only=False, kind="dlmm") if r["id"] == rid] == []
+
+
+def _mock_response(json_data, status=200):
+    m = MagicMock()
+    m.status_code = status
+    m.json.return_value = json_data
+    return m
+
+
+@patch("lp_position_alert.requests")
+def test_fetch_meteora_pool(mock_requests):
+    mock_requests.get.return_value = _mock_response({
+        "name": "PUMP-SOL", "current_price": 3.56e-05,
+        "token_x": {"symbol": "PUMP", "decimals": 6},
+        "token_y": {"symbol": "SOL", "decimals": 9},
+        "tvl": 1317645.9, "is_blacklisted": False, "created_at": 1752335747,
+    })
+    out = lpa.fetch_meteora_pool("POOL1")
+    assert out["name"] == "PUMP-SOL"
+    assert out["current_price"] == pytest.approx(3.56e-05)
+    assert out["token_x_symbol"] == "PUMP"
+    assert out["token_y_symbol"] == "SOL"
+    assert out["is_blacklisted"] is False
+    called = mock_requests.get.call_args[0][0]
+    assert called.endswith("/pools/POOL1")
+
+
+@patch("lp_position_alert.requests")
+def test_fetch_meteora_pool_returns_none_on_http_error(mock_requests):
+    mock_requests.get.return_value = _mock_response({}, 500)
+    assert lpa.fetch_meteora_pool("POOL1") is None
+
+
+@patch("lp_position_alert.requests")
+def test_fetch_meteora_positions_parses_list(mock_requests):
+    mock_requests.get.return_value = _mock_response({"positions": [{
+        "positionAddress": "POS1", "minPrice": "1.5e-05", "maxPrice": "2.5e-05",
+        "lowerBinId": 10, "upperBinId": 20, "pnlPctChange": "8.0",
+        "poolActivePrice": "2.0e-05", "isOutOfRange": False, "isClosed": False,
+    }], "totalCount": 1})
+    out = lpa.fetch_meteora_positions("POOL1", "WALLET1")
+    assert len(out) == 1
+    assert out[0]["position_address"] == "POS1"
+    assert out[0]["pnl_pct"] == 8.0
+    _, kwargs = mock_requests.get.call_args
+    assert kwargs["params"]["user"] == "WALLET1"
+
+
+@patch("lp_position_alert.requests")
+def test_fetch_meteora_positions_returns_none_on_http_error(mock_requests):
+    mock_requests.get.return_value = _mock_response({}, 400)
+    assert lpa.fetch_meteora_positions("POOL1", "W1") is None
+
+
+@patch("lp_position_alert.requests")
+def test_fetch_dexscreener_pair_maps_chain_and_parses(mock_requests):
+    mock_requests.get.return_value = _mock_response({"pairs": [{
+        "priceUsd": "5.14e-06",
+        "baseToken": {"symbol": "USDG"}, "quoteToken": {"symbol": "USDG"},
+        "liquidity": {"usd": 1000}, "pairCreatedAt": 1,
+    }]})
+    out = lpa.fetch_dexscreener_pair("robinhood", "0xPAIR")
+    assert out["price"] == pytest.approx(5.14e-06)
+    called = mock_requests.get.call_args[0][0]
+    assert "/pairs/robinhood/0xPAIR" in called
+    assert "/pairs/4663/" not in called
+
+
+@patch("lp_position_alert.requests")
+def test_fetch_pool_floor_from_ohlcv(mock_requests):
+    mock_requests.get.return_value = _mock_response({"data": {"attributes": {
+        "ohlcv_list": [[300, 1, 1, 5.0e-06, 5.0e-06, 1],
+                       [200, 1, 1, 3.0e-06, 3.0e-06, 1],
+                       [100, 1, 1, 4.0e-06, 4.0e-06, 1]]}}})
+    assert lpa.fetch_pool_floor("robinhood", "0xPAIR") == pytest.approx(3.0e-06)
+    called = mock_requests.get.call_args[0][0]
+    assert "/networks/robinhood/pools/0xPAIR/ohlcv/day" in called
+
+
+@patch("lp_position_alert.requests")
+def test_http_get_json_returns_none_on_network_exception(mock_requests):
+    mock_requests.get.side_effect = RuntimeError("boom")
+    assert lpa.http_get_json("https://example.invalid") is None

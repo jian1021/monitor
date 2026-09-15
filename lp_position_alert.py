@@ -315,3 +315,66 @@ def mark_alerted(rule_id, field):
         f"UPDATE lp_position_alert SET {field} = 1, "
         f"last_checked_at = datetime('now') WHERE id = ?",
         [rule_id]) is True
+
+
+def http_get_json(url, params=None, timeout=20):
+    try:
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+        if resp.status_code == 200:
+            return resp.json()
+        print(f"⚠️ HTTP {resp.status_code}: {url}")
+    except Exception as e:
+        print(f"⚠️ 请求异常: {url} -> {e}")
+    return None
+
+
+def fetch_meteora_pool(pool_address):
+    data = http_get_json(f"{METEORA_BASE}/pools/{pool_address}")
+    if not data:
+        return None
+    x = data.get("token_x") or {}
+    y = data.get("token_y") or {}
+    return {
+        "name": data.get("name"),
+        "current_price": to_float(data.get("current_price")),
+        "token_x_symbol": x.get("symbol"),
+        "token_y_symbol": y.get("symbol"),
+        "tvl": to_float(data.get("tvl")),
+        "is_blacklisted": data.get("is_blacklisted"),
+        "created_at": data.get("created_at"),
+    }
+
+
+def fetch_meteora_positions(pool_address, wallet):
+    data = http_get_json(
+        f"{METEORA_BASE}/positions/{pool_address}/pnl",
+        params={"user": wallet, "status": "open", "page_size": 100},
+        timeout=25,
+    )
+    if not isinstance(data, dict):
+        return None
+    return [parse_dlmm_position(p) for p in (data.get("positions") or [])]
+
+
+def _dexscreener_chain(chain):
+    return DEXSCREENER_CHAIN.get(str(chain or "").strip().lower(), str(chain).strip().lower())
+
+
+def _gecko_network(chain):
+    return GECKO_NETWORK.get(str(chain or "").strip().lower(), str(chain).strip().lower())
+
+
+def fetch_dexscreener_pair(chain, pool_address):
+    data = http_get_json(f"{DEXSCREENER_BASE}/latest/dex/pairs/{_dexscreener_chain(chain)}/{pool_address}")
+    return parse_dexscreener_pair(data)
+
+
+def fetch_pool_floor(chain, pool_address):
+    data = http_get_json(
+        f"{GECKO_BASE}/networks/{_gecko_network(chain)}/pools/{pool_address}/ohlcv/day",
+        params={"limit": 100}, timeout=25,
+    )
+    if not isinstance(data, dict):
+        return None
+    attrs = (data.get("data") or {}).get("attributes") or {}
+    return floor_from_ohlcv(attrs.get("ohlcv_list") or [])
