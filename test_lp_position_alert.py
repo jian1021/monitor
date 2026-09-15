@@ -94,3 +94,99 @@ def test_floor_from_ohlcv_returns_none_for_empty_or_malformed():
     assert lpa.floor_from_ohlcv(None) is None
     assert lpa.floor_from_ohlcv([["only-two", "cols"]]) is None
     assert lpa.floor_from_ohlcv([[1, 2, 3, "junk", 5, 6]]) is None
+
+
+def _rule(**over):
+    base = {
+        "kind": "dlmm", "target_mode": "pnl_pct", "target_pct": 10.0,
+        "floor_price": 3.0e-05, "entry_price": None,
+        "enable_target_alert": 1, "enable_floor_alert": 1, "rearm": 1,
+        "floor_alerted": 0, "target_alerted": 0,
+    }
+    base.update(over)
+    return base
+
+
+def test_evaluate_dlmm_target_fires_on_pnl_pct():
+    cur = {"pnl_pct": 10.5, "active_price": 4.0e-05, "price": None}
+    assert lpa.evaluate(_rule(), cur) == {"target": True, "floor": False}
+
+
+def test_evaluate_dlmm_target_does_not_fire_below_threshold():
+    cur = {"pnl_pct": 9.99, "active_price": 4.0e-05, "price": None}
+    assert lpa.evaluate(_rule(), cur) == {"target": False, "floor": False}
+
+
+def test_evaluate_dlmm_floor_fires_when_active_price_at_or_below_floor():
+    for act in (3.0e-05, 2.9e-05):
+        cur = {"pnl_pct": 0.0, "active_price": act, "price": None}
+        assert lpa.evaluate(_rule(target_pct=None), cur) == {"target": False, "floor": True}
+
+
+def test_evaluate_dlmm_floor_uses_active_price_not_pool_price():
+    cur = {"pnl_pct": 0.0, "active_price": 4.0e-05, "price": 1.0e-09}
+    assert lpa.evaluate(_rule(target_pct=None), cur)["floor"] is False
+
+
+def test_evaluate_pool_price_target_uses_entry_snapshot():
+    rule = _rule(kind="pool_price", target_mode="price_pct", target_pct=10.0,
+                 entry_price=100.0, floor_price=50.0)
+    assert lpa.evaluate(rule, {"pnl_pct": None, "active_price": None, "price": 110.0})["target"] is True
+    assert lpa.evaluate(rule, {"pnl_pct": None, "active_price": None, "price": 109.99})["target"] is False
+
+
+def test_evaluate_pool_price_floor_uses_price():
+    rule = _rule(kind="pool_price", target_mode="price_pct", target_pct=10.0,
+                 entry_price=100.0, floor_price=50.0)
+    assert lpa.evaluate(rule, {"price": 50.0})["floor"] is True
+    assert lpa.evaluate(rule, {"price": 50.01})["floor"] is False
+
+
+def test_evaluate_skips_disabled_and_null_triggers():
+    cur = {"pnl_pct": 99.0, "active_price": 1.0, "price": 1.0}
+    assert lpa.evaluate(_rule(enable_target_alert=0), cur)["target"] is False
+    assert lpa.evaluate(_rule(enable_floor_alert=0), cur)["floor"] is False
+    assert lpa.evaluate(_rule(target_pct=None), cur)["target"] is False
+    assert lpa.evaluate(_rule(floor_price=None), cur)["floor"] is False
+
+
+def test_evaluate_never_raises_on_missing_current_values():
+    assert lpa.evaluate(_rule(), {}) == {"target": False, "floor": False}
+
+
+def test_evaluate_pool_price_ignores_zero_or_missing_entry():
+    rule = _rule(kind="pool_price", target_mode="price_pct", target_pct=10.0, entry_price=0.0)
+    assert lpa.evaluate(rule, {"price": 999.0})["target"] is False
+    rule2 = _rule(kind="pool_price", target_mode="price_pct", target_pct=10.0, entry_price=None)
+    assert lpa.evaluate(rule2, {"price": 999.0})["target"] is False
+
+
+def test_needs_rearm_only_when_floor_alerted_and_price_recovered():
+    rule = _rule(floor_alerted=1, rearm=1)
+    assert lpa.needs_rearm(rule, {"active_price": 4.0e-05}) is True
+    assert lpa.needs_rearm(rule, {"active_price": 2.0e-05}) is False
+    assert lpa.needs_rearm(_rule(floor_alerted=0, rearm=1), {"active_price": 4.0e-05}) is False
+    assert lpa.needs_rearm(_rule(floor_alerted=1, rearm=0), {"active_price": 4.0e-05}) is False
+    assert lpa.needs_rearm(_rule(floor_alerted=1, rearm=1), {}) is False
+
+
+def test_units_plausible_accepts_matching_values():
+    assert lpa.units_plausible(3.56e-05, 3.56e-05) is True
+    assert lpa.units_plausible(3.60e-05, 3.56e-05) is True
+    assert lpa.units_plausible(3.9e-04, 3.56e-05) is True
+
+
+def test_units_plausible_rejects_inverted_units():
+    assert lpa.units_plausible(28012.0, 3.56e-05) is False
+    assert lpa.units_plausible(3.56e-05, 28012.0) is False
+
+
+def test_units_plausible_passes_when_data_missing():
+    assert lpa.units_plausible(None, 3.56e-05) is True
+    assert lpa.units_plausible(3.56e-05, None) is True
+    assert lpa.units_plausible(None, None) is True
+
+
+def test_units_plausible_rejects_nonpositive():
+    assert lpa.units_plausible(0.0, 3.56e-05) is False
+    assert lpa.units_plausible(3.56e-05, 0.0) is False
