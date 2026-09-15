@@ -10,7 +10,7 @@ if "logged_in" not in st.session_state:
 
 # ================= 2. 登录与退出视图函数 =================
 def login():
-    st.title("🔐 监控系统登录")
+    st.title("🔐 超卖监控")
 
     with st.form("login_form"):
         username = st.text_input("账号", placeholder="请输入管理员账号")

@@ -1,7 +1,6 @@
 import requests
 import os
 
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
 
 def send_feishu_msg(webhook, msg):
     if not webhook:
