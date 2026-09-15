@@ -671,10 +671,6 @@ def main():
         run_once()
 
 
-if __name__ == "__main__":
-    main()
-
-
 CHAIN_OPTIONS = ["sol"]
 POOL_PRICE_CHAINS = ["robinhood", "bsc", "base", "eth"]
 
@@ -1056,3 +1052,7 @@ def preview_evm_wallet(wallet):
                 "error": "⚠️ 该钱包在 Uniswap v4 上没有仓位。",
                 "positions": []}
     return {"ok": True, "error": None, "positions": positions}
+
+
+if __name__ == "__main__":
+    main()

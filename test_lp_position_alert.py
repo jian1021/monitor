@@ -619,6 +619,21 @@ def test_pool_id_is_deterministic_and_hex64():
     assert first != lpa._pool_id("00" * 32, "11" * 32, 500, 60, "00" * 32)
 
 
+def test_main_guard_placed_after_every_definition():
+    import ast
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lp_position_alert.py")
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    guards = [n for n in tree.body
+              if isinstance(n, ast.If) and "__main__" in ast.dump(n.test)]
+    assert len(guards) == 1, "应有且仅有一个 __main__ 入口"
+    defined_after = [n.name for n in tree.body
+                     if isinstance(n, (ast.FunctionDef, ast.ClassDef))
+                     and n.lineno > guards[0].lineno]
+    assert defined_after == [], (
+        f"入口块之后仍有定义 {defined_after}；脚本方式运行时 main() 会提前执行而 NameError")
+
+
 def test_aggregate3_selector_is_known_value():
     assert lpa.SEL_AGGREGATE3 == "0x82ad56cb"
 

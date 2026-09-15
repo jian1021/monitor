@@ -11,6 +11,7 @@ import monitor_meteora_pump
 from send_feishu_msg import send_feishu_msg
 import traceback
 import monitor_rsi
+import lp_position_alert
 from config import FEISHU_WEBHOOK
 from monitor_meteora_pump import run_pump_strategy_monitor
 from monitor_robinhood_pump import run_monitor
@@ -139,6 +140,14 @@ if __name__ == "__main__":
         run_monitor()
     except Exception as e:
         print(f"❌ run_monitor() 发生异常：{e}")
+        traceback.print_exc()
+
+    print("\n====== 开始执行 LP 仓位 / 池子价格告警监控 ======")
+    try:
+        lp_position_alert.ensure_table()
+        lp_position_alert.run_once()
+    except Exception as e:
+        print(f"❌ lp_position_alert 发生异常：{e}")
         traceback.print_exc()
 
     print("\n✅ main.py 全部任务执行完毕")
