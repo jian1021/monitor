@@ -9,9 +9,10 @@ import baostock as bs
 from db import get_db_client
 headers = {'User-Agent': 'Mozilla/5.0'}
 # ================= 全局默认 RSI 参数配置 =================
+# 注意周期写法不通用：OKX 用 interval ("1W")，baostock/腾讯用 frequency ("w")。
 DEFAULT_SETTINGS = {
     "crypto": {
-        "interval": "1H",
+        "interval": "1W",
         "period": 3,
         "rsi_low": 10,
         "rsi_high": 90
@@ -24,16 +25,29 @@ DEFAULT_SETTINGS = {
         "rsi_high": 90
     },
     "bond": {
+        "frequency": "w",
         "period": 3,
         "rsi_low": 10,
         "rsi_high": 90
     },
     "etf": {
+        "frequency": "w",
         "period": 3,
         "rsi_low": 10,
         "rsi_high": 90
     }
 }
+
+_TIMEFRAME_LABELS = {
+    "1W": "周线", "1w": "周线", "w": "周线", "week": "周线",
+    "1D": "日线", "1d": "日线", "d": "日线", "day": "日线",
+    "1H": "1H", "1h": "1H", "hour": "1H",
+}
+
+
+def timeframe_label(key):
+    return _TIMEFRAME_LABELS.get(str(key).strip(), str(key))
+
 
 # ================= 1. 数据获取与 RSI 计算 =================
 def get_okx_rsi(symbol, interval="1H", length=14):
@@ -81,16 +95,23 @@ def _to_bs_code(code):
     return f"sz.{c}"
 
 
-def _get_tencent_rsi(code, length=5):
+_TENCENT_KLINE = {
+    "d": ("day", ("qfqday", "day")),
+    "w": ("week", ("qfqweek", "week")),
+}
+
+
+def _get_tencent_rsi(code, length=5, frequency="d"):
     try:
         c = str(code).strip().lower().zfill(6)
         mkt = 'sh' if c[0] in ('5', '6', '9') or c.startswith('11') else 'sz'
-        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={mkt}{c},day,,,320,qfq"
+        period, keys = _TENCENT_KLINE.get(str(frequency).lower(), _TENCENT_KLINE["d"])
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={mkt}{c},{period},,,320,qfq"
         res = requests.get(url, headers=headers, timeout=10).json()
-        days = res.get('data', {}).get(f'{mkt}{c}', {})
-        days = days.get('qfqday') or days.get('day') or []
-        if len(days) >= length:
-            close = pd.Series([float(k[2]) for k in days])
+        node = res.get('data', {}).get(f'{mkt}{c}', {})
+        rows = next((node[k] for k in keys if node.get(k)), [])
+        if len(rows) >= length:
+            close = pd.Series([float(k[2]) for k in rows])
             rsi = ta.momentum.rsi(close, window=length)
             return rsi.iloc[-1], close.iloc[-1]
     except Exception as e:
@@ -100,9 +121,10 @@ def _get_tencent_rsi(code, length=5):
     return None, None
 
 
-def get_a_share_rsi(code, bs_login_done: bool, length=5, max_retries=3):
+def get_a_share_rsi(code, bs_login_done: bool, length=5, max_retries=3, frequency="d"):
     bs_code = _to_bs_code(code)
-    start_date = (pd.Timestamp.now() - pd.Timedelta(days=100)).strftime("%Y-%m-%d")
+    lookback_days = 100 if str(frequency).lower() == "d" else 730
+    start_date = (pd.Timestamp.now() - pd.Timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
     for attempt in range(max_retries):
         try:
@@ -112,7 +134,7 @@ def get_a_share_rsi(code, bs_login_done: bool, length=5, max_retries=3):
                 bs_code,
                 "date,close",
                 start_date=start_date,
-                frequency="d",
+                frequency=frequency,
                 adjustflag="2",
             )
             if rs.error_code != '0':
@@ -125,10 +147,10 @@ def get_a_share_rsi(code, bs_login_done: bool, length=5, max_retries=3):
                     df['close_num'] = df['close'].astype(float)
                     df['rsi'] = ta.momentum.rsi(df['close_num'], window=length)
                     return df['rsi'].iloc[-1], df['close_num'].iloc[-1]
-            return _get_tencent_rsi(code, length)
+            return _get_tencent_rsi(code, length, frequency)
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(1.5 * (attempt + 1))
             else:
                 print(f"❌ 标的 [{code}] 请求多次失败: {e}")
-    return _get_tencent_rsi(code, length)
+    return _get_tencent_rsi(code, length, frequency)
