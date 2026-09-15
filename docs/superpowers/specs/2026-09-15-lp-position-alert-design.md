@@ -218,3 +218,29 @@ CREATE INDEX IF NOT EXISTS idx_lp_position_alert_enabled
 6. Tab 2：输入一个真实 Robinhood 池子地址 → 「连接成功」并显示现价；「填入建池以来最低价」能取到数值。
 7. 取数失败（故意传错地址）→ 页面与日志报错，但**不发送任何飞书消息**。
 8. `monitor_price.py` 与现有「价格监控」页面行为与改动前完全一致（回归检查）。
+
+## 追加范围：`kind='evm_v4'`（2026-09-15 实现）
+
+原设计把 Robinhood 限定为「只做池子价格」，因为当时判断链上无法按钱包枚举仓位。**该判断在 v3 上错误、在 v4 上可以通过事件日志绕过**，故追加第三种 kind。
+
+**可行性结论（均以真实链上数据验证）**
+
+| 合约 | 地址 | ERC721Enumerable | 能否按钱包枚举 |
+|---|---|---|---|
+| v3 NonfungiblePositionManager | `0x73991a25c818bf1f1128deaab1492d45638de0d3` | ✅ | 可以（`balanceOf`+`tokenOfOwnerByIndex`） |
+| v4 PositionManager | `0x58daec3116aae6d93017baaea7749052e8a04fa7` | ❌ | **靠 `eth_getLogs` 抓 Transfer 事件绕过** |
+
+注意：Robinhood Chain 上 Uniswap 用的是**非标准地址**（与主网确定性地址不同），排查时勿套用主网地址。
+
+**实现要点**
+
+- 枚举：`eth_getLogs(address=v4PM, topics=[Transfer, null, wallet])` → tokenId 集合 → `ownerOf` 复核
+- 区间：`getPoolAndPositionInfo(tokenId)` → PoolKey(5 word) + PositionInfo(1 word)；**tick 从第 8 位起**（`tickLower = bits[8:32]`、`tickUpper = bits[32:56]`），此偏移由「tick 必须整除 tickSpacing」约束在 25 个真实样本上暴力搜索确认
+- 当前价：`poolId = keccak256(abi.encode(PoolKey))` → `StateView.getSlot0(poolId)` → activeTick
+- `currency0 = address(0)` 是 v4 的原生 ETH，非解码错误
+
+**判定语义**：跌穿用 `activeTick < lower_bin_id`（tick 空间比较，精确且完全避开代币小数位）；盈利目标用对数空间 `Δtick >= ln(1+pct/100)/ln(1.0001)`，避免 `1.0001^Δ` 溢出。价格仅用于展示。
+
+**复用的列**：`lower_bin_id`/`upper_bin_id` 存 tick 上下界，`pool_address` 存 poolId，`floor_price`/`min_price`/`max_price` 存展示用价格快照。新增列仅 `token_id`、`entry_tick`（`ensure_table` 用 `ALTER TABLE` 幂等迁移）。
+
+**已验证**：真实钱包 26 个 v4 仓位全部解出（同池两个仓位当前价一致，为解码正确性的内部佐证）；端到端触发跌穿 → 飞书 200 → 跨轮去重 → 重武装 → 清理，全部通过。

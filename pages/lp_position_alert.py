@@ -130,6 +130,86 @@ with tab_lp:
 
 
 with tab_price:
+    px_wallet = st.text_input("Robinhood 钱包地址 *", key="px_wallet",
+                              placeholder="0x 开头的 EVM 钱包，Uniswap v4 仓位会自动列出")
+
+    if st.button("🔌 连接钱包", type="primary", key="px_connect_wallet"):
+        if not px_wallet.strip():
+            st.warning("⚠️ 请填写钱包地址")
+        else:
+            with st.spinner("正在读取链上 Uniswap v4 仓位 ..."):
+                st.session_state["evm_preview"] = lpa.preview_evm_wallet(px_wallet.strip())
+
+    ev = st.session_state.get("evm_preview")
+    if ev:
+        if ev["error"]:
+            st.error(ev["error"])
+        if ev["ok"]:
+            st.success(f"✅ 连接成功：找到 {len(ev['positions'])} 个 Uniswap v4 仓位")
+            st.dataframe(pd.DataFrame([{
+                "tokenId": p["token_id"],
+                "交易对": p["pool_name"],
+                "区间下界": p["lower_price"],
+                "区间上界": p["upper_price"],
+                "当前价": p["current_price"],
+                "状态": "区间内" if p["in_range"] else "已超区间",
+            } for p in ev["positions"]]), use_container_width=True)
+
+            ev_labels = {str(p["token_id"]): f"{p['pool_name']} · #{p['token_id']}"
+                         for p in ev["positions"]}
+            picked_id = st.selectbox("选择仓位 *", options=list(ev_labels),
+                                     format_func=lambda x: ev_labels[x],
+                                     key="px_picked_position")
+            picked = next(p for p in ev["positions"] if str(p["token_id"]) == picked_id)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("区间下界", f"{picked['lower_price']:.10g}")
+            c2.metric("当前价",
+                      f"{picked['current_price']:.10g}" if picked.get("current_price") else "-")
+            c3.metric("状态", "区间内" if picked["in_range"] else "已超区间")
+
+            if picked.get("active_tick") is None:
+                st.warning("⚠️ 读不到该池当前 tick，暂时无法建立规则，请稍后重试。")
+            else:
+                with st.form("evm_add_form"):
+                    e1, e2 = st.columns(2)
+                    e_tgt = e1.number_input("盈利目标 %（相对建立规则时现价）", value=10.0,
+                                            step=1.0, key="evm_tgt")
+                    e_floor = e2.number_input("跌穿阈值价（默认 = 该仓位区间下界）",
+                                              value=float(picked["lower_price"]),
+                                              format="%.10g", step=0.0, key="evm_floor")
+                    st.caption(f"触发以链上 tick 判定：当前 tick {picked['active_tick']}、"
+                               f"仓位下界 tick {picked['tick_lower']}"
+                               f"（价格仅用于显示，精度受代币小数位影响）")
+                    if st.form_submit_button("✅ 添加规则", type="primary"):
+                        created = lpa.add_rule({
+                            "kind": "evm_v4", "chain": "robinhood",
+                            "pool_address": picked["pool_id"],
+                            "wallet": px_wallet.strip(),
+                            "position_address": None,
+                            "pool_name": picked["pool_name"],
+                            "token_x_symbol": picked["token_x_symbol"],
+                            "token_y_symbol": picked["token_y_symbol"],
+                            "lower_bin_id": picked["tick_lower"],
+                            "upper_bin_id": picked["tick_upper"],
+                            "min_price": picked["lower_price"],
+                            "max_price": picked["upper_price"],
+                            "floor_price": float(e_floor),
+                            "target_mode": "price_pct",
+                            "target_pct": float(e_tgt),
+                            "entry_price": picked["current_price"],
+                            "token_id": picked["token_id"],
+                            "entry_tick": picked["active_tick"],
+                        })
+                        if created:
+                            st.success("✅ 规则已添加")
+                            st.rerun()
+                        else:
+                            st.error("❌ 规则写入失败")
+
+    st.divider()
+    st.caption("或者：直接按池子地址监控价格（支持多链，不依赖仓位）")
+
     p1, p2 = st.columns(2)
     px_pool = p1.text_input("池子地址 *", key="px_pool", placeholder="Uniswap 池子 / pair 地址")
     px_chain = p2.selectbox("链", lpa.POOL_PRICE_CHAINS, key="px_chain")
@@ -220,10 +300,13 @@ view = pd.DataFrame([{
     ]),
     "盈利目标%": r["target_pct"],
     "跌穿阈值": r["floor_price"],
-    "当前值": (f"PnL {r['last_pnl_pct']:.2f}%"
-               if r["kind"] == "dlmm" and r["last_pnl_pct"] is not None
-               else (f"{r['last_active_price']:.10g}"
-                     if r["last_active_price"] is not None else "-")),
+    "当前值": (
+        f"PnL {r['last_pnl_pct']:.2f}%"
+        if r["kind"] == "dlmm" and r["last_pnl_pct"] is not None
+        else (f"tick {r['last_active_price']:.0f}"
+              if r["kind"] == "evm_v4" and r["last_active_price"] is not None
+              else (f"{r['last_active_price']:.10g}"
+                    if r["last_active_price"] is not None else "-"))),
     "状态": {"open": "🟢 监控中", "closed": "⚫ 已关闭", "error": "🔴 取数失败"}.get(r["status"], r["status"]),
     "启用": r["enabled"],
     "已告警": "".join([

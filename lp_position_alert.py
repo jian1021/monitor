@@ -1,18 +1,21 @@
 """lp_position_alert.py — LP 仓位 / 池子价格告警.
 
-两种 kind:
+三种 kind:
   dlmm       Solana / Meteora DLMM，读链上仓位区间（minPrice）+ 真实持仓盈亏（pnlPctChange）
-  pool_price Robinhood Chain / Uniswap，只有池子价格，盈利按价格涨幅、最低价取历史或手填
+  evm_v4     Robinhood Chain / Uniswap v4，按钱包枚举仓位 NFT，用 tick 判定跌破区间下界
+  pool_price 只有池子价格，盈利按价格涨幅、最低价取历史或手填
 
 用法:
   python lp_position_alert.py            # 单轮检查后退出（GitHub Actions cron）
   python lp_position_alert.py --loop     # 本地常驻
 """
+import math
 import sys
 import time
 import traceback
 
 import requests
+from Crypto.Hash import keccak
 
 from config import FEISHU_WEBHOOK
 from db import get_db_client
@@ -34,6 +37,20 @@ GECKO_NETWORK = {
     "bsc": "bsc", "base": "base",
     "eth": "eth", "robinhood": "robinhood",
 }
+
+EVM_RPC = "https://rpc.mainnet.chain.robinhood.com"
+V4_POSITION_MANAGER = "0x58daec3116aae6d93017baaea7749052e8a04fa7"
+V4_STATE_VIEW = "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b"
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+TICK_BASE = 1.0001
+SEL_BALANCE_OF = "0x70a08231"
+SEL_OWNER_OF = "0x6352211e"
+SEL_POOL_AND_POSITION_INFO = "0x7ba03aad"
+SEL_POSITION_LIQUIDITY = "0x1efeed33"
+SEL_DECIMALS = "0x313ce567"
+SEL_SYMBOL = "0x95d89b41"
+SEL_GET_SLOT0 = "0xc815641c"
+INFO_TICK_SHIFT = 8
 
 
 def to_float(value):
@@ -89,11 +106,34 @@ def floor_from_ohlcv(ohlcv_list):
 def _current_price(rule, cur):
     if rule.get("kind") == "dlmm":
         return cur.get("active_price")
+    if rule.get("kind") == "evm_v4":
+        return cur.get("active_tick")
     return cur.get("price")
+
+
+def tick_delta_for_pct(pct):
+    """达到 +pct% 价格涨幅所需的 tick 增量.
+
+    价格比 = 1.0001^Δ（小数位因子在比值中约掉），故 Δ = ln(1+pct/100)/ln(1.0001)。
+    在对数空间比较可避免 1.0001^Δ 在大 Δ 时溢出，也绕开 token 小数位。
+    """
+    return math.log1p(pct / 100.0) / math.log(TICK_BASE)
 
 
 def evaluate(rule, cur):
     fires = {"target": False, "floor": False}
+
+    if rule.get("kind") == "evm_v4":
+        active = cur.get("active_tick")
+        if (rule.get("enable_target_alert") and rule.get("target_pct") is not None
+                and active is not None and rule.get("entry_tick") is not None):
+            if (active - int(rule["entry_tick"])) >= tick_delta_for_pct(float(rule["target_pct"])):
+                fires["target"] = True
+        if (rule.get("enable_floor_alert") and rule.get("lower_bin_id") is not None
+                and active is not None):
+            if active < int(rule["lower_bin_id"]):
+                fires["floor"] = True
+        return fires
 
     if rule.get("enable_target_alert") and rule.get("target_pct") is not None:
         tgt = float(rule["target_pct"])
@@ -122,6 +162,10 @@ def evaluate(rule, cur):
 def needs_rearm(rule, cur):
     if not rule.get("rearm") or not rule.get("floor_alerted"):
         return False
+    if rule.get("kind") == "evm_v4":
+        active = cur.get("active_tick")
+        lower = rule.get("lower_bin_id")
+        return active is not None and lower is not None and active >= int(lower)
     if rule.get("floor_price") is None:
         return False
     value = _current_price(rule, cur)
@@ -159,6 +203,12 @@ COLUMNS = (
     "target_alerted", "floor_alerted",
     "last_pnl_pct", "last_active_price", "last_checked_at",
     "is_out_of_range", "status",
+    "token_id", "entry_tick",
+)
+
+MIGRATION_COLUMNS = (
+    ("token_id", "INTEGER"),
+    ("entry_tick", "INTEGER"),
 )
 
 CREATE_TABLE_SQL = """
@@ -191,7 +241,9 @@ CREATE TABLE IF NOT EXISTS lp_position_alert (
     last_checked_at     TEXT,
     is_out_of_range     INTEGER,
     status              TEXT    NOT NULL DEFAULT 'open',
-    created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+    token_id            INTEGER,
+    entry_tick          INTEGER
 );
 """
 
@@ -238,6 +290,12 @@ def ensure_table():
         return False
     try:
         client.batch([CREATE_TABLE_SQL, CREATE_INDEX_SQL])
+        for column, decl in MIGRATION_COLUMNS:
+            try:
+                client.execute(
+                    f"ALTER TABLE lp_position_alert ADD COLUMN {column} {decl}")
+            except Exception:
+                pass
         return True
     except Exception as e:
         print(f"❌ 建表失败: {e}")
@@ -399,9 +457,46 @@ def _cur_pool_price(rule):
     return pair, STATUS_OPEN
 
 
+def _cur_evm_v4(rule):
+    pool_id = str(rule.get("pool_address") or "").replace("0x", "").lower()
+    if len(pool_id) != 64:
+        return None, STATUS_ERROR
+    slot = _evm_call(V4_STATE_VIEW, SEL_GET_SLOT0 + pool_id)
+    if not slot:
+        return None, STATUS_ERROR
+    return {"active_tick": _signed24(_word(slot, 1)),
+            "active_price": None, "pnl_pct": None, "price": None}, STATUS_OPEN
+
+
+def pct_from_tick_delta(delta):
+    if delta > 500000:
+        return float("inf")
+    if delta < -500000:
+        return -100.0
+    return (TICK_BASE ** delta - 1) * 100
+
+
 def build_message(rule, cur, fired, pool_info):
     name = (pool_info or {}).get("name") or rule.get("pool_name") or rule["pool_address"]
     lines = []
+    if rule.get("kind") == "evm_v4":
+        active = cur.get("active_tick")
+        if "target" in fired:
+            delta = active - int(rule["entry_tick"])
+            lines.append(f"🎯 【盈利达标】自建规则以来约 {pct_from_tick_delta(delta):+.2f}%"
+                         f"（目标 {float(rule['target_pct']):.2f}%）")
+        if "floor" in fired:
+            lower = int(rule["lower_bin_id"])
+            lines.append(f"🚨 【跌穿区间下界】当前 tick {active} < 下界 tick {lower}"
+                         f"（低 {lower - active} 个 tick）")
+        lines.append("")
+        lines.append(f"池子: {name}（robinhood / uniswap v4）")
+        lines.append(f"仓位 tokenId: {rule.get('token_id')}")
+        lines.append(f"区间: tick {rule.get('lower_bin_id')} ~ {rule.get('upper_bin_id')}"
+                     f"，下界价约 {float(rule.get('floor_price') or 0):.10g}")
+        lines.append(f"当前 tick: {active}")
+        lines.append(f"poolId: {rule['pool_address']}")
+        return "\n".join(lines)
     if "target" in fired:
         if rule.get("target_mode") == "pnl_pct":
             lines.append(f"🎯 【盈利达标】真实持仓盈亏 {cur.get('pnl_pct'):.2f}% "
@@ -443,6 +538,9 @@ def check_rule(rule):
                             f"仓位地址: {rule.get('position_address')}\n"
                             f"该仓位已不在开放列表中，规则自动停用。"),
             }
+    elif rule["kind"] == "evm_v4":
+        cur, status = _cur_evm_v4(rule)
+        pool_info = {"name": rule.get("pool_name") or rule["pool_address"]}
     else:
         cur, status = _cur_pool_price(rule)
         if cur is not None:
@@ -463,7 +561,7 @@ def check_rule(rule):
                   f"本轮跳过跌穿判定（不告警），请人工核对 minPrice 单位。")
             rule = dict(rule)
             rule["enable_floor_alert"] = 0
-    else:
+    elif rule["kind"] != "evm_v4":
         cur["pnl_pct"] = None
         cur["active_price"] = None
 
@@ -631,3 +729,157 @@ def preview_wallet(wallet):
                 "error": "⚠️ 该钱包没有开放的 LP 仓位（建仓后请稍等片刻再试）。",
                 "pools": []}
     return {"ok": True, "error": None, "pools": pools}
+
+
+def _evm_rpc(method, params, timeout=45, tries=4):
+    body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    for attempt in range(tries):
+        try:
+            resp = requests.post(EVM_RPC, json=body, headers=HEADERS, timeout=timeout)
+            if resp.status_code == 429:
+                time.sleep(2 * (attempt + 1))
+                continue
+            if resp.status_code != 200:
+                print(f"⚠️ EVM HTTP {resp.status_code}: {method}")
+                return None
+            payload = resp.json()
+            if "error" in payload:
+                print(f"⚠️ EVM RPC 错误 {method}: {str(payload['error'])[:120]}")
+                return None
+            return payload.get("result")
+        except Exception as e:
+            print(f"⚠️ EVM 请求异常 {method}: {e}")
+            time.sleep(1.5)
+    return None
+
+
+def _evm_call(to, data):
+    return _evm_rpc("eth_call", [{"to": to, "data": data}, "latest"])
+
+
+def _word(hexstr, index):
+    return hexstr[2 + index * 64:2 + (index + 1) * 64]
+
+
+def _signed24(value):
+    if isinstance(value, str):
+        value = int(value, 16)
+    value &= 0xFFFFFF
+    return value - (1 << 24) if value >= (1 << 23) else value
+
+
+def _pad_uint(value):
+    return format(int(value), "064x")
+
+
+def _hex_address(word_hex):
+    return "0x" + word_hex[24:]
+
+
+def _pool_id(c0_word, c1_word, fee, spacing, hooks_word):
+    packed = (bytes.fromhex(c0_word) + bytes.fromhex(c1_word)
+              + int(fee).to_bytes(32, "big") + int(spacing).to_bytes(32, "big")
+              + bytes.fromhex(hooks_word))
+    digest = keccak.new(digest_bits=256)
+    digest.update(packed)
+    return digest.hexdigest()
+
+
+def _decode_abi_string(hexstr):
+    if not hexstr or len(hexstr) <= 2:
+        return None
+    try:
+        body = hexstr[2:]
+        offset = int(body[0:64], 16) * 2
+        length = int(body[offset:offset + 64], 16) * 2
+        return bytes.fromhex(body[offset + 64:offset + 64 + length]).decode("utf-8", "replace")
+    except Exception:
+        return None
+
+
+def _token_meta(address_word):
+    address = _hex_address(address_word)
+    if int(address, 16) == 0:
+        return "ETH", 18
+    decimals = _evm_call(address, SEL_DECIMALS)
+    dec = int(decimals, 16) if decimals and len(decimals) > 2 else 18
+    symbol = _decode_abi_string(_evm_call(address, SEL_SYMBOL))
+    return (symbol or address[:10]), dec
+
+
+def _tick_to_price(tick, dec0, dec1):
+    return (TICK_BASE ** tick) * (10 ** (dec0 - dec1))
+
+
+def fetch_evm_v4_positions(wallet):
+    wallet = (wallet or "").strip()
+    if not wallet.lower().startswith("0x") or len(wallet) != 42:
+        return None
+    logs = _evm_rpc("eth_getLogs", [{
+        "address": V4_POSITION_MANAGER,
+        "topics": [TRANSFER_TOPIC, None, "0x" + "0" * 24 + wallet[2:].lower()],
+        "fromBlock": "0x0",
+        "toBlock": "latest",
+    }], timeout=90)
+    if logs is None:
+        return None
+
+    token_ids = sorted({int(entry["topics"][3], 16) for entry in logs})
+    positions = []
+    for token_id in token_ids:
+        owner = _evm_call(V4_POSITION_MANAGER, SEL_OWNER_OF + _pad_uint(token_id))
+        if not owner or _hex_address(_word(owner, 0)).lower() != wallet.lower():
+            continue
+        info = _evm_call(V4_POSITION_MANAGER, SEL_POOL_AND_POSITION_INFO + _pad_uint(token_id))
+        if not info:
+            continue
+        c0, c1 = _word(info, 0), _word(info, 1)
+        fee, spacing, hooks = int(_word(info, 2), 16), int(_word(info, 3), 16), _word(info, 4)
+        packed = int(_word(info, 5), 16)
+        tick_lower = _signed24((packed >> INFO_TICK_SHIFT) & 0xFFFFFF)
+        tick_upper = _signed24((packed >> (INFO_TICK_SHIFT + 24)) & 0xFFFFFF)
+        if tick_lower >= tick_upper:
+            continue
+
+        liquidity = _evm_call(V4_POSITION_MANAGER, SEL_POSITION_LIQUIDITY + _pad_uint(token_id))
+        pool_id = _pool_id(c0, c1, fee, spacing, hooks)
+        slot = _evm_call(V4_STATE_VIEW, SEL_GET_SLOT0 + pool_id)
+        active_tick = _signed24(_word(slot, 1)) if slot else None
+
+        symbol0, dec0 = _token_meta(c0)
+        symbol1, dec1 = _token_meta(c1)
+        positions.append({
+            "token_id": token_id,
+            "pool_id": "0x" + pool_id,
+            "pool_name": f"{symbol0}/{symbol1}",
+            "token_x_symbol": symbol0,
+            "token_y_symbol": symbol1,
+            "fee": fee,
+            "tick_spacing": spacing,
+            "tick_lower": tick_lower,
+            "tick_upper": tick_upper,
+            "lower_price": _tick_to_price(tick_lower, dec0, dec1),
+            "upper_price": _tick_to_price(tick_upper, dec0, dec1),
+            "active_tick": active_tick,
+            "current_price": _tick_to_price(active_tick, dec0, dec1) if active_tick is not None else None,
+            "in_range": (active_tick is not None and tick_lower <= active_tick <= tick_upper),
+            "liquidity": int(liquidity, 16) if liquidity and len(liquidity) > 2 else 0,
+        })
+    return positions
+
+
+def preview_evm_wallet(wallet):
+    wallet = (wallet or "").strip()
+    if not wallet.lower().startswith("0x") or len(wallet) != 42:
+        return {"ok": False, "error": "⚠️ 请填写 Robinhood 链的 EVM 钱包地址（0x 开头、42 位）。",
+                "positions": []}
+    positions = fetch_evm_v4_positions(wallet)
+    if positions is None:
+        return {"ok": False,
+                "error": "❌ 连接失败：读取链上仓位失败，请核对钱包地址或稍后重试。",
+                "positions": []}
+    if not positions:
+        return {"ok": False,
+                "error": "⚠️ 该钱包在 Uniswap v4 上没有仓位。",
+                "positions": []}
+    return {"ok": True, "error": None, "positions": positions}

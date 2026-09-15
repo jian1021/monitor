@@ -579,3 +579,118 @@ def test_preview_wallet_reports_fetch_failure(mock_pf):
     out = lpa.preview_wallet("W")
     assert out["ok"] is False
     assert "连接失败" in out["error"]
+
+
+def test_signed24_sign_extends_twos_complement():
+    assert lpa._signed24(0xFFFFFF) == -1
+    assert lpa._signed24(0x7FFFFF) == 0x7FFFFF
+    assert lpa._signed24(0x0) == 0
+    assert lpa._signed24(655104) == 655104
+
+
+def test_tick_delta_for_pct_round_trips_through_pct():
+    for pct in (1.0, 10.0, 100.0):
+        assert lpa.pct_from_tick_delta(lpa.tick_delta_for_pct(pct)) == pytest.approx(pct, rel=1e-9)
+
+
+def _v4_rule(**over):
+    base = {
+        "id": 1, "kind": "evm_v4", "chain": "robinhood",
+        "pool_address": "0x" + "ab" * 32, "pool_name": "ETH/DINO",
+        "token_id": 1502321, "lower_bin_id": 141060, "upper_bin_id": 146880,
+        "entry_tick": 140000, "floor_price": 1.33614e+06,
+        "target_mode": "price_pct", "target_pct": 10.0,
+        "enable_target_alert": 1, "enable_floor_alert": 1, "rearm": 1,
+        "target_alerted": 0, "floor_alerted": 0,
+    }
+    base.update(over)
+    return base
+
+
+def test_evaluate_evm_v4_floor_fires_only_below_tick_lower():
+    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_tick": 141059})["floor"] is True
+    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_tick": 141060})["floor"] is False
+    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_tick": 150000})["floor"] is False
+
+
+def test_evaluate_evm_v4_target_uses_tick_delta():
+    need = lpa.tick_delta_for_pct(10.0)
+    rule = _v4_rule(entry_tick=140000)
+    assert lpa.evaluate(rule, {"active_tick": 140000 + int(need) + 1})["target"] is True
+    assert lpa.evaluate(rule, {"active_tick": 140000 + int(need) - 2})["target"] is False
+
+
+def test_evaluate_evm_v4_skips_disabled_and_missing():
+    assert lpa.evaluate(_v4_rule(enable_floor_alert=0), {"active_tick": 1})["floor"] is False
+    assert lpa.evaluate(_v4_rule(lower_bin_id=None), {"active_tick": 1})["floor"] is False
+    assert lpa.evaluate(_v4_rule(enable_target_alert=0), {"active_tick": 999999})["target"] is False
+    assert lpa.evaluate(_v4_rule(entry_tick=None), {"active_tick": 999999})["target"] is False
+    assert lpa.evaluate(_v4_rule(), {}) == {"target": False, "floor": False}
+
+
+def test_needs_rearm_evm_v4_only_after_tick_recovers():
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=1), {"active_tick": 141060}) is True
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=1), {"active_tick": 141059}) is False
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=0), {"active_tick": 141060}) is False
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=1, rearm=0), {"active_tick": 141060}) is False
+
+
+@patch("lp_position_alert.fetch_evm_v4_positions")
+def test_preview_evm_wallet_success(mock_fetch):
+    mock_fetch.return_value = [{"token_id": 1, "pool_name": "ETH/DINO"}]
+    out = lpa.preview_evm_wallet("0x" + "a" * 40)
+    assert out["ok"] is True
+    assert len(out["positions"]) == 1
+
+
+@patch("lp_position_alert.fetch_evm_v4_positions")
+def test_preview_evm_wallet_empty_and_failure(mock_fetch):
+    mock_fetch.return_value = []
+    assert lpa.preview_evm_wallet("0x" + "a" * 40)["ok"] is False
+    mock_fetch.return_value = None
+    out = lpa.preview_evm_wallet("0x" + "a" * 40)
+    assert out["ok"] is False and "连接失败" in out["error"]
+
+
+def test_preview_evm_wallet_rejects_malformed_address():
+    for bad in ("not-an-address", "0x123", "", "0x" + "a" * 39):
+        out = lpa.preview_evm_wallet(bad)
+        assert out["ok"] is False
+        assert "0x" in out["error"]
+
+
+def test_build_message_evm_v4_reports_ticks_and_token_id():
+    msg = lpa.build_message(_v4_rule(), {"active_tick": 141000},
+                            ["floor"], {"name": "ETH/DINO"})
+    assert "跌穿区间下界" in msg
+    assert "141060" in msg
+    assert "141000" in msg
+    assert "1502321" in msg
+
+
+def test_build_message_evm_v4_target_reports_pct():
+    msg = lpa.build_message(_v4_rule(), {"active_tick": 150000},
+                            ["target"], {"name": "ETH/DINO"})
+    assert "盈利达标" in msg
+    assert "10.00" in msg
+
+
+@patch("lp_position_alert.clear_alert_flag")
+@patch("lp_position_alert._cur_evm_v4")
+def test_check_rule_evm_v4_fires_floor_without_units_guard(mock_cur, mock_clear):
+    mock_cur.return_value = ({"active_tick": 141000, "active_price": None,
+                              "pnl_pct": None, "price": None}, "open")
+    res = lpa.check_rule(_v4_rule())
+    assert "floor" in res["fired"]
+    assert "跌穿区间下界" in res["message"]
+    assert res["status"] == "open"
+
+
+@patch("lp_position_alert.set_status")
+@patch("lp_position_alert._cur_evm_v4")
+def test_check_rule_evm_v4_returns_error_when_rpc_fails(mock_cur, mock_status):
+    mock_cur.return_value = (None, "error")
+    res = lpa.check_rule(_v4_rule())
+    assert res["status"] == "error"
+    assert res["fired"] == []
+    assert res["message"] is None
