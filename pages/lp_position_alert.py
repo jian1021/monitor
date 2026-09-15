@@ -183,10 +183,11 @@ with tab_price:
                 with st.form("evm_add_form"):
                     e1, e2 = st.columns(2)
                     e_tgt = e1.number_input("盈利目标 %（相对建立规则时现价）", value=10.0,
-                                            step=1.0, key="evm_tgt")
+                                            step=1.0, key=f"evm_tgt_{picked_id}")
                     e_floor = e2.number_input(f"跌穿阈值价（{unit}，默认 = 该仓位区间下界）",
                                               value=float(picked["lower_price"]),
-                                              format="%.10g", step=0.0, key="evm_floor")
+                                              format="%.10g", step=0.0,
+                                              key=f"evm_floor_{picked_id}")
                     st.caption(f"链上 tick {picked['tick_lower']} ~ {picked['tick_upper']}，"
                                f"当前 {picked['active_tick']}；判定按 {unit} 价格比较")
                     if st.form_submit_button("✅ 添加规则", type="primary"):
@@ -289,7 +290,13 @@ with tab_price:
                             st.error("❌ 规则写入失败")
 
 st.divider()
-st.subheader("现有规则")
+head_left, head_right = st.columns([3, 1])
+head_left.subheader("现有规则")
+if head_right.button("🔄 立即检查一次", key="run_now", use_container_width=True):
+    with st.spinner("正在检查全部启用规则（触发的规则会发飞书）..."):
+        lpa.run_once()
+    st.success("检查完成，已刷新下方「当前值 / 盈亏% / 状态」")
+    st.rerun()
 
 rules = lpa.load_rules(enabled_only=False)
 if not rules:
@@ -301,7 +308,8 @@ view = pd.DataFrame([{
     "类型": r["kind"],
     "池子": r["pool_name"] or r["pool_address"][:10] + "...",
     "链": r["chain"],
-    "仓位": (r["position_address"][:10] + "...") if r["position_address"] else "-",
+    "仓位": (f"#{r['token_id']}" if r["kind"] == "evm_v4" and r.get("token_id")
+             else ((r["position_address"][:10] + "...") if r["position_address"] else "-")),
     "触发": "".join([
         f"{'盈利' if r['enable_target_alert'] else ''}"
         f"{'/' if r['enable_target_alert'] and r['enable_floor_alert'] else ''}"
@@ -316,6 +324,14 @@ view = pd.DataFrame([{
               if r["kind"] == "evm_v4" and r["last_active_price"] is not None
               else (f"{r['last_active_price']:.10g}"
                     if r["last_active_price"] is not None else "-"))),
+    "盈亏%": (
+        f"{(r['last_active_price'] / r['entry_price'] - 1) * 100:+.2f}%"
+        if r["kind"] == "evm_v4" and r.get("last_active_price") and r.get("entry_price")
+        else "-"),
+    "区间(下界~上界)": (
+        f"{r['min_price']:.6g} ~ {r['max_price']:.6g}"
+        if r["kind"] == "evm_v4" and r.get("min_price") and r.get("max_price")
+        else "-"),
     "状态": {"open": "🟢 监控中", "closed": "⚫ 已关闭", "error": "🔴 取数失败"}.get(r["status"], r["status"]),
     "启用": r["enabled"],
     "已告警": "".join([
