@@ -190,3 +190,51 @@ def test_units_plausible_passes_when_data_missing():
 def test_units_plausible_rejects_nonpositive():
     assert lpa.units_plausible(0.0, 3.56e-05) is False
     assert lpa.units_plausible(3.56e-05, 0.0) is False
+
+
+from config import LIBSQL_URL, LIBSQL_TOKEN
+
+requires_db = pytest.mark.skipif(
+    not (LIBSQL_URL and LIBSQL_TOKEN), reason="未配置 Turso 凭据"
+)
+
+
+@requires_db
+def test_ensure_table_and_crud_roundtrip():
+    assert lpa.ensure_table() is True
+    rule = {
+        "kind": "dlmm", "chain": "sol",
+        "pool_address": "TESTPOOL_ROUNDTRIP", "wallet": "TESTWALLET",
+        "position_address": "TESTPOS", "pool_name": "TEST/SOL",
+        "token_x_symbol": "TEST", "token_y_symbol": "SOL",
+        "lower_bin_id": 1, "upper_bin_id": 2,
+        "min_price": 1.5e-05, "max_price": 2.5e-05, "floor_price": 1.5e-05,
+        "target_mode": "pnl_pct", "target_pct": 10.0, "entry_price": None,
+    }
+    assert lpa.add_rule(rule) is True
+    rows = [r for r in lpa.load_rules(enabled_only=False, kind="dlmm")
+            if r["pool_address"] == "TESTPOOL_ROUNDTRIP"]
+    assert len(rows) == 1
+    rid = rows[0]["id"]
+    assert rows[0]["target_pct"] == pytest.approx(10.0)
+    assert rows[0]["min_price"] == pytest.approx(1.5e-05)
+    assert rows[0]["status"] == lpa.STATUS_OPEN
+    assert rows[0]["target_alerted"] is False
+
+    assert lpa.update_runtime(rid, {"last_pnl_pct": 12.5, "last_active_price": 2.0e-05}) is True
+    assert lpa.set_status(rid, lpa.STATUS_CLOSED) is True
+    assert lpa.clear_alert_flag(rid, "floor_alerted") is True
+    assert lpa.set_enabled(rid, False) is True
+
+    after = [r for r in lpa.load_rules(enabled_only=False, kind="dlmm") if r["id"] == rid][0]
+    assert after["last_pnl_pct"] == pytest.approx(12.5)
+    assert after["status"] == lpa.STATUS_CLOSED
+    assert after["enabled"] is False
+
+    # pool_price 规则每轮会把 last_pnl_pct 写成 None，必须确认 None 能正常绑定并回读
+    assert lpa.update_runtime(rid, {"last_pnl_pct": None}) is True
+    assert [r for r in lpa.load_rules(enabled_only=False, kind="dlmm")
+            if r["id"] == rid][0]["last_pnl_pct"] is None
+
+    assert lpa.delete_rule(rid) is True
+    assert [r for r in lpa.load_rules(enabled_only=False, kind="dlmm") if r["id"] == rid] == []
