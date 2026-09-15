@@ -530,3 +530,52 @@ def test_preview_pool_price_reports_bad_address(mock_pair):
     out = lpa.preview_pool_price("robinhood", "0xBAD")
     assert out["ok"] is False
     assert "连接失败" in out["error"]
+
+
+@patch("lp_position_alert.http_get_json")
+def test_fetch_open_portfolio_parses_pools(mock_get):
+    mock_get.return_value = {"totalPositions": 2, "pools": [{
+        "poolAddress": "POOL1", "tokenX": "MET", "tokenY": "SOL",
+        "poolPrice": 0.00204, "pnlPctChange": "11.5",
+        "openPositionCount": 2, "listPositions": ["P1", "P2"],
+    }]}
+    out = lpa.fetch_open_portfolio("WALLET1")
+    assert len(out) == 1
+    assert out[0]["pool_address"] == "POOL1"
+    assert out[0]["pool_name"] == "MET / SOL"
+    assert out[0]["pool_price"] == pytest.approx(0.00204)
+    assert out[0]["pnl_pct"] == 11.5
+    assert out[0]["open_positions"] == 2
+    assert out[0]["position_addresses"] == ["P1", "P2"]
+    assert mock_get.call_args[1]["params"]["user"] == "WALLET1"
+
+
+@patch("lp_position_alert.http_get_json")
+def test_fetch_open_portfolio_returns_none_on_failure(mock_get):
+    mock_get.return_value = None
+    assert lpa.fetch_open_portfolio("W") is None
+
+
+@patch("lp_position_alert.fetch_open_portfolio")
+def test_preview_wallet_success(mock_pf):
+    mock_pf.return_value = [{"pool_address": "POOL1", "pool_name": "MET / SOL"}]
+    out = lpa.preview_wallet("W")
+    assert out["ok"] is True
+    assert out["error"] is None
+    assert out["pools"][0]["pool_address"] == "POOL1"
+
+
+@patch("lp_position_alert.fetch_open_portfolio")
+def test_preview_wallet_reports_no_open_positions(mock_pf):
+    mock_pf.return_value = []
+    out = lpa.preview_wallet("W")
+    assert out["ok"] is False
+    assert "没有开放的 LP 仓位" in out["error"]
+
+
+@patch("lp_position_alert.fetch_open_portfolio")
+def test_preview_wallet_reports_fetch_failure(mock_pf):
+    mock_pf.return_value = None
+    out = lpa.preview_wallet("W")
+    assert out["ok"] is False
+    assert "连接失败" in out["error"]

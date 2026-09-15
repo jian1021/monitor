@@ -595,3 +595,39 @@ def preview_pool_price(chain, pool_address):
                 "error": "❌ 连接失败：Dexscreener 未找到该池子地址，请核对地址与所属链是否正确。",
                 "pair": None, "floor": None}
     return {"ok": True, "error": None, "pair": pair, "floor": None}
+
+
+def fetch_open_portfolio(wallet, page_size=50):
+    data = http_get_json(
+        f"{METEORA_BASE}/portfolio/open",
+        params={"user": wallet, "page_size": page_size},
+        timeout=25,
+    )
+    if not isinstance(data, dict):
+        return None
+    pools = []
+    for p in data.get("pools") or []:
+        pools.append({
+            "pool_address": p.get("poolAddress"),
+            "pool_name": " / ".join(filter(None, [p.get("tokenX"), p.get("tokenY")])),
+            "token_x_symbol": p.get("tokenX"),
+            "token_y_symbol": p.get("tokenY"),
+            "pool_price": to_float(p.get("poolPrice")),
+            "pnl_pct": to_float(p.get("pnlPctChange")),
+            "open_positions": p.get("openPositionCount"),
+            "position_addresses": p.get("listPositions") or [],
+        })
+    return pools
+
+
+def preview_wallet(wallet):
+    pools = fetch_open_portfolio(wallet)
+    if pools is None:
+        return {"ok": False,
+                "error": "❌ 连接失败：读取钱包组合失败，请核对钱包地址或稍后重试。",
+                "pools": []}
+    if not pools:
+        return {"ok": False,
+                "error": "⚠️ 该钱包没有开放的 LP 仓位（建仓后请稍等片刻再试）。",
+                "pools": []}
+    return {"ok": True, "error": None, "pools": pools}

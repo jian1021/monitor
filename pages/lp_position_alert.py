@@ -28,21 +28,47 @@ st.caption("Solana / Meteora DLMM 读链上仓位真实区间；Robinhood 等链
 tab_lp, tab_price = st.tabs(["Solana LP 仓位", "池子价格（Robinhood 等）"])
 
 with tab_lp:
-    c1, c2, c3 = st.columns(3)
-    lp_pool = c1.text_input("池子地址 *", key="lp_pool",
-                            placeholder="Meteora DLMM 池子地址（LbPair）")
-    lp_wallet = c2.text_input("钱包地址 *", key="lp_wallet", placeholder="持有该仓位的钱包")
-    c3.selectbox("链", lpa.CHAIN_OPTIONS, key="lp_chain")
+    lp_wallet = st.text_input("钱包地址 *", key="lp_wallet",
+                              placeholder="只需钱包地址，池子会自动列出")
 
-    if st.button("🔌 连接", type="primary", key="lp_connect"):
-        if not lp_pool.strip() or not lp_wallet.strip():
-            st.warning("⚠️ 请填写池子地址与钱包地址")
+    if st.button("🔌 连接钱包", type="primary", key="lp_connect"):
+        if not lp_wallet.strip():
+            st.warning("⚠️ 请填写钱包地址")
         else:
-            with st.spinner("正在连接 Meteora 并读取仓位 ..."):
-                st.session_state["lp_preview"] = lpa.preview_dlmm(
-                    lp_pool.strip(), lp_wallet.strip())
+            with st.spinner("正在读取该钱包的 LP 仓位 ..."):
+                st.session_state["wallet_preview"] = lpa.preview_wallet(lp_wallet.strip())
 
-    preview = st.session_state.get("lp_preview")
+    wp = st.session_state.get("wallet_preview")
+    preview = None
+    if wp:
+        if wp["error"]:
+            st.error(wp["error"])
+        if wp["ok"]:
+            st.success(f"✅ 连接成功：找到 {len(wp['pools'])} 个有开放仓位的池子")
+            st.dataframe(pd.DataFrame([{
+                "池子": p["pool_name"],
+                "池子地址": p["pool_address"],
+                "仓位数": p["open_positions"],
+                "池子价": p["pool_price"],
+                "盈亏%": p["pnl_pct"],
+            } for p in wp["pools"]]), use_container_width=True)
+
+            labels = {p["pool_address"]: f"{p['pool_name']} · {p['pool_address'][:8]}…"
+                      for p in wp["pools"]}
+            picked_pool = st.selectbox("选择池子 *", options=list(labels),
+                                       format_func=lambda a: labels[a],
+                                       key="lp_picked_pool")
+
+            with st.expander("🔧 高级：改用手动输入池子地址"):
+                manual = st.text_input("池子地址", key="lp_manual_pool",
+                                       placeholder="留空则用上面选中的池子")
+                if manual.strip():
+                    picked_pool = manual.strip()
+
+            with st.spinner("读取该池仓位 ..."):
+                preview = lpa.preview_dlmm(picked_pool, lp_wallet.strip())
+            st.session_state["lp_active_pool"] = picked_pool
+
     if preview:
         if preview["error"]:
             st.error(preview["error"])
@@ -83,7 +109,7 @@ with tab_lp:
                     else:
                         created = lpa.add_rule({
                             "kind": "dlmm", "chain": "sol",
-                            "pool_address": lp_pool.strip(),
+                            "pool_address": st.session_state["lp_active_pool"],
                             "wallet": lp_wallet.strip(),
                             "position_address": picked,
                             "pool_name": (preview["pool"] or {}).get("name"),
