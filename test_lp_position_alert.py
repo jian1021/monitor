@@ -651,6 +651,61 @@ def test_main_guard_placed_after_every_definition():
         f"入口块之后仍有定义 {defined_after}；脚本方式运行时 main() 会提前执行而 NameError")
 
 
+@patch("lp_position_alert.fetch_evm_v4_positions")
+def test_preview_evm_wallet_passes_manual_token_ids(mock_fetch):
+    mock_fetch.return_value = [{"token_id": 1, "pool_name": "A/B"}]
+    lpa.preview_evm_wallet("0x" + "a" * 40, "1642591, 2740893  3000")
+    assert mock_fetch.call_args[0][1] == [1642591, 2740893, 3000]
+
+
+@patch("lp_position_alert.fetch_evm_v4_positions")
+def test_preview_evm_wallet_omits_token_ids_when_blank(mock_fetch):
+    mock_fetch.return_value = [{"token_id": 1, "pool_name": "A/B"}]
+    lpa.preview_evm_wallet("0x" + "a" * 40, "  , abc ,")
+    assert mock_fetch.call_args[0][1] is None
+
+
+@patch("lp_position_alert._evm_rpc")
+def test_scan_falls_back_to_recent_window_when_full_history_rejected(mock_rpc):
+    def fake(method, params, **kwargs):
+        if method == "eth_getLogs":
+            if params[0]["fromBlock"] == "0x0":
+                return None
+            return [{"topics": ["0x0", "0x0", "0x0", "0x2a"]}]
+        if method == "eth_blockNumber":
+            return hex(100000)
+        return None
+
+    mock_rpc.side_effect = fake
+    token_ids, mode = lpa._scan_transfer_token_ids("0x" + "a" * 40)
+    assert token_ids == [42]
+    assert mode == "recent"
+
+
+@patch("lp_position_alert._evm_rpc")
+def test_scan_returns_none_when_every_range_fails(mock_rpc):
+    mock_rpc.return_value = None
+    assert lpa._scan_transfer_token_ids("0x" + "a" * 40) == (None, None)
+
+
+@patch("lp_position_alert.fetch_evm_v4_positions")
+def test_preview_evm_wallet_explains_limited_scan(mock_fetch):
+    mock_fetch.return_value = []
+    lpa._LAST_SCAN_MODE = "recent"
+    out = lpa.preview_evm_wallet("0x" + "a" * 40)
+    assert out["ok"] is False
+    assert str(lpa.RECENT_BLOCK_WINDOW) in out["error"]
+    lpa._LAST_SCAN_MODE = ""
+
+
+@patch("lp_position_alert.fetch_evm_v4_positions")
+def test_preview_evm_wallet_allows_ownership_filter_for_manual_ids(mock_fetch):
+    mock_fetch.return_value = [{"token_id": 2740893, "pool_name": "USDG/WAIFU"}]
+    out = lpa.preview_evm_wallet("0x" + "a" * 40, "2740893")
+    assert out["ok"] is True
+    assert out["positions"][0]["token_id"] == 2740893
+
+
 def test_aggregate3_selector_is_known_value():
     assert lpa.SEL_AGGREGATE3 == "0x82ad56cb"
 

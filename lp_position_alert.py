@@ -16,7 +16,7 @@ import traceback
 
 import requests
 
-from config import FEISHU_WEBHOOK
+from config import FEISHU_WEBHOOK, ROBINHOOD_RPC
 from db import get_db_client
 from keccak_pure import keccak256
 from send_feishu_msg import send_feishu_msg
@@ -24,7 +24,7 @@ from db import get_db_client
 from send_feishu_msg import send_feishu_msg
 
 METEORA_BASE = "https://dlmm.datapi.meteora.ag"
-VERSION = "2026-09-15.7"
+VERSION = "2026-09-15.8"
 DEXSCREENER_BASE = "https://api.dexscreener.com"
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -41,7 +41,7 @@ GECKO_NETWORK = {
     "eth": "eth", "robinhood": "robinhood",
 }
 
-EVM_RPC = "https://rpc.mainnet.chain.robinhood.com"
+EVM_RPC = ROBINHOOD_RPC or "https://rpc.mainnet.chain.robinhood.com"
 V4_POSITION_MANAGER = "0x58daec3116aae6d93017baaea7749052e8a04fa7"
 V4_STATE_VIEW = "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b"
 USDG_ADDRESS = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
@@ -736,6 +736,7 @@ def preview_wallet(wallet):
 
 
 _LAST_EVM_ERROR = ""
+_LAST_SCAN_MODE = ""
 
 
 def _fail(reason):
@@ -912,19 +913,45 @@ def _uint_from(entry):
     return int.from_bytes(ret[:32], "big")
 
 
-def fetch_evm_v4_positions(wallet):
+RECENT_BLOCK_WINDOW = 5000
+
+
+def _scan_transfer_token_ids(wallet):
+    """扫描 PositionManager 的 Transfer 事件，取出转入过该钱包的 tokenId.
+
+    返回 (token_ids, 扫描模式)。公共 Robinhood 节点对 eth_getLogs 的区块跨度
+    有硬限制（实测 5000 块可、10000 块即拒），故全历史扫描失败时降级为最近窗口，
+    模式标记为 "recent"，由界面提示用户改用手填 tokenId。
+    """
+    topic = "0x" + "0" * 24 + wallet[2:].lower()
+    common = {"address": V4_POSITION_MANAGER, "topics": [TRANSFER_TOPIC, None, topic],
+              "toBlock": "latest"}
+    global _LAST_SCAN_MODE
+    logs = _evm_rpc("eth_getLogs", [dict(common, fromBlock="0x0")], timeout=90)
+    if logs is not None:
+        _LAST_SCAN_MODE = "full"
+        return sorted({int(entry["topics"][3], 16) for entry in logs}), "full"
+    head = _evm_rpc("eth_blockNumber", [])
+    if isinstance(head, str) and head.startswith("0x"):
+        start = hex(max(int(head, 16) - RECENT_BLOCK_WINDOW, 0))
+        logs = _evm_rpc("eth_getLogs", [dict(common, fromBlock=start)], timeout=90)
+        if logs is not None:
+            _LAST_SCAN_MODE = "recent"
+            return sorted({int(entry["topics"][3], 16) for entry in logs}), "recent"
+    _LAST_SCAN_MODE = ""
+    return None, None
+
+
+def fetch_evm_v4_positions(wallet, token_ids=None):
     wallet = (wallet or "").strip()
     if not wallet.lower().startswith("0x") or len(wallet) != 42:
         return None
-    logs = _evm_rpc("eth_getLogs", [{
-        "address": V4_POSITION_MANAGER,
-        "topics": [TRANSFER_TOPIC, None, "0x" + "0" * 24 + wallet[2:].lower()],
-        "fromBlock": "0x0",
-        "toBlock": "latest",
-    }], timeout=90)
-    if logs is None:
-        return None
-    token_ids = sorted({int(entry["topics"][3], 16) for entry in logs})
+    if token_ids is None:
+        token_ids, _mode = _scan_transfer_token_ids(wallet)
+        if token_ids is None:
+            return None
+    else:
+        token_ids = sorted({int(t) for t in token_ids})
     if not token_ids:
         return []
 
@@ -1048,20 +1075,33 @@ def fetch_evm_v4_positions(wallet):
     return positions
 
 
-def preview_evm_wallet(wallet):
+def preview_evm_wallet(wallet, token_ids_text=""):
     wallet = (wallet or "").strip()
     if not wallet.lower().startswith("0x") or len(wallet) != 42:
         return {"ok": False, "error": "⚠️ 请填写 Robinhood 链的 EVM 钱包地址（0x 开头、42 位）。",
                 "positions": []}
-    positions = fetch_evm_v4_positions(wallet)
+    manual = [int(t) for t in str(token_ids_text or "").replace(",", " ").split()
+              if t.strip().isdigit()]
+    positions = fetch_evm_v4_positions(wallet, manual or None)
     if positions is None:
         detail = f"（原因：{_LAST_EVM_ERROR}）" if _LAST_EVM_ERROR else ""
+        hint = ("" if manual else
+                "　公共 RPC 不允许全历史日志查询，可在下方手动填入 tokenId"
+                "（从 Uniswap 界面复制），或配置 ROBINHOOD_RPC 换用付费节点。")
         return {"ok": False,
-                "error": f"❌ 连接失败：读取链上仓位失败{detail}",
+                "error": f"❌ 连接失败：读取链上仓位失败{detail}{hint}",
                 "positions": []}
     if not positions:
+        if _LAST_SCAN_MODE == "recent":
+            return {"ok": False,
+                    "error": f"⚠️ 只扫描了最近 {RECENT_BLOCK_WINDOW} 个区块"
+                             "（公共 RPC 不允许全历史日志查询），未发现仓位。"
+                             "请在下方手动填入 tokenId（从 Uniswap 界面复制），"
+                             "或配置 ROBINHOOD_RPC 换用付费节点。",
+                    "positions": []}
         return {"ok": False,
-                "error": "⚠️ 该钱包在 Uniswap v4 上没有仓位。",
+                "error": "⚠️ 没有找到 Uniswap v4 仓位。若你确实有仓位，"
+                         "请在下方手动填入 tokenId。",
                 "positions": []}
     return {"ok": True, "error": None, "positions": positions}
 

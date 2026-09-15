@@ -53,6 +53,9 @@ FEISHU_WEBHOOK = _setting("FEISHU_WEBHOOK")
 ADMIN_USER = _setting("ADMIN_USER", "admin")
 ADMIN_PASS = _setting("ADMIN_PASS", "123456")
 
+# ========== Robinhood 链 RPC（可选，换付费节点可放宽 eth_getLogs 范围限制） ==========
+ROBINHOOD_RPC = _setting("ROBINHOOD_RPC", "")
+
 
 # ========== 可选：生产环境严格校验（建议开启） ==========
 # 如果你不想空值上线报错，可以放开下面校验

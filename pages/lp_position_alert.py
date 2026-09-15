@@ -31,8 +31,8 @@ if not lpa.ensure_table():
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def cached_evm_preview(wallet):
-    return lpa.preview_evm_wallet(wallet)
+def cached_evm_preview(wallet, token_ids_text):
+    return lpa.preview_evm_wallet(wallet, token_ids_text)
 
 st.caption("Solana / Meteora DLMM 读链上仓位真实区间；Robinhood 只列未平仓的 Uniswap v4 仓位。"
            f"　构建 {lpa.VERSION}")
@@ -143,14 +143,18 @@ with tab_lp:
 
 with tab_price:
     px_wallet = st.text_input("Robinhood 钱包地址 *", key="px_wallet",
-                              placeholder="0x 开头的 EVM 钱包，Uniswap v4 仓位会自动列出")
+                              placeholder="0x 开头的 EVM 钱包")
+    px_token_ids = st.text_input(
+        "tokenId（可选，多个用逗号分隔）", key="px_token_ids",
+        placeholder="公共 RPC 不支持全历史扫描，填这里可精确读取，例如 2740893")
 
     if st.button("🔌 连接钱包", type="primary", key="px_connect_wallet"):
         if not px_wallet.strip():
             st.warning("⚠️ 请填写钱包地址")
         else:
-            with st.spinner("正在读取链上 Uniswap v4 仓位（首次约 30-40 秒，之后 2 分钟内走缓存）..."):
-                st.session_state["evm_preview"] = cached_evm_preview(px_wallet.strip())
+            with st.spinner("正在读取链上 Uniswap v4 仓位 ..."):
+                st.session_state["evm_preview"] = cached_evm_preview(
+                    px_wallet.strip(), px_token_ids.strip())
 
     ev = st.session_state.get("evm_preview")
     if ev:
