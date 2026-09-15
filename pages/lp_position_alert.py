@@ -23,6 +23,11 @@ if not lpa.ensure_table():
     st.error("❌ 初始化 lp_position_alert 表失败，请检查 Turso 凭据。")
     st.stop()
 
+
+@st.cache_data(ttl=120, show_spinner=False)
+def cached_evm_preview(wallet):
+    return lpa.preview_evm_wallet(wallet)
+
 st.caption("Solana / Meteora DLMM 读链上仓位真实区间；Robinhood 等链只做池子价格。")
 
 tab_lp, tab_price = st.tabs(["Solana LP 仓位", "池子价格（Robinhood 等）"])
@@ -137,15 +142,17 @@ with tab_price:
         if not px_wallet.strip():
             st.warning("⚠️ 请填写钱包地址")
         else:
-            with st.spinner("正在读取链上 Uniswap v4 仓位 ..."):
-                st.session_state["evm_preview"] = lpa.preview_evm_wallet(px_wallet.strip())
+            with st.spinner("正在读取链上 Uniswap v4 仓位（首次约 30-40 秒，之后 2 分钟内走缓存）..."):
+                st.session_state["evm_preview"] = cached_evm_preview(px_wallet.strip())
 
     ev = st.session_state.get("evm_preview")
     if ev:
         if ev["error"]:
             st.error(ev["error"])
         if ev["ok"]:
-            st.success(f"✅ 连接成功：找到 {len(ev['positions'])} 个 Uniswap v4 仓位")
+            basis = ev["positions"][0].get("price_basis") or "token1"
+            st.success(f"✅ 连接成功：找到 {len(ev['positions'])} 个有流动性的 Uniswap v4 仓位"
+                       f"（未平仓；价格以 {basis} 计价）")
             st.dataframe(pd.DataFrame([{
                 "tokenId": p["token_id"],
                 "交易对": p["pool_name"],
@@ -161,10 +168,11 @@ with tab_price:
                                      format_func=lambda x: ev_labels[x],
                                      key="px_picked_position")
             picked = next(p for p in ev["positions"] if str(p["token_id"]) == picked_id)
+            unit = picked.get("price_basis") or "token1"
 
             c1, c2, c3 = st.columns(3)
-            c1.metric("区间下界", f"{picked['lower_price']:.10g}")
-            c2.metric("当前价",
+            c1.metric(f"区间下界（{unit}）", f"{picked['lower_price']:.10g}")
+            c2.metric(f"当前价（{unit}）",
                       f"{picked['current_price']:.10g}" if picked.get("current_price") else "-")
             c3.metric("状态", "区间内" if picked["in_range"] else "已超区间")
 
@@ -175,12 +183,11 @@ with tab_price:
                     e1, e2 = st.columns(2)
                     e_tgt = e1.number_input("盈利目标 %（相对建立规则时现价）", value=10.0,
                                             step=1.0, key="evm_tgt")
-                    e_floor = e2.number_input("跌穿阈值价（默认 = 该仓位区间下界）",
+                    e_floor = e2.number_input(f"跌穿阈值价（{unit}，默认 = 该仓位区间下界）",
                                               value=float(picked["lower_price"]),
                                               format="%.10g", step=0.0, key="evm_floor")
-                    st.caption(f"触发以链上 tick 判定：当前 tick {picked['active_tick']}、"
-                               f"仓位下界 tick {picked['tick_lower']}"
-                               f"（价格仅用于显示，精度受代币小数位影响）")
+                    st.caption(f"链上 tick {picked['tick_lower']} ~ {picked['tick_upper']}，"
+                               f"当前 {picked['active_tick']}；判定按 {unit} 价格比较")
                     if st.form_submit_button("✅ 添加规则", type="primary"):
                         created = lpa.add_rule({
                             "kind": "evm_v4", "chain": "robinhood",
@@ -190,8 +197,9 @@ with tab_price:
                             "pool_name": picked["pool_name"],
                             "token_x_symbol": picked["token_x_symbol"],
                             "token_y_symbol": picked["token_y_symbol"],
-                            "lower_bin_id": picked["tick_lower"],
-                            "upper_bin_id": picked["tick_upper"],
+                            "price_basis": picked.get("price_basis"),
+                            "lower_bin_id": picked["tick_min"],
+                            "upper_bin_id": picked["tick_max"],
                             "min_price": picked["lower_price"],
                             "max_price": picked["upper_price"],
                             "floor_price": float(e_floor),
@@ -303,7 +311,7 @@ view = pd.DataFrame([{
     "当前值": (
         f"PnL {r['last_pnl_pct']:.2f}%"
         if r["kind"] == "dlmm" and r["last_pnl_pct"] is not None
-        else (f"tick {r['last_active_price']:.0f}"
+        else (f"{r['last_active_price']:.10g} {r['price_basis'] or ''}".strip()
               if r["kind"] == "evm_v4" and r["last_active_price"] is not None
               else (f"{r['last_active_price']:.10g}"
                     if r["last_active_price"] is not None else "-"))),

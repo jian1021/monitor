@@ -45,6 +45,7 @@ GECKO_NETWORK = {
 EVM_RPC = "https://rpc.mainnet.chain.robinhood.com"
 V4_POSITION_MANAGER = "0x58daec3116aae6d93017baaea7749052e8a04fa7"
 V4_STATE_VIEW = "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b"
+USDG_ADDRESS = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 TICK_BASE = 1.0001
 SEL_BALANCE_OF = "0x70a08231"
@@ -111,32 +112,23 @@ def _current_price(rule, cur):
     if rule.get("kind") == "dlmm":
         return cur.get("active_price")
     if rule.get("kind") == "evm_v4":
-        return cur.get("active_tick")
+        return cur.get("active_price")
     return cur.get("price")
-
-
-def tick_delta_for_pct(pct):
-    """达到 +pct% 价格涨幅所需的 tick 增量.
-
-    价格比 = 1.0001^Δ（小数位因子在比值中约掉），故 Δ = ln(1+pct/100)/ln(1.0001)。
-    在对数空间比较可避免 1.0001^Δ 在大 Δ 时溢出，也绕开 token 小数位。
-    """
-    return math.log1p(pct / 100.0) / math.log(TICK_BASE)
 
 
 def evaluate(rule, cur):
     fires = {"target": False, "floor": False}
 
     if rule.get("kind") == "evm_v4":
-        active = cur.get("active_tick")
-        if (rule.get("enable_target_alert") and rule.get("target_pct") is not None
-                and active is not None and rule.get("entry_tick") is not None):
-            if (active - int(rule["entry_tick"])) >= tick_delta_for_pct(float(rule["target_pct"])):
-                fires["target"] = True
-        if (rule.get("enable_floor_alert") and rule.get("lower_bin_id") is not None
-                and active is not None):
-            if active < int(rule["lower_bin_id"]):
+        price = cur.get("active_price")
+        if (rule.get("enable_floor_alert") and rule.get("floor_price") is not None
+                and price is not None):
+            if price < float(rule["floor_price"]):
                 fires["floor"] = True
+        if (rule.get("enable_target_alert") and rule.get("target_pct") is not None
+                and price is not None and rule.get("entry_price")):
+            if price >= float(rule["entry_price"]) * (100.0 + float(rule["target_pct"])) / 100.0:
+                fires["target"] = True
         return fires
 
     if rule.get("enable_target_alert") and rule.get("target_pct") is not None:
@@ -167,9 +159,9 @@ def needs_rearm(rule, cur):
     if not rule.get("rearm") or not rule.get("floor_alerted"):
         return False
     if rule.get("kind") == "evm_v4":
-        active = cur.get("active_tick")
-        lower = rule.get("lower_bin_id")
-        return active is not None and lower is not None and active >= int(lower)
+        price = cur.get("active_price")
+        floor = rule.get("floor_price")
+        return price is not None and floor is not None and price > float(floor)
     if rule.get("floor_price") is None:
         return False
     value = _current_price(rule, cur)
@@ -207,12 +199,13 @@ COLUMNS = (
     "target_alerted", "floor_alerted",
     "last_pnl_pct", "last_active_price", "last_checked_at",
     "is_out_of_range", "status",
-    "token_id", "entry_tick",
+    "token_id", "entry_tick", "price_basis",
 )
 
 MIGRATION_COLUMNS = (
     ("token_id", "INTEGER"),
     ("entry_tick", "INTEGER"),
+    ("price_basis", "TEXT"),
 )
 
 CREATE_TABLE_SQL = """
@@ -247,7 +240,8 @@ CREATE TABLE IF NOT EXISTS lp_position_alert (
     status              TEXT    NOT NULL DEFAULT 'open',
     created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
     token_id            INTEGER,
-    entry_tick          INTEGER
+    entry_tick          INTEGER,
+    price_basis         TEXT
 );
 """
 
@@ -461,44 +455,55 @@ def _cur_pool_price(rule):
     return pair, STATUS_OPEN
 
 
+def _token_decimals(address_word):
+    address = _hex_address(address_word)
+    if int(address, 16) == 0:
+        return 18
+    result = _evm_call(address, SEL_DECIMALS)
+    return int(result, 16) if result and len(result) > 2 else 18
+
+
 def _cur_evm_v4(rule):
-    pool_id = str(rule.get("pool_address") or "").replace("0x", "").lower()
-    if len(pool_id) != 64:
+    token_id = rule.get("token_id")
+    if token_id is None:
+        return None, STATUS_ERROR
+    info = _evm_call(V4_POSITION_MANAGER, SEL_POOL_AND_POSITION_INFO + _pad_uint(token_id))
+    if not info:
+        return None, STATUS_ERROR
+    c0, c1 = _word(info, 0), _word(info, 1)
+    fee, spacing, hooks = int(_word(info, 2), 16), int(_word(info, 3), 16), _word(info, 4)
+    pool_id = _pool_id(c0, c1, fee, spacing, hooks)
+    if not pool_id:
         return None, STATUS_ERROR
     slot = _evm_call(V4_STATE_VIEW, SEL_GET_SLOT0 + pool_id)
     if not slot:
         return None, STATUS_ERROR
-    return {"active_tick": _signed24(_word(slot, 1)),
-            "active_price": None, "pnl_pct": None, "price": None}, STATUS_OPEN
-
-
-def pct_from_tick_delta(delta):
-    if delta > 500000:
-        return float("inf")
-    if delta < -500000:
-        return -100.0
-    return (TICK_BASE ** delta - 1) * 100
+    active_tick = _signed24(_word(slot, 1))
+    price, _, _ = quote_price(active_tick, c0, c1,
+                              _token_decimals(c0), _token_decimals(c1))
+    return {"active_tick": active_tick, "active_price": price,
+            "pnl_pct": None, "price": None}, STATUS_OPEN
 
 
 def build_message(rule, cur, fired, pool_info):
     name = (pool_info or {}).get("name") or rule.get("pool_name") or rule["pool_address"]
     lines = []
     if rule.get("kind") == "evm_v4":
-        active = cur.get("active_tick")
+        basis = rule.get("price_basis") or rule.get("token_y_symbol") or ""
+        price = cur.get("active_price")
         if "target" in fired:
-            delta = active - int(rule["entry_tick"])
-            lines.append(f"🎯 【盈利达标】自建规则以来约 {pct_from_tick_delta(delta):+.2f}%"
-                         f"（目标 {float(rule['target_pct']):.2f}%）")
+            base = float(rule.get("entry_price") or 0)
+            pct = (price / base - 1) * 100 if base else 0.0
+            lines.append(f"🎯 【盈利达标】现价 {price:.10g}，较建立规则时 {base:.10g} "
+                         f"涨 {pct:.2f}%（目标 {float(rule['target_pct']):.2f}%）")
         if "floor" in fired:
-            lower = int(rule["lower_bin_id"])
-            lines.append(f"🚨 【跌穿区间下界】当前 tick {active} < 下界 tick {lower}"
-                         f"（低 {lower - active} 个 tick）")
+            lines.append(f"🚨 【跌穿区间下界】现价 {price:.10g} < 下界 "
+                         f"{float(rule['floor_price']):.10g}")
         lines.append("")
-        lines.append(f"池子: {name}（robinhood / uniswap v4）")
-        lines.append(f"仓位 tokenId: {rule.get('token_id')}")
-        lines.append(f"区间: tick {rule.get('lower_bin_id')} ~ {rule.get('upper_bin_id')}"
-                     f"，下界价约 {float(rule.get('floor_price') or 0):.10g}")
-        lines.append(f"当前 tick: {active}")
+        lines.append(f"池子: {name}（robinhood / uniswap v4，{basis} 计价）")
+        lines.append(f"仓位 tokenId: {rule.get('token_id')}｜当前 tick {cur.get('active_tick')}")
+        lines.append(f"区间: {float(rule.get('lower_price') or 0):.10g} ~ "
+                     f"{float(rule.get('max_price') or 0):.10g}")
         lines.append(f"poolId: {rule['pool_address']}")
         return "\n".join(lines)
     if "target" in fired:
@@ -803,18 +808,34 @@ def _decode_abi_string(hexstr):
         return None
 
 
-def _token_meta(address_word):
+def _token_meta(address_word, cache=None):
     address = _hex_address(address_word)
     if int(address, 16) == 0:
         return "ETH", 18
+    if cache is not None and address in cache:
+        return cache[address]
     decimals = _evm_call(address, SEL_DECIMALS)
     dec = int(decimals, 16) if decimals and len(decimals) > 2 else 18
     symbol = _decode_abi_string(_evm_call(address, SEL_SYMBOL))
-    return (symbol or address[:10]), dec
+    result = ((symbol or address[:10]), dec)
+    if cache is not None:
+        cache[address] = result
+    return result
 
 
-def _tick_to_price(tick, dec0, dec1):
-    return (TICK_BASE ** tick) * (10 ** (dec0 - dec1))
+def quote_price(tick, c0_word, c1_word, dec0, dec1):
+    """把 tick 换算成「以 USDG 计价」的价格.
+
+    返回 (price, tick_sign, basis)：tick_sign 为 +1 表示价格随 tick 上升，
+    -1 表示随 tick 下降（此时 USDG 是 currency0，价格是它的倒数）。
+    池子两侧都没有 USDG 时退回 token1 计价，basis 为 None。
+    """
+    c0, c1 = _hex_address(c0_word), _hex_address(c1_word)
+    if c1.lower() == USDG_ADDRESS:
+        return (TICK_BASE ** tick) * (10 ** (dec0 - dec1)), 1, "USDG"
+    if c0.lower() == USDG_ADDRESS:
+        return (TICK_BASE ** (-tick)) * (10 ** (dec1 - dec0)), -1, "USDG"
+    return (TICK_BASE ** tick) * (10 ** (dec0 - dec1)), 1, None
 
 
 def fetch_evm_v4_positions(wallet):
@@ -823,9 +844,10 @@ def fetch_evm_v4_positions(wallet):
         return None
     if not wallet.lower().startswith("0x") or len(wallet) != 42:
         return None
+    topic_to_wallet = "0x" + "0" * 24 + wallet[2:].lower()
     logs = _evm_rpc("eth_getLogs", [{
         "address": V4_POSITION_MANAGER,
-        "topics": [TRANSFER_TOPIC, None, "0x" + "0" * 24 + wallet[2:].lower()],
+        "topics": [TRANSFER_TOPIC, None, topic_to_wallet],
         "fromBlock": "0x0",
         "toBlock": "latest",
     }], timeout=90)
@@ -833,11 +855,20 @@ def fetch_evm_v4_positions(wallet):
         return None
 
     token_ids = sorted({int(entry["topics"][3], 16) for entry in logs})
+
+    token_cache = {}
+    tick_cache = {}
     positions = []
     for token_id in token_ids:
+        liquidity = _evm_call(V4_POSITION_MANAGER, SEL_POSITION_LIQUIDITY + _pad_uint(token_id))
+        liq = int(liquidity, 16) if liquidity and len(liquidity) > 2 else 0
+        if liq <= 0:
+            continue
+
         owner = _evm_call(V4_POSITION_MANAGER, SEL_OWNER_OF + _pad_uint(token_id))
         if not owner or _hex_address(_word(owner, 0)).lower() != wallet.lower():
             continue
+
         info = _evm_call(V4_POSITION_MANAGER, SEL_POOL_AND_POSITION_INFO + _pad_uint(token_id))
         if not info:
             continue
@@ -849,29 +880,44 @@ def fetch_evm_v4_positions(wallet):
         if tick_lower >= tick_upper:
             continue
 
-        liquidity = _evm_call(V4_POSITION_MANAGER, SEL_POSITION_LIQUIDITY + _pad_uint(token_id))
         pool_id = _pool_id(c0, c1, fee, spacing, hooks)
-        slot = _evm_call(V4_STATE_VIEW, SEL_GET_SLOT0 + pool_id)
-        active_tick = _signed24(_word(slot, 1)) if slot else None
+        if pool_id not in tick_cache:
+            slot = _evm_call(V4_STATE_VIEW, SEL_GET_SLOT0 + pool_id)
+            tick_cache[pool_id] = _signed24(_word(slot, 1)) if slot else None
+        active_tick = tick_cache[pool_id]
 
-        symbol0, dec0 = _token_meta(c0)
-        symbol1, dec1 = _token_meta(c1)
+        symbol0, dec0 = _token_meta(c0, token_cache)
+        symbol1, dec1 = _token_meta(c1, token_cache)
+
+        p_lower, sign, basis = quote_price(tick_lower, c0, c1, dec0, dec1)
+        p_upper, _, _ = quote_price(tick_upper, c0, c1, dec0, dec1)
+        if sign > 0:
+            tick_min, tick_max = tick_lower, tick_upper
+        else:
+            tick_min, tick_max = tick_upper, tick_lower
+        low_price, high_price = min(p_lower, p_upper), max(p_lower, p_upper)
+        current_price = (quote_price(active_tick, c0, c1, dec0, dec1)[0]
+                         if active_tick is not None else None)
+
         positions.append({
             "token_id": token_id,
             "pool_id": "0x" + pool_id,
             "pool_name": f"{symbol0}/{symbol1}",
             "token_x_symbol": symbol0,
             "token_y_symbol": symbol1,
+            "price_basis": basis or symbol1,
             "fee": fee,
             "tick_spacing": spacing,
             "tick_lower": tick_lower,
             "tick_upper": tick_upper,
-            "lower_price": _tick_to_price(tick_lower, dec0, dec1),
-            "upper_price": _tick_to_price(tick_upper, dec0, dec1),
+            "tick_min": tick_min,
+            "tick_max": tick_max,
+            "lower_price": low_price,
+            "upper_price": high_price,
             "active_tick": active_tick,
-            "current_price": _tick_to_price(active_tick, dec0, dec1) if active_tick is not None else None,
+            "current_price": current_price,
             "in_range": (active_tick is not None and tick_lower <= active_tick <= tick_upper),
-            "liquidity": int(liquidity, 16) if liquidity and len(liquidity) > 2 else 0,
+            "liquidity": liq,
         })
     return positions
 

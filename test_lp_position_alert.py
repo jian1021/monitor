@@ -202,6 +202,8 @@ requires_db = pytest.mark.skipif(
 @requires_db
 def test_ensure_table_and_crud_roundtrip():
     assert lpa.ensure_table() is True
+    lpa._execute("DELETE FROM lp_position_alert WHERE pool_address = ?",
+                 ["TESTPOOL_ROUNDTRIP"])
     rule = {
         "kind": "dlmm", "chain": "sol",
         "pool_address": "TESTPOOL_ROUNDTRIP", "wallet": "TESTWALLET",
@@ -588,17 +590,44 @@ def test_signed24_sign_extends_twos_complement():
     assert lpa._signed24(655104) == 655104
 
 
-def test_tick_delta_for_pct_round_trips_through_pct():
-    for pct in (1.0, 10.0, 100.0):
-        assert lpa.pct_from_tick_delta(lpa.tick_delta_for_pct(pct)) == pytest.approx(pct, rel=1e-9)
+_USDG_WORD = "0" * 24 + "5fc5360d0400a0fd4f2af552add042d716f1d168"
+_OTHER_WORD = "0" * 24 + "2bf78d3dc6b2222bcbfe8c712c9c33120b3058bc"
+
+
+def test_quote_price_usdg_as_currency1_increases_with_tick():
+    price, sign, basis = lpa.quote_price(1000, _OTHER_WORD, _USDG_WORD, 18, 18)
+    assert price == pytest.approx(1.0001 ** 1000)
+    assert sign == 1
+    assert basis == "USDG"
+
+
+def test_quote_price_usdg_as_currency0_returns_reciprocal():
+    price, sign, basis = lpa.quote_price(1000, _USDG_WORD, _OTHER_WORD, 18, 18)
+    assert price == pytest.approx(1.0001 ** -1000)
+    assert sign == -1
+    assert basis == "USDG"
+    assert lpa.quote_price(1000, _OTHER_WORD, _USDG_WORD, 18, 18)[0] == pytest.approx(1 / price)
+
+
+def test_quote_price_applies_decimal_difference():
+    price, _, _ = lpa.quote_price(0, _OTHER_WORD, _USDG_WORD, 6, 18)
+    assert price == pytest.approx(1e-12)
+
+
+def test_quote_price_without_usdg_reports_no_basis():
+    price, sign, basis = lpa.quote_price(0, "0" * 24 + "aa" * 20, "0" * 24 + "bb" * 20, 18, 18)
+    assert basis is None
+    assert sign == 1
+    assert price == pytest.approx(1.0)
 
 
 def _v4_rule(**over):
     base = {
         "id": 1, "kind": "evm_v4", "chain": "robinhood",
-        "pool_address": "0x" + "ab" * 32, "pool_name": "ETH/DINO",
-        "token_id": 1502321, "lower_bin_id": 141060, "upper_bin_id": 146880,
-        "entry_tick": 140000, "floor_price": 1.33614e+06,
+        "pool_address": "0x" + "ab" * 32, "pool_name": "HUGCOIN/USDG",
+        "price_basis": "USDG", "token_id": 1642591,
+        "lower_bin_id": -346440, "upper_bin_id": -339600,
+        "floor_price": 0.0009016836685, "entry_price": 4.875510203e-06,
         "target_mode": "price_pct", "target_pct": 10.0,
         "enable_target_alert": 1, "enable_floor_alert": 1, "rearm": 1,
         "target_alerted": 0, "floor_alerted": 0,
@@ -607,32 +636,35 @@ def _v4_rule(**over):
     return base
 
 
-def test_evaluate_evm_v4_floor_fires_only_below_tick_lower():
-    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_tick": 141059})["floor"] is True
-    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_tick": 141060})["floor"] is False
-    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_tick": 150000})["floor"] is False
+def test_evaluate_evm_v4_floor_fires_only_below_floor_price():
+    floor = 0.0009016836685
+    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_price": floor * 0.9})["floor"] is True
+    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_price": floor})["floor"] is False
+    assert lpa.evaluate(_v4_rule(target_pct=None), {"active_price": floor * 1.1})["floor"] is False
 
 
-def test_evaluate_evm_v4_target_uses_tick_delta():
-    need = lpa.tick_delta_for_pct(10.0)
-    rule = _v4_rule(entry_tick=140000)
-    assert lpa.evaluate(rule, {"active_tick": 140000 + int(need) + 1})["target"] is True
-    assert lpa.evaluate(rule, {"active_tick": 140000 + int(need) - 2})["target"] is False
+def test_evaluate_evm_v4_target_compares_price_to_entry():
+    rule = _v4_rule(entry_price=100.0, floor_price=1.0)
+    assert lpa.evaluate(rule, {"active_price": 110.0})["target"] is True
+    assert lpa.evaluate(rule, {"active_price": 109.99})["target"] is False
 
 
 def test_evaluate_evm_v4_skips_disabled_and_missing():
-    assert lpa.evaluate(_v4_rule(enable_floor_alert=0), {"active_tick": 1})["floor"] is False
-    assert lpa.evaluate(_v4_rule(lower_bin_id=None), {"active_tick": 1})["floor"] is False
-    assert lpa.evaluate(_v4_rule(enable_target_alert=0), {"active_tick": 999999})["target"] is False
-    assert lpa.evaluate(_v4_rule(entry_tick=None), {"active_tick": 999999})["target"] is False
+    assert lpa.evaluate(_v4_rule(enable_floor_alert=0), {"active_price": 1e-9})["floor"] is False
+    assert lpa.evaluate(_v4_rule(floor_price=None), {"active_price": 1e-9})["floor"] is False
+    assert lpa.evaluate(_v4_rule(enable_target_alert=0), {"active_price": 1e9})["target"] is False
+    assert lpa.evaluate(_v4_rule(entry_price=None), {"active_price": 1e9})["target"] is False
+    assert lpa.evaluate(_v4_rule(entry_price=0), {"active_price": 1e9})["target"] is False
     assert lpa.evaluate(_v4_rule(), {}) == {"target": False, "floor": False}
 
 
-def test_needs_rearm_evm_v4_only_after_tick_recovers():
-    assert lpa.needs_rearm(_v4_rule(floor_alerted=1), {"active_tick": 141060}) is True
-    assert lpa.needs_rearm(_v4_rule(floor_alerted=1), {"active_tick": 141059}) is False
-    assert lpa.needs_rearm(_v4_rule(floor_alerted=0), {"active_tick": 141060}) is False
-    assert lpa.needs_rearm(_v4_rule(floor_alerted=1, rearm=0), {"active_tick": 141060}) is False
+def test_needs_rearm_evm_v4_only_after_price_recovers():
+    floor = 0.0009016836685
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=1), {"active_price": floor * 1.01}) is True
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=1), {"active_price": floor * 0.99}) is False
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=0), {"active_price": floor * 2}) is False
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=1, rearm=0), {"active_price": floor * 2}) is False
+    assert lpa.needs_rearm(_v4_rule(floor_alerted=1), {}) is False
 
 
 @patch("lp_position_alert.fetch_evm_v4_positions")
@@ -659,18 +691,18 @@ def test_preview_evm_wallet_rejects_malformed_address():
         assert "0x" in out["error"]
 
 
-def test_build_message_evm_v4_reports_ticks_and_token_id():
-    msg = lpa.build_message(_v4_rule(), {"active_tick": 141000},
-                            ["floor"], {"name": "ETH/DINO"})
+def test_build_message_evm_v4_reports_prices_and_token_id():
+    msg = lpa.build_message(_v4_rule(), {"active_tick": -398643, "active_price": 4.87e-6},
+                            ["floor"], {"name": "HUGCOIN/USDG"})
     assert "跌穿区间下界" in msg
-    assert "141060" in msg
-    assert "141000" in msg
-    assert "1502321" in msg
+    assert "HUGCOIN/USDG" in msg
+    assert "USDG 计价" in msg
+    assert "1642591" in msg
 
 
 def test_build_message_evm_v4_target_reports_pct():
-    msg = lpa.build_message(_v4_rule(), {"active_tick": 150000},
-                            ["target"], {"name": "ETH/DINO"})
+    msg = lpa.build_message(_v4_rule(), {"active_tick": 150000, "active_price": 97.51e-6},
+                            ["target"], {"name": "HUGCOIN/USDG"})
     assert "盈利达标" in msg
     assert "10.00" in msg
 
@@ -678,7 +710,7 @@ def test_build_message_evm_v4_target_reports_pct():
 @patch("lp_position_alert.clear_alert_flag")
 @patch("lp_position_alert._cur_evm_v4")
 def test_check_rule_evm_v4_fires_floor_without_units_guard(mock_cur, mock_clear):
-    mock_cur.return_value = ({"active_tick": 141000, "active_price": None,
+    mock_cur.return_value = ({"active_tick": -398643, "active_price": 4.87e-6,
                               "pnl_pct": None, "price": None}, "open")
     res = lpa.check_rule(_v4_rule())
     assert "floor" in res["fired"]
