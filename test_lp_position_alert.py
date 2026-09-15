@@ -321,3 +321,155 @@ def test_fetch_pool_floor_from_ohlcv(mock_requests):
 def test_http_get_json_returns_none_on_network_exception(mock_requests):
     mock_requests.get.side_effect = RuntimeError("boom")
     assert lpa.http_get_json("https://example.invalid") is None
+
+
+def _db_rule(**over):
+    base = {
+        "id": 1, "kind": "dlmm", "chain": "sol",
+        "pool_address": "POOL1", "wallet": "WALLET1", "position_address": "POS1",
+        "pool_name": "PUMP-SOL", "token_x_symbol": "PUMP", "token_y_symbol": "SOL",
+        "min_price": 1.5e-05, "max_price": 2.5e-05, "floor_price": 1.5e-05,
+        "target_mode": "pnl_pct", "target_pct": 10.0, "entry_price": None,
+        "enable_target_alert": 1, "enable_floor_alert": 1, "rearm": 1,
+        "target_alerted": 0, "floor_alerted": 0, "status": "open",
+    }
+    base.update(over)
+    return base
+
+
+@patch("lp_position_alert.fetch_meteora_pool")
+@patch("lp_position_alert.send_feishu_msg")
+@patch("lp_position_alert.update_runtime")
+@patch("lp_position_alert.mark_alerted")
+@patch("lp_position_alert.clear_alert_flag")
+@patch("lp_position_alert.set_status")
+@patch("lp_position_alert.fetch_meteora_positions")
+def test_run_once_dlmm_fires_target_and_floor_independently(
+        mock_pos, mock_status, mock_clear, mock_mark, mock_update, mock_send, mock_pool):
+    mock_pos.return_value = [{
+        "position_address": "POS1", "min_price": 1.5e-05, "max_price": 2.5e-05,
+        "lower_bin_id": 1, "upper_bin_id": 2, "pnl_pct": 25.0,
+        "active_price": 1.0e-05, "is_out_of_range": True, "is_closed": False,
+    }]
+    mock_pool.return_value = {"name": "PUMP-SOL", "current_price": 1.0e-05}
+    with patch("lp_position_alert.load_rules", return_value=[_db_rule()]):
+        lpa.run_once()
+
+    assert mock_send.call_count == 1, "两个条件都触发时应合成一条消息，而不是两条"
+    msg = mock_send.call_args[0][1]
+    assert "盈利" in msg and "跌穿" in msg
+    marked = {c[0][1] for c in mock_mark.call_args_list}
+    assert marked == {"target_alerted", "floor_alerted"}, "两个标记位必须各自落库"
+
+
+@patch("lp_position_alert.fetch_meteora_pool")
+@patch("lp_position_alert.send_feishu_msg")
+@patch("lp_position_alert.update_runtime")
+@patch("lp_position_alert.mark_alerted")
+@patch("lp_position_alert.clear_alert_flag")
+@patch("lp_position_alert.set_status")
+@patch("lp_position_alert.fetch_meteora_positions")
+def test_run_once_dlmm_marks_closed_position(
+        mock_pos, mock_status, mock_clear, mock_mark, mock_update, mock_send, mock_pool):
+    mock_pos.return_value = [{
+        "position_address": "POS1", "min_price": None, "max_price": None,
+        "lower_bin_id": None, "upper_bin_id": None, "pnl_pct": None,
+        "active_price": None, "is_out_of_range": None, "is_closed": True,
+    }]
+    mock_pool.return_value = {"name": "PUMP-SOL"}
+    with patch("lp_position_alert.load_rules", return_value=[_db_rule()]):
+        lpa.run_once()
+
+    assert mock_status.call_args[0][1] == lpa.STATUS_CLOSED
+    assert mock_send.call_count == 1
+    assert "已关闭" in mock_send.call_args[0][1]
+
+
+@patch("lp_position_alert.fetch_meteora_pool")
+@patch("lp_position_alert.send_feishu_msg")
+@patch("lp_position_alert.update_runtime")
+@patch("lp_position_alert.mark_alerted")
+@patch("lp_position_alert.clear_alert_flag")
+@patch("lp_position_alert.set_status")
+@patch("lp_position_alert.fetch_meteora_positions")
+def test_run_once_never_alerts_when_fetch_fails(
+        mock_pos, mock_status, mock_clear, mock_mark, mock_update, mock_send, mock_pool):
+    mock_pos.return_value = None
+    with patch("lp_position_alert.load_rules", return_value=[_db_rule()]):
+        lpa.run_once()
+    assert mock_send.call_count == 0, "取数失败绝不能告警"
+    assert mock_status.call_args[0][1] == lpa.STATUS_ERROR
+
+
+@patch("lp_position_alert.fetch_dexscreener_pair")
+@patch("lp_position_alert.send_feishu_msg")
+@patch("lp_position_alert.update_runtime")
+@patch("lp_position_alert.mark_alerted")
+@patch("lp_position_alert.clear_alert_flag")
+@patch("lp_position_alert.set_status")
+def test_run_once_pool_price_fires_price_target(
+        mock_status, mock_clear, mock_mark, mock_update, mock_send, mock_pair):
+    mock_pair.return_value = {"price": 110.0, "base_symbol": "AAPL", "quote_symbol": "USDG",
+                              "liquidity_usd": 1.0, "pair_created_at": 1}
+    rule = _db_rule(kind="pool_price", chain="robinhood", wallet=None,
+                    position_address=None, target_mode="price_pct",
+                    target_pct=10.0, entry_price=100.0, floor_price=50.0)
+    with patch("lp_position_alert.load_rules", return_value=[rule]):
+        lpa.run_once()
+    assert mock_send.call_count == 1
+    assert mock_mark.call_args[0][1] == "target_alerted"
+
+
+@patch("lp_position_alert.fetch_meteora_pool")
+@patch("lp_position_alert.send_feishu_msg")
+@patch("lp_position_alert.update_runtime")
+@patch("lp_position_alert.mark_alerted")
+@patch("lp_position_alert.clear_alert_flag")
+@patch("lp_position_alert.set_status")
+@patch("lp_position_alert.fetch_meteora_positions")
+def test_run_once_rearms_floor_after_recovery(
+        mock_pos, mock_status, mock_clear, mock_mark, mock_update, mock_send, mock_pool):
+    mock_pos.return_value = [{
+        "position_address": "POS1", "min_price": 1.5e-05, "max_price": 2.5e-05,
+        "lower_bin_id": 1, "upper_bin_id": 2, "pnl_pct": 0.0,
+        "active_price": 3.0e-05, "is_out_of_range": False, "is_closed": False,
+    }]
+    mock_pool.return_value = {"name": "PUMP-SOL"}
+    with patch("lp_position_alert.load_rules",
+               return_value=[_db_rule(floor_alerted=1, target_pct=None)]):
+        lpa.run_once()
+    assert mock_clear.call_args[0][1] == "floor_alerted"
+    assert mock_send.call_count == 0, "价格回升不是告警，只是重置标记"
+
+
+@patch("lp_position_alert.fetch_meteora_pool")
+@patch("lp_position_alert.send_feishu_msg")
+@patch("lp_position_alert.update_runtime")
+@patch("lp_position_alert.mark_alerted")
+@patch("lp_position_alert.clear_alert_flag")
+@patch("lp_position_alert.set_status")
+@patch("lp_position_alert.fetch_meteora_positions")
+def test_run_once_dlmm_suppresses_floor_on_unit_mismatch(
+        mock_pos, mock_status, mock_clear, mock_mark, mock_update, mock_send, mock_pool):
+    mock_pos.return_value = [{
+        "position_address": "POS1", "min_price": 1.5e-05, "max_price": 2.5e-05,
+        "lower_bin_id": 1, "upper_bin_id": 2, "pnl_pct": 0.0,
+        "active_price": 28012.0, "is_out_of_range": True, "is_closed": False,
+    }]
+    mock_pool.return_value = {"name": "PUMP-SOL", "current_price": 3.56e-05}
+    with patch("lp_position_alert.load_rules",
+               return_value=[_db_rule(target_pct=None, floor_price=1.5e-05)]):
+        lpa.run_once()
+    assert mock_send.call_count == 0, "单位不一致必须拒绝判定，不能误报跌穿"
+    assert mock_mark.call_count == 0
+
+
+def test_build_message_contains_actionable_fields():
+    rule = _db_rule()
+    cur = {"pnl_pct": 25.0, "active_price": 1.0e-05, "min_price": 1.5e-05,
+           "max_price": 2.5e-05, "price": None}
+    msg = lpa.build_message(rule, cur, ["target", "floor"], {"name": "PUMP-SOL"})
+    assert "PUMP-SOL" in msg
+    assert "POS1" in msg
+    assert "25.00" in msg
+    assert "meteora" in msg.lower()

@@ -378,3 +378,192 @@ def fetch_pool_floor(chain, pool_address):
         return None
     attrs = (data.get("data") or {}).get("attributes") or {}
     return floor_from_ohlcv(attrs.get("ohlcv_list") or [])
+
+
+def _cur_dlmm(rule):
+    positions = fetch_meteora_positions(rule["pool_address"], rule["wallet"])
+    if positions is None:
+        return None, STATUS_ERROR
+    for pos in positions:
+        if pos.get("position_address") == rule.get("position_address"):
+            if pos.get("is_closed"):
+                return None, STATUS_CLOSED
+            return pos, STATUS_OPEN
+    return None, STATUS_CLOSED
+
+
+def _cur_pool_price(rule):
+    pair = fetch_dexscreener_pair(rule["chain"], rule["pool_address"])
+    if pair is None or pair.get("price") is None:
+        return None, STATUS_ERROR
+    return pair, STATUS_OPEN
+
+
+def build_message(rule, cur, fired, pool_info):
+    name = (pool_info or {}).get("name") or rule.get("pool_name") or rule["pool_address"]
+    lines = []
+    if "target" in fired:
+        if rule.get("target_mode") == "pnl_pct":
+            lines.append(f"🎯 【盈利达标】真实持仓盈亏 {cur.get('pnl_pct'):.2f}% "
+                         f"（目标 {float(rule['target_pct']):.2f}%）")
+        else:
+            base = float(rule["entry_price"])
+            pct = (cur["price"] / base - 1) * 100 if base else 0.0
+            lines.append(f"🎯 【盈利达标】现价 {cur['price']:.10g}，较登记价 {base:.10g} "
+                         f"涨 {pct:.2f}%（目标 {float(rule['target_pct']):.2f}%）")
+    if "floor" in fired:
+        price = _current_price(rule, cur)
+        lines.append(f"🚨 【价格跌穿】现价 {price:.10g} ≤ 阈值 {float(rule['floor_price']):.10g}")
+    lines.append("")
+    lines.append(f"池子: {name} ({rule['chain']})")
+    lines.append(f"池子地址: {rule['pool_address']}")
+    if rule.get("position_address"):
+        lines.append(f"仓位地址: {rule['position_address']}")
+    if rule.get("position_address"):
+        lines.append(f"仓位区间: bin {rule.get('lower_bin_id')} ~ {rule.get('upper_bin_id')}")
+    if rule["kind"] == "dlmm":
+        lines.append(f"链接: https://app.meteora.ag/dlmm/{rule['pool_address']}")
+    else:
+        lines.append(f"链接: https://dexscreener.com/{_dexscreener_chain(rule['chain'])}/{rule['pool_address']}")
+    return "\n".join(lines)
+
+
+def check_rule(rule):
+    pool_info = None
+    if rule["kind"] == "dlmm":
+        pool_info = fetch_meteora_pool(rule["pool_address"])
+        cur, status = _cur_dlmm(rule)
+        if status == STATUS_CLOSED:
+            name = rule.get("pool_name") or rule["pool_address"]
+            return {
+                "status": STATUS_CLOSED,
+                "fired": ["closed"],
+                "cur": None,
+                "message": (f"ℹ️ 【仓位已关闭】{name}\n"
+                            f"仓位地址: {rule.get('position_address')}\n"
+                            f"该仓位已不在开放列表中，规则自动停用。"),
+            }
+    else:
+        cur, status = _cur_pool_price(rule)
+        if cur is not None:
+            pool_info = {"name": " / ".join(
+                filter(None, [cur.get("base_symbol"), cur.get("quote_symbol")]))}
+
+    if cur is None:
+        return {"status": status, "fired": [], "cur": None, "message": None}
+
+    cur = dict(cur)
+    if rule["kind"] == "dlmm":
+        cur["price"] = None
+        if not units_plausible(cur.get("active_price"),
+                               (pool_info or {}).get("current_price")):
+            print(f"⚠️ 规则 {rule['id']} 单位校验未通过: poolActivePrice="
+                  f"{cur.get('active_price')} vs pool current_price="
+                  f"{(pool_info or {}).get('current_price')}；"
+                  f"本轮跳过跌穿判定（不告警），请人工核对 minPrice 单位。")
+            rule = dict(rule)
+            rule["enable_floor_alert"] = 0
+    else:
+        cur["pnl_pct"] = None
+        cur["active_price"] = None
+
+    fired = [k for k, v in evaluate(rule, cur).items() if v]
+    if rule.get("target_alerted") and "target" in fired:
+        fired.remove("target")
+    if rule.get("floor_alerted") and "floor" in fired:
+        fired.remove("floor")
+
+    message = None
+    if fired:
+        message = build_message(rule, cur, fired, pool_info)
+
+    if needs_rearm(rule, cur):
+        clear_alert_flag(rule["id"], "floor_alerted")
+
+    return {"status": STATUS_OPEN, "fired": fired, "cur": cur, "message": message}
+
+
+RUN_TIME_FIELDS = ("min_price", "max_price", "last_pnl_pct", "last_active_price")
+
+
+def run_once():
+    rules = load_rules(enabled_only=True)
+    if not rules:
+        print("ℹ️ 没有启用的 LP 告警规则")
+        return
+
+    print(f"🔍 本轮检查 {len(rules)} 条 LP 告警规则 ...")
+    ok = fail = 0
+    for rule in rules:
+        try:
+            result = check_rule(rule)
+        except Exception:
+            print(f"❌ 规则 {rule['id']} 检查异常")
+            traceback.print_exc()
+            fail += 1
+            continue
+
+        cur = result["cur"]
+        if result["status"] == STATUS_ERROR:
+            print(f"⚠️ 规则 {rule['id']} 取数失败，跳过（不告警）")
+            set_status(rule["id"], STATUS_ERROR)
+            fail += 1
+            continue
+
+        ok += 1
+        values = {"status": result["status"]}
+        if cur:
+            if cur.get("min_price") is not None:
+                values["min_price"] = cur["min_price"]
+            if cur.get("max_price") is not None:
+                values["max_price"] = cur["max_price"]
+            values["last_pnl_pct"] = cur.get("pnl_pct")
+            values["last_active_price"] = _current_price(rule, cur)
+            if cur.get("is_out_of_range") is not None:
+                values["is_out_of_range"] = 1 if cur["is_out_of_range"] else 0
+        update_runtime(rule["id"], values)
+
+        if result["fired"]:
+            print(f"🚨 规则 {rule['id']} 触发: {result['fired']}")
+            text = result["message"]
+            if text:
+                send_feishu_msg(FEISHU_WEBHOOK, text)
+            for name in ("target", "floor"):
+                if name in result["fired"]:
+                    mark_alerted(rule["id"], f"{name}_alerted")
+            if "closed" in result["fired"]:
+                set_status(rule["id"], STATUS_CLOSED)
+                set_enabled(rule["id"], False)
+
+    print(f"📊 本轮完成: 成功 {ok}，失败 {fail}")
+
+
+def run_loop(interval):
+    print(f"🔁 常驻监控模式: 每 {interval} 秒检查一次 (Ctrl+C 退出)")
+    while True:
+        try:
+            run_once()
+        except KeyboardInterrupt:
+            print("\n👋 已退出常驻监控")
+            break
+        except Exception:
+            traceback.print_exc()
+        time.sleep(interval)
+
+
+def main():
+    ensure_table()
+    args = sys.argv[1:]
+    if "--loop" in args:
+        interval = DEFAULT_INTERVAL
+        if "--interval" in args:
+            idx = args.index("--interval")
+            if len(args) > idx + 1:
+                interval = int(args[idx + 1])
+        run_loop(interval)
+    else:
+        run_once()
+
+
+if __name__ == "__main__":
+    main()
