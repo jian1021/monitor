@@ -19,6 +19,12 @@ if FEISHU_WEBHOOK:
 else:
     st.warning("⚠️ 未配置 FEISHU_WEBHOOK，告警仅打印到控制台")
 
+with st.expander("🔍 配置诊断（部署排查用，只显示键名与来源，不显示任何值）"):
+    import config as _cfg
+    for _name in ("FEISHU_WEBHOOK", "LIBSQL_URL", "LIBSQL_TOKEN", "ADMIN_USER"):
+        st.write(f"`{_name}` → {_cfg.setting_source(_name)}")
+    st.write("st.secrets 中的键名：", _cfg.streamlit_secret_keys())
+
 if not lpa.ensure_table():
     st.error("❌ 初始化 lp_position_alert 表失败，请检查 Turso 凭据。")
     st.stop()

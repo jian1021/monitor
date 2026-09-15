@@ -26,6 +26,22 @@ def _setting(name, default=""):
     return value if value else _streamlit_secret(name, default)
 
 
+def setting_source(name):
+    if os.getenv(name):
+        return "环境变量 / .env"
+    if _streamlit_secret(name):
+        return "st.secrets"
+    return "未配置"
+
+
+def streamlit_secret_keys():
+    try:
+        import streamlit as st
+        return sorted(st.secrets.keys())
+    except Exception as exc:
+        return [f"<无法读取 st.secrets: {type(exc).__name__}>"]
+
+
 # ========== 数据库配置 ==========
 LIBSQL_URL = _setting("LIBSQL_URL")
 LIBSQL_TOKEN = _setting("LIBSQL_TOKEN")
