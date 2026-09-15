@@ -206,7 +206,7 @@ view = pd.DataFrame([{
     ]) or "-",
 } for r in rules])
 st.dataframe(view, use_container_width=True)
-
+ 
 st.caption("操作")
 for r in rules:
     o1, o2, o3, o4 = st.columns([1, 1, 1, 3])
