@@ -473,3 +473,42 @@ def test_build_message_contains_actionable_fields():
     assert "POS1" in msg
     assert "25.00" in msg
     assert "meteora" in msg.lower()
+
+
+@patch("lp_position_alert.fetch_meteora_positions")
+@patch("lp_position_alert.fetch_meteora_pool")
+def test_preview_dlmm_reports_bad_pool(mock_pool, mock_pos):
+    mock_pool.return_value = None
+    out = lpa.preview_dlmm("BADPOOL", "WALLET1")
+    assert out["ok"] is False
+    assert "连接失败" in out["error"]
+    assert out["pool"] is None
+    mock_pos.assert_not_called()
+
+
+@patch("lp_position_alert.fetch_meteora_positions")
+@patch("lp_position_alert.fetch_meteora_pool")
+def test_preview_dlmm_reports_no_positions(mock_pool, mock_pos):
+    mock_pool.return_value = {"name": "PUMP-SOL", "current_price": 1.0}
+    mock_pos.return_value = []
+    out = lpa.preview_dlmm("POOL1", "WALLET1")
+    assert out["ok"] is False
+    assert "没有开放仓位" in out["error"]
+    assert out["pool"]["name"] == "PUMP-SOL"
+
+
+@patch("lp_position_alert.fetch_meteora_positions")
+@patch("lp_position_alert.fetch_meteora_pool")
+def test_preview_dlmm_reports_positions_on_success(mock_pool, mock_pos):
+    mock_pool.return_value = {"name": "PUMP-SOL", "current_price": 1.0,
+                              "token_x_symbol": "PUMP", "token_y_symbol": "SOL",
+                              "tvl": 2.0, "is_blacklisted": False}
+    mock_pos.return_value = [{"position_address": "POS1", "min_price": 1.5e-05,
+                              "max_price": 2.5e-05, "lower_bin_id": 1,
+                              "upper_bin_id": 2, "pnl_pct": 5.0,
+                              "active_price": 2.0e-05, "is_out_of_range": False,
+                              "is_closed": False}]
+    out = lpa.preview_dlmm("POOL1", "WALLET1")
+    assert out["ok"] is True
+    assert out["error"] is None
+    assert len(out["positions"]) == 1

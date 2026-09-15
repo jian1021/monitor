@@ -567,3 +567,22 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+CHAIN_OPTIONS = ["sol"]
+POOL_PRICE_CHAINS = ["robinhood", "bsc", "base", "eth"]
+
+
+def preview_dlmm(pool_address, wallet):
+    pool = fetch_meteora_pool(pool_address)
+    if not pool:
+        return {"ok": False, "error": "❌ 连接失败：Meteora 未找到该池子地址，请核对池子地址是否正确。",
+                "pool": None, "positions": []}
+    positions = fetch_meteora_positions(pool_address, wallet)
+    if positions is None:
+        return {"ok": False, "error": "❌ 连接成功，但读取仓位失败（接口异常），请稍后重试。",
+                "pool": pool, "positions": []}
+    if not positions:
+        return {"ok": False, "error": "⚠️ 该钱包在此池没有开放仓位。请确认钱包地址，或该仓位是否已关闭。",
+                "pool": pool, "positions": []}
+    return {"ok": True, "error": None, "pool": pool, "positions": positions}
