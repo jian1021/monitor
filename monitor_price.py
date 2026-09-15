@@ -153,6 +153,20 @@ def update_rule_price(rule_id: int, price: float):
         client.close()
 
 
+def update_rule_symbol(rule_id: int, symbol: str):
+    """回写代币符号（规则建立时留空则由每轮取数自动补全）"""
+    client = get_db_client()
+    if not client:
+        return
+    try:
+        client.execute(
+            "UPDATE price_alert SET symbol = ? WHERE id = ?", [symbol, rule_id])
+    except Exception as e:
+        print(f"❌ 回写代币符号失败 (id={rule_id}): {e}")
+    finally:
+        client.close()
+
+
 def mark_alerted(rule_id: int):
     """标记规则已触发（避免同一条目标价重复告警）"""
     client = get_db_client()
@@ -191,6 +205,9 @@ def run_once():
             fail += 1
             continue
         ok += 1
+        if not rule["symbol"] and symbol:
+            update_rule_symbol(rule["id"], symbol)
+            print(f"🏷️ 已自动补全代币符号: {symbol}")
         sym = rule["symbol"] or symbol or addr[:8] + "..."
 
         print(f"✅ [{sym}] {chain} 现价: {price}")

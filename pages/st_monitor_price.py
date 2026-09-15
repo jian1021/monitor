@@ -214,7 +214,7 @@ with st.expander("➕ 新增价格监控规则", expanded=True):
                 format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
                 horizontal=True,
             )
-            new_symbol = st.text_input("代币符号 (可选)", placeholder="例如: USDC")
+            new_symbol = st.text_input("代币符号 (留空则自动获取)", placeholder="留空即自动识别")
 
         submitted = st.form_submit_button("✅ 添加规则", type="primary")
         if submitted:
@@ -223,8 +223,15 @@ with st.expander("➕ 新增价格监控规则", expanded=True):
             elif new_target <= 0:
                 st.warning("⚠️ 目标价格必须大于 0")
             else:
-                if add_rule(new_address, new_chain, new_target, new_direction, new_symbol):
-                    st.success(f"✅ 已添加规则: {new_address[:10]}... ({CHAIN_LABELS[new_chain]}) 目标 {new_target}")
+                symbol = new_symbol.strip()
+                if not symbol:
+                    with st.spinner("正在自动获取代币符号 ..."):
+                        info, _source = fetch_token_info(new_chain, new_address.strip())
+                        symbol = str((info or {}).get("symbol") or "").strip()
+                if add_rule(new_address, new_chain, new_target, new_direction, symbol):
+                    st.success(f"✅ 已添加规则: {new_address[:10]}... "
+                               f"({CHAIN_LABELS[new_chain]}) 符号 {symbol or '未识别'} "
+                               f"目标 {new_target}")
                     st.rerun()
 
 st.divider()
