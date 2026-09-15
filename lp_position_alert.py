@@ -833,54 +833,183 @@ def quote_price(tick, c0_word, c1_word, dec0, dec1):
     return (TICK_BASE ** tick) * (10 ** (dec0 - dec1)), 1, None
 
 
+MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11"
+SEL_AGGREGATE3 = "0x82ad56cb"
+
+
+def _pad32(data):
+    return data + b"\x00" * ((32 - len(data) % 32) % 32)
+
+
+def encode_aggregate3(calls):
+    """calls: [(目标地址, calldata bytes)] -> Multicall3.aggregate3 的 eth_call data."""
+    blocks = []
+    for target, data in calls:
+        blocks.append(int(target, 16).to_bytes(32, "big")
+                      + (1).to_bytes(32, "big")
+                      + (96).to_bytes(32, "big")
+                      + len(data).to_bytes(32, "big")
+                      + _pad32(data))
+    offsets, cursor = [], 32 * len(blocks)
+    for block in blocks:
+        offsets.append(cursor)
+        cursor += len(block)
+    array = len(blocks).to_bytes(32, "big")
+    array += b"".join(offset.to_bytes(32, "big") for offset in offsets)
+    array += b"".join(blocks)
+    return SEL_AGGREGATE3 + (32).to_bytes(32, "big").hex() + array.hex()
+
+
+def decode_aggregate3(result_hex):
+    """(bool,bytes)[] -> [(success, bytes)]；返回长度不足的条目视为失败."""
+    body = bytes.fromhex(result_hex[2:] if result_hex.startswith("0x") else result_hex)
+    arg_offset = int.from_bytes(body[0:32], "big")
+    count = int.from_bytes(body[arg_offset:arg_offset + 32], "big")
+    table = arg_offset + 32
+    out = []
+    for i in range(count):
+        rel = int.from_bytes(body[table + i * 32:table + (i + 1) * 32], "big")
+        pos = table + rel
+        success = int.from_bytes(body[pos:pos + 32], "big") == 1
+        bytes_rel = int.from_bytes(body[pos + 32:pos + 64], "big")
+        bpos = pos + bytes_rel
+        length = int.from_bytes(body[bpos:bpos + 32], "big")
+        out.append((success, body[bpos + 32:bpos + 32 + length]))
+    return out
+
+
+def call_data(selector_hex, *values):
+    data = bytes.fromhex(selector_hex[2:])
+    for value in values:
+        if isinstance(value, str):
+            raw = value[2:] if value.startswith("0x") else value
+            data += bytes.fromhex(raw.rjust(64, "0"))
+        else:
+            data += int(value).to_bytes(32, "big")
+    return data
+
+
+def _multicall(calls):
+    if not calls:
+        return []
+    result = _evm_call(MULTICALL3, encode_aggregate3(calls))
+    if not result:
+        return None
+    return decode_aggregate3(result)
+
+
+def _uint_from(entry):
+    success, ret = entry
+    if not success or len(ret) < 32:
+        return None
+    return int.from_bytes(ret[:32], "big")
+
+
 def fetch_evm_v4_positions(wallet):
     wallet = (wallet or "").strip()
     if not wallet.lower().startswith("0x") or len(wallet) != 42:
         return None
-    topic_to_wallet = "0x" + "0" * 24 + wallet[2:].lower()
     logs = _evm_rpc("eth_getLogs", [{
         "address": V4_POSITION_MANAGER,
-        "topics": [TRANSFER_TOPIC, None, topic_to_wallet],
+        "topics": [TRANSFER_TOPIC, None, "0x" + "0" * 24 + wallet[2:].lower()],
         "fromBlock": "0x0",
         "toBlock": "latest",
     }], timeout=90)
     if logs is None:
         return None
-
     token_ids = sorted({int(entry["topics"][3], 16) for entry in logs})
+    if not token_ids:
+        return []
 
-    token_cache = {}
-    tick_cache = {}
-    positions = []
+    probe = []
     for token_id in token_ids:
-        liquidity = _evm_call(V4_POSITION_MANAGER, SEL_POSITION_LIQUIDITY + _pad_uint(token_id))
-        liq = int(liquidity, 16) if liquidity and len(liquidity) > 2 else 0
-        if liq <= 0:
-            continue
+        probe.append((V4_POSITION_MANAGER, call_data(SEL_OWNER_OF, token_id)))
+        probe.append((V4_POSITION_MANAGER, call_data(SEL_POSITION_LIQUIDITY, token_id)))
+    decoded = _multicall(probe)
+    if decoded is None or len(decoded) != len(probe):
+        return None
 
-        owner = _evm_call(V4_POSITION_MANAGER, SEL_OWNER_OF + _pad_uint(token_id))
-        if not owner or _hex_address(_word(owner, 0)).lower() != wallet.lower():
+    alive = []
+    for index, token_id in enumerate(token_ids):
+        success, raw = decoded[2 * index]
+        owner = "0x" + raw[12:32].hex() if success and len(raw) >= 32 else None
+        if not owner or owner.lower() != wallet.lower():
             continue
+        liquidity = _uint_from(decoded[2 * index + 1])
+        if not liquidity:
+            continue
+        alive.append((token_id, liquidity))
+    if not alive:
+        return []
 
-        info = _evm_call(V4_POSITION_MANAGER, SEL_POOL_AND_POSITION_INFO + _pad_uint(token_id))
-        if not info:
+    infos = _multicall([(V4_POSITION_MANAGER, call_data(SEL_POOL_AND_POSITION_INFO, tid))
+                        for tid, _ in alive])
+    if infos is None or len(infos) != len(alive):
+        return None
+
+    parsed = []
+    for (token_id, liquidity), entry in zip(alive, infos):
+        success, raw = entry
+        if not success or len(raw) < 192:
             continue
-        c0, c1 = _word(info, 0), _word(info, 1)
-        fee, spacing, hooks = int(_word(info, 2), 16), int(_word(info, 3), 16), _word(info, 4)
-        packed = int(_word(info, 5), 16)
+        hexstr = "0x" + raw.hex()
+        c0, c1 = _word(hexstr, 0), _word(hexstr, 1)
+        fee, spacing, hooks = (int(_word(hexstr, 2), 16), int(_word(hexstr, 3), 16),
+                               _word(hexstr, 4))
+        packed = int(_word(hexstr, 5), 16)
         tick_lower = _signed24((packed >> INFO_TICK_SHIFT) & 0xFFFFFF)
         tick_upper = _signed24((packed >> (INFO_TICK_SHIFT + 24)) & 0xFFFFFF)
         if tick_lower >= tick_upper:
             continue
+        parsed.append((token_id, liquidity, c0, c1, fee, spacing, hooks,
+                       tick_lower, tick_upper))
+    if not parsed:
+        return []
 
-        pool_id = _pool_id(c0, c1, fee, spacing, hooks)
-        if pool_id not in tick_cache:
-            slot = _evm_call(V4_STATE_VIEW, SEL_GET_SLOT0 + pool_id)
-            tick_cache[pool_id] = _signed24(_word(slot, 1)) if slot else None
-        active_tick = tick_cache[pool_id]
+    pool_ids = []
+    for item in parsed:
+        pid = _pool_id(item[2], item[3], item[4], item[5], item[6])
+        if pid not in pool_ids:
+            pool_ids.append(pid)
+    slots = _multicall([(V4_STATE_VIEW, call_data(SEL_GET_SLOT0, pid)) for pid in pool_ids])
+    if slots is None or len(slots) != len(pool_ids):
+        return None
+    active_ticks = {}
+    for pid, entry in zip(pool_ids, slots):
+        success, raw = entry
+        active_ticks[pid] = _signed24("0x" + raw[32:64].hex()) if success and len(raw) >= 64 else None
 
-        symbol0, dec0 = _token_meta(c0, token_cache)
-        symbol1, dec1 = _token_meta(c1, token_cache)
+    token_addresses = []
+    for item in parsed:
+        for word in (item[2], item[3]):
+            address = _hex_address(word)
+            if address not in token_addresses:
+                token_addresses.append(address)
+    meta = {}
+    queried = [a for a in token_addresses if int(a, 16) != 0]
+    meta_calls = []
+    for address in queried:
+        meta_calls.append((address, call_data(SEL_DECIMALS)))
+        meta_calls.append((address, call_data(SEL_SYMBOL)))
+    if meta_calls:
+        results = _multicall(meta_calls)
+        if results is None or len(results) != len(meta_calls):
+            return None
+        for index, address in enumerate(queried):
+            decimals = _uint_from(results[2 * index]) or 18
+            symbol_ok, symbol_raw = results[2 * index + 1]
+            symbol = (_decode_abi_string("0x" + symbol_raw.hex())
+                      if symbol_ok and symbol_raw else None)
+            meta[address] = (symbol or address[:10], decimals)
+    for address in token_addresses:
+        if int(address, 16) == 0:
+            meta[address] = ("ETH", 18)
+
+    positions = []
+    for token_id, liquidity, c0, c1, fee, spacing, hooks, tick_lower, tick_upper in parsed:
+        symbol0, dec0 = meta[_hex_address(c0)]
+        symbol1, dec1 = meta[_hex_address(c1)]
+        active_tick = active_ticks.get(_pool_id(c0, c1, fee, spacing, hooks))
 
         p_lower, sign, basis = quote_price(tick_lower, c0, c1, dec0, dec1)
         p_upper, _, _ = quote_price(tick_upper, c0, c1, dec0, dec1)
@@ -888,13 +1017,9 @@ def fetch_evm_v4_positions(wallet):
             tick_min, tick_max = tick_lower, tick_upper
         else:
             tick_min, tick_max = tick_upper, tick_lower
-        low_price, high_price = min(p_lower, p_upper), max(p_lower, p_upper)
-        current_price = (quote_price(active_tick, c0, c1, dec0, dec1)[0]
-                         if active_tick is not None else None)
-
         positions.append({
             "token_id": token_id,
-            "pool_id": "0x" + pool_id,
+            "pool_id": "0x" + _pool_id(c0, c1, fee, spacing, hooks),
             "pool_name": f"{symbol0}/{symbol1}",
             "token_x_symbol": symbol0,
             "token_y_symbol": symbol1,
@@ -905,12 +1030,13 @@ def fetch_evm_v4_positions(wallet):
             "tick_upper": tick_upper,
             "tick_min": tick_min,
             "tick_max": tick_max,
-            "lower_price": low_price,
-            "upper_price": high_price,
+            "lower_price": min(p_lower, p_upper),
+            "upper_price": max(p_lower, p_upper),
             "active_tick": active_tick,
-            "current_price": current_price,
+            "current_price": (quote_price(active_tick, c0, c1, dec0, dec1)[0]
+                              if active_tick is not None else None),
             "in_range": (active_tick is not None and tick_lower <= active_tick <= tick_upper),
-            "liquidity": liq,
+            "liquidity": liquidity,
         })
     return positions
 

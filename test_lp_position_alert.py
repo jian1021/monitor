@@ -619,6 +619,53 @@ def test_pool_id_is_deterministic_and_hex64():
     assert first != lpa._pool_id("00" * 32, "11" * 32, 500, 60, "00" * 32)
 
 
+def test_aggregate3_selector_is_known_value():
+    assert lpa.SEL_AGGREGATE3 == "0x82ad56cb"
+
+
+def test_encode_aggregate3_layout():
+    data = lpa.encode_aggregate3([("0x" + "11" * 20, bytes.fromhex("95d89b41"))])
+    assert data.startswith(lpa.SEL_AGGREGATE3)
+    body = bytes.fromhex(data[2:])[4:]
+    assert int.from_bytes(body[0:32], "big") == 32
+    assert int.from_bytes(body[32:64], "big") == 1
+    assert int.from_bytes(body[64:96], "big") == 32
+    assert int.from_bytes(body[96:128], "big") == int("11" * 20, 16)
+    assert int.from_bytes(body[128:160], "big") == 1
+
+
+def test_decode_aggregate3_parses_known_payload():
+    arg_offset = (32).to_bytes(32, "big")
+    length = (1).to_bytes(32, "big")
+    offsets = (32).to_bytes(32, "big")
+    element = ((1).to_bytes(32, "big") + (64).to_bytes(32, "big")
+               + (4).to_bytes(32, "big") + bytes.fromhex("deadbeef") + b"\x00" * 28)
+    payload = "0x" + (arg_offset + length + offsets + element).hex()
+    assert lpa.decode_aggregate3(payload) == [(True, bytes.fromhex("deadbeef"))]
+
+
+def test_decode_aggregate3_marks_failed_entry():
+    arg_offset = (32).to_bytes(32, "big")
+    length = (1).to_bytes(32, "big")
+    offsets = (32).to_bytes(32, "big")
+    element = ((0).to_bytes(32, "big") + (64).to_bytes(32, "big")
+               + (0).to_bytes(32, "big"))
+    payload = "0x" + (arg_offset + length + offsets + element).hex()
+    assert lpa.decode_aggregate3(payload) == [(False, b"")]
+
+
+def test_uint_from_treats_short_or_failed_as_none():
+    assert lpa._uint_from((True, b"\x00" * 32)) == 0
+    assert lpa._uint_from((True, b"\x00" * 16)) is None
+    assert lpa._uint_from((False, b"\x00" * 32)) is None
+
+
+def test_call_data_pads_addresses_and_uints():
+    assert lpa.call_data("0x70a08231", 1).hex() == \
+        "70a08231" + "0" * 63 + "1"
+    assert lpa.call_data("0xc815641c", "0x" + "ab" * 32).hex() == "c815641c" + "ab" * 32
+
+
 _USDG_WORD = "0" * 24 + "5fc5360d0400a0fd4f2af552add042d716f1d168"
 _OTHER_WORD = "0" * 24 + "2bf78d3dc6b2222bcbfe8c712c9c33120b3058bc"
 
