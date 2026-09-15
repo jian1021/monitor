@@ -101,3 +101,122 @@ with tab_lp:
                             st.rerun()
                         else:
                             st.error("❌ 规则写入失败")
+
+
+with tab_price:
+    p1, p2 = st.columns(2)
+    px_pool = p1.text_input("池子地址 *", key="px_pool", placeholder="Uniswap 池子 / pair 地址")
+    px_chain = p2.selectbox("链", lpa.POOL_PRICE_CHAINS, key="px_chain")
+
+    if st.button("🔌 连接", type="primary", key="px_connect"):
+        if not px_pool.strip():
+            st.warning("⚠️ 请填写池子地址")
+        else:
+            with st.spinner("正在连接 ..."):
+                st.session_state["px_preview"] = lpa.preview_pool_price(
+                    px_chain, px_pool.strip())
+
+    px = st.session_state.get("px_preview")
+    if px:
+        if px["error"]:
+            st.error(px["error"])
+        if px["ok"]:
+            st.success("✅ 连接成功")
+            pair = px["pair"]
+            q1, q2, q3, q4 = st.columns(4)
+            q1.metric("交易对", f"{pair.get('base_symbol') or '-'} / {pair.get('quote_symbol') or '-'}")
+            q2.metric("现价", f"{pair['price']:.10g}")
+            q3.metric("流动性", f"{pair.get('liquidity_usd'):,.0f}"
+                      if pair.get("liquidity_usd") else "-")
+            q4.metric("建池时间",
+                      pd.to_datetime(pair["pair_created_at"], unit="ms").strftime("%Y-%m-%d")
+                      if pair.get("pair_created_at") else "-")
+
+            if st.button("⬇️ 计算建池以来最低价", key="px_floor_btn"):
+                with st.spinner("读取历史 K 线 ..."):
+                    st.session_state["px_floor"] = lpa.fetch_pool_floor(
+                        px_chain, px_pool.strip())
+                if st.session_state["px_floor"] is None:
+                    st.warning("⚠️ 取不到历史 K 线，请手动填写跌穿阈值。")
+
+            entry_price = float(pair["price"])
+            with st.form("px_add_form"):
+                g1, g2 = st.columns(2)
+                px_tgt = g1.number_input("盈利目标 %（相对登记时现价）", value=10.0,
+                                         step=1.0, key="px_tgt")
+                suggested = st.session_state.get("px_floor")
+                px_floor = g2.number_input(
+                    "跌穿阈值",
+                    value=float(suggested) if suggested else 0.0,
+                    format="%.10f", step=0.0, key="px_floor_val")
+                st.caption(f"登记时现价 {entry_price:.10g}，盈利目标价 "
+                           f"{entry_price * (100.0 + px_tgt) / 100.0:.10g}")
+
+                if st.form_submit_button("✅ 添加规则", type="primary"):
+                    if px_floor <= 0:
+                        st.warning("⚠️ 跌穿阈值必须大于 0（可点上方按钮自动填入）")
+                    else:
+                        created = lpa.add_rule({
+                            "kind": "pool_price", "chain": px_chain,
+                            "pool_address": px_pool.strip(),
+                            "wallet": None, "position_address": None,
+                            "pool_name": f"{pair.get('base_symbol')} / {pair.get('quote_symbol')}",
+                            "token_x_symbol": pair.get("base_symbol"),
+                            "token_y_symbol": pair.get("quote_symbol"),
+                            "floor_price": float(px_floor),
+                            "target_mode": "price_pct", "target_pct": float(px_tgt),
+                            "entry_price": entry_price,
+                        })
+                        if created:
+                            st.success("✅ 规则已添加")
+                            st.rerun()
+                        else:
+                            st.error("❌ 规则写入失败")
+
+st.divider()
+st.subheader("现有规则")
+
+rules = lpa.load_rules(enabled_only=False)
+if not rules:
+    st.info("ℹ️ 暂无规则，请在上方 Tab 中新增。")
+    st.stop()
+
+view = pd.DataFrame([{
+    "id": r["id"],
+    "类型": r["kind"],
+    "池子": r["pool_name"] or r["pool_address"][:10] + "...",
+    "链": r["chain"],
+    "仓位": (r["position_address"][:10] + "...") if r["position_address"] else "-",
+    "触发": "".join([
+        f"{'盈利' if r['enable_target_alert'] else ''}"
+        f"{'/' if r['enable_target_alert'] and r['enable_floor_alert'] else ''}"
+        f"{'跌穿' if r['enable_floor_alert'] else ''}"
+    ]),
+    "盈利目标%": r["target_pct"],
+    "跌穿阈值": r["floor_price"],
+    "当前值": (f"PnL {r['last_pnl_pct']:.2f}%"
+               if r["kind"] == "dlmm" and r["last_pnl_pct"] is not None
+               else (f"{r['last_active_price']:.10g}"
+                     if r["last_active_price"] is not None else "-")),
+    "状态": {"open": "🟢 监控中", "closed": "⚫ 已关闭", "error": "🔴 取数失败"}.get(r["status"], r["status"]),
+    "启用": r["enabled"],
+    "已告警": "".join([
+        "盈利" if r["target_alerted"] else "",
+        "跌穿" if r["floor_alerted"] else "",
+    ]) or "-",
+} for r in rules])
+st.dataframe(view, use_container_width=True)
+
+st.caption("操作")
+for r in rules:
+    o1, o2, o3, o4 = st.columns([1, 1, 1, 3])
+    o1.write(f"#{r['id']}")
+    if o2.button("暂停" if r["enabled"] else "启用", key=f"tg_{r['id']}"):
+        lpa.set_enabled(r["id"], not r["enabled"])
+        st.rerun()
+    if o3.button("重置告警", key=f"rs_{r['id']}"):
+        lpa.reset_alerts(r["id"])
+        st.rerun()
+    if o4.button("删除", key=f"dl_{r['id']}"):
+        lpa.delete_rule(r["id"])
+        st.rerun()

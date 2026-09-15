@@ -586,3 +586,12 @@ def preview_dlmm(pool_address, wallet):
         return {"ok": False, "error": "⚠️ 该钱包在此池没有开放仓位。请确认钱包地址，或该仓位是否已关闭。",
                 "pool": pool, "positions": []}
     return {"ok": True, "error": None, "pool": pool, "positions": positions}
+
+
+def preview_pool_price(chain, pool_address):
+    pair = fetch_dexscreener_pair(chain, pool_address)
+    if not pair or pair.get("price") is None:
+        return {"ok": False,
+                "error": "❌ 连接失败：Dexscreener 未找到该池子地址，请核对地址与所属链是否正确。",
+                "pair": None, "floor": None}
+    return {"ok": True, "error": None, "pair": pair, "floor": None}

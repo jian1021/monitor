@@ -512,3 +512,21 @@ def test_preview_dlmm_reports_positions_on_success(mock_pool, mock_pos):
     assert out["ok"] is True
     assert out["error"] is None
     assert len(out["positions"]) == 1
+
+
+@patch("lp_position_alert.fetch_dexscreener_pair")
+def test_preview_pool_price_success(mock_pair):
+    mock_pair.return_value = {"price": 5.14e-06, "base_symbol": "USDG",
+                              "quote_symbol": "USDG", "liquidity_usd": 1.0,
+                              "pair_created_at": 1}
+    out = lpa.preview_pool_price("robinhood", "0xPAIR")
+    assert out["ok"] is True
+    assert out["pair"]["price"] == pytest.approx(5.14e-06)
+
+
+@patch("lp_position_alert.fetch_dexscreener_pair")
+def test_preview_pool_price_reports_bad_address(mock_pair):
+    mock_pair.return_value = None
+    out = lpa.preview_pool_price("robinhood", "0xBAD")
+    assert out["ok"] is False
+    assert "连接失败" in out["error"]
