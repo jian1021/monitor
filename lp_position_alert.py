@@ -16,16 +16,15 @@ import traceback
 
 import requests
 
-try:
-    from Crypto.Hash import keccak
-except ImportError:
-    keccak = None
-
 from config import FEISHU_WEBHOOK
+from db import get_db_client
+from keccak_pure import keccak256
+from send_feishu_msg import send_feishu_msg
 from db import get_db_client
 from send_feishu_msg import send_feishu_msg
 
 METEORA_BASE = "https://dlmm.datapi.meteora.ag"
+VERSION = "2026-09-15.4"
 DEXSCREENER_BASE = "https://api.dexscreener.com"
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -786,14 +785,10 @@ def _hex_address(word_hex):
 
 
 def _pool_id(c0_word, c1_word, fee, spacing, hooks_word):
-    if keccak is None:
-        return None
     packed = (bytes.fromhex(c0_word) + bytes.fromhex(c1_word)
               + int(fee).to_bytes(32, "big") + int(spacing).to_bytes(32, "big")
               + bytes.fromhex(hooks_word))
-    digest = keccak.new(digest_bits=256)
-    digest.update(packed)
-    return digest.hexdigest()
+    return keccak256(packed).hex()
 
 
 def _decode_abi_string(hexstr):
@@ -840,8 +835,6 @@ def quote_price(tick, c0_word, c1_word, dec0, dec1):
 
 def fetch_evm_v4_positions(wallet):
     wallet = (wallet or "").strip()
-    if keccak is None:
-        return None
     if not wallet.lower().startswith("0x") or len(wallet) != 42:
         return None
     topic_to_wallet = "0x" + "0" * 24 + wallet[2:].lower()
@@ -926,11 +919,6 @@ def preview_evm_wallet(wallet):
     wallet = (wallet or "").strip()
     if not wallet.lower().startswith("0x") or len(wallet) != 42:
         return {"ok": False, "error": "⚠️ 请填写 Robinhood 链的 EVM 钱包地址（0x 开头、42 位）。",
-                "positions": []}
-    if keccak is None:
-        return {"ok": False,
-                "error": "❌ 服务端缺少 pycryptodome 依赖，无法读取 Uniswap v4 仓位"
-                         "（请确认 requirements.txt 中的 pycryptodome 已安装）。",
                 "positions": []}
     positions = fetch_evm_v4_positions(wallet)
     if positions is None:

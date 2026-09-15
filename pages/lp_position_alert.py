@@ -28,7 +28,8 @@ if not lpa.ensure_table():
 def cached_evm_preview(wallet):
     return lpa.preview_evm_wallet(wallet)
 
-st.caption("Solana / Meteora DLMM 读链上仓位真实区间；Robinhood 等链只做池子价格。")
+st.caption("Solana / Meteora DLMM 读链上仓位真实区间；Robinhood 只列未平仓的 Uniswap v4 仓位。"
+           f"　构建 {lpa.VERSION}")
 
 tab_lp, tab_price = st.tabs(["Solana LP 仓位", "池子价格（Robinhood 等）"])
 

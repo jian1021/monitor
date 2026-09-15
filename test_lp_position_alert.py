@@ -590,6 +590,35 @@ def test_signed24_sign_extends_twos_complement():
     assert lpa._signed24(655104) == 655104
 
 
+def test_keccak256_matches_published_vectors():
+    from keccak_pure import keccak256
+    assert keccak256(b"").hex() == \
+        "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+    assert keccak256(b"abc").hex() == \
+        "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45"
+
+
+def test_keccak256_handles_block_boundaries():
+    from keccak_pure import keccak256
+    expected = {
+        135: "34367dc248bbd832f4e3e69dfaac2f92638bd0bbd18f2912ba4ef454919cf446",
+        136: "a6c4d403279fe3e0af03729caada8374b5ca54d8065329a3ebcaeb4b60aa386e",
+        137: "d869f639c7046b4929fc92a4d988a8b22c55fbadb802c0c66ebcd484f1915f39",
+        271: "132f47effd6c8b1b299efa53fe68aece77ec8ae4eb2e294f668eec94f76001e1",
+        272: "cf7fcd4f705ee749930d19ca84561a9bf62516bd90a471545fa2f49fdc7e63c8",
+    }
+    for size, digest in expected.items():
+        assert keccak256(b"a" * size).hex() == digest, f"padding 边界 {size} 字节"
+
+
+def test_pool_id_is_deterministic_and_hex64():
+    args = ("00" * 32, "11" * 32, 3000, 60, "00" * 32)
+    first = lpa._pool_id(*args)
+    assert len(first) == 64
+    assert first == lpa._pool_id(*args)
+    assert first != lpa._pool_id("00" * 32, "11" * 32, 500, 60, "00" * 32)
+
+
 _USDG_WORD = "0" * 24 + "5fc5360d0400a0fd4f2af552add042d716f1d168"
 _OTHER_WORD = "0" * 24 + "2bf78d3dc6b2222bcbfe8c712c9c33120b3058bc"
 
