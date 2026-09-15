@@ -21,9 +21,10 @@ else:
 
 with st.expander("🔍 配置诊断（部署排查用，只显示键名与来源，不显示任何值）"):
     import config as _cfg
-    for _name in ("FEISHU_WEBHOOK", "LIBSQL_URL", "LIBSQL_TOKEN", "ADMIN_USER"):
+    for _name in ("FEISHU_WEBHOOK", "LIBSQL_URL", "LIBSQL_TOKEN", "ADMIN_USER", "ROBINHOOD_RPC"):
         st.write(f"`{_name}` → {_cfg.setting_source(_name)}")
     st.write("st.secrets 中的键名：", _cfg.streamlit_secret_keys())
+    st.caption(f"当前使用的 RPC：{lpa.EVM_RPC}")
 
 if not lpa.ensure_table():
     st.error("❌ 初始化 lp_position_alert 表失败，请检查 Turso 凭据。")

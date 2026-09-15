@@ -24,7 +24,7 @@ from db import get_db_client
 from send_feishu_msg import send_feishu_msg
 
 METEORA_BASE = "https://dlmm.datapi.meteora.ag"
-VERSION = "2026-09-15.8"
+VERSION = "2026-09-15.9"
 DEXSCREENER_BASE = "https://api.dexscreener.com"
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
