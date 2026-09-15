@@ -1,10 +1,14 @@
 # config.py
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 # ========== 仅本地开发加载 .env，云端忽略此文件 ==========
-if os.path.exists(".env"):
-    load_dotenv()
+# 用相对 __file__ 的绝对路径：否则 .env 是否被读取取决于启动时的 CWD，
+# 从仓库外启动 streamlit（如 streamlit run /path/to/index.py）会读不到配置。
+_ENV_PATH = Path(__file__).resolve().parent / ".env"
+if _ENV_PATH.exists():
+    load_dotenv(_ENV_PATH)
 
 # ========== 数据库配置 ==========
 LIBSQL_URL = os.getenv("LIBSQL_URL", "")
