@@ -619,6 +619,23 @@ def test_pool_id_is_deterministic_and_hex64():
     assert first != lpa._pool_id("00" * 32, "11" * 32, 500, 60, "00" * 32)
 
 
+def test_config_setting_prefers_env_and_falls_back_to_secrets(monkeypatch):
+    import config
+    monkeypatch.delenv("LP_ALERT_TEST_KEY", raising=False)
+    monkeypatch.setattr(config, "_streamlit_secret",
+                        lambda name, default="": "from-secrets")
+    assert config._setting("LP_ALERT_TEST_KEY") == "from-secrets"
+    monkeypatch.setenv("LP_ALERT_TEST_KEY", "from-env")
+    assert config._setting("LP_ALERT_TEST_KEY") == "from-env"
+
+
+def test_config_setting_is_safe_when_secrets_unavailable(monkeypatch):
+    import config
+    monkeypatch.delenv("LP_ALERT_TEST_KEY", raising=False)
+    monkeypatch.setattr(config, "_streamlit_secret", lambda name, default="": default)
+    assert config._setting("LP_ALERT_TEST_KEY", "fallback") == "fallback"
+
+
 def test_main_guard_placed_after_every_definition():
     import ast
     import os

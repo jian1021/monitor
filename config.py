@@ -10,16 +10,32 @@ _ENV_PATH = Path(__file__).resolve().parent / ".env"
 if _ENV_PATH.exists():
     load_dotenv(_ENV_PATH)
 
+
+def _streamlit_secret(name, default=""):
+    try:
+        import streamlit as st
+        return st.secrets.get(name, default) or default
+    except Exception:
+        return default
+
+
+def _setting(name, default=""):
+    """先读环境变量（本地 .env 与 GitHub Actions secrets 都走这条），
+    再退回 Streamlit 的 st.secrets（Streamlit Cloud 用的是这个）。"""
+    value = os.getenv(name)
+    return value if value else _streamlit_secret(name, default)
+
+
 # ========== 数据库配置 ==========
-LIBSQL_URL = os.getenv("LIBSQL_URL", "")
-LIBSQL_TOKEN = os.getenv("LIBSQL_TOKEN", "")
+LIBSQL_URL = _setting("LIBSQL_URL")
+LIBSQL_TOKEN = _setting("LIBSQL_TOKEN")
 
 # ========== 飞书告警推送 ==========
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
+FEISHU_WEBHOOK = _setting("FEISHU_WEBHOOK")
 
 # ========== Streamlit 后台管理员账号 ==========
-ADMIN_USER = os.getenv("ADMIN_USER", "admin")
-ADMIN_PASS = os.getenv("ADMIN_PASS", "123456")
+ADMIN_USER = _setting("ADMIN_USER", "admin")
+ADMIN_PASS = _setting("ADMIN_PASS", "123456")
 
 
 # ========== 可选：生产环境严格校验（建议开启） ==========

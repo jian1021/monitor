@@ -24,7 +24,7 @@ from db import get_db_client
 from send_feishu_msg import send_feishu_msg
 
 METEORA_BASE = "https://dlmm.datapi.meteora.ag"
-VERSION = "2026-09-15.5"
+VERSION = "2026-09-15.6"
 DEXSCREENER_BASE = "https://api.dexscreener.com"
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -735,24 +735,35 @@ def preview_wallet(wallet):
     return {"ok": True, "error": None, "pools": pools}
 
 
+_LAST_EVM_ERROR = ""
+
+
+def _fail(reason):
+    global _LAST_EVM_ERROR
+    _LAST_EVM_ERROR = reason
+    print(f"⚠️ EVM 失败: {reason}")
+    return None
+
+
 def _evm_rpc(method, params, timeout=45, tries=4):
     body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
     for attempt in range(tries):
         try:
             resp = requests.post(EVM_RPC, json=body, headers=HEADERS, timeout=timeout)
             if resp.status_code == 429:
+                if attempt == tries - 1:
+                    return _fail(f"{method}: HTTP 429 请求过于频繁（公共节点限流）")
                 time.sleep(2 * (attempt + 1))
                 continue
             if resp.status_code != 200:
-                print(f"⚠️ EVM HTTP {resp.status_code}: {method}")
-                return None
+                return _fail(f"{method}: HTTP {resp.status_code}")
             payload = resp.json()
             if "error" in payload:
-                print(f"⚠️ EVM RPC 错误 {method}: {str(payload['error'])[:120]}")
-                return None
+                return _fail(f"{method}: {str(payload['error'])[:120]}")
             return payload.get("result")
         except Exception as e:
-            print(f"⚠️ EVM 请求异常 {method}: {e}")
+            if attempt == tries - 1:
+                return _fail(f"{method}: {type(e).__name__} {str(e)[:100]}")
             time.sleep(1.5)
     return None
 
@@ -1044,8 +1055,9 @@ def preview_evm_wallet(wallet):
                 "positions": []}
     positions = fetch_evm_v4_positions(wallet)
     if positions is None:
+        detail = f"（原因：{_LAST_EVM_ERROR}）" if _LAST_EVM_ERROR else ""
         return {"ok": False,
-                "error": "❌ 连接失败：读取链上仓位失败，请核对钱包地址或稍后重试。",
+                "error": f"❌ 连接失败：读取链上仓位失败{detail}",
                 "positions": []}
     if not positions:
         return {"ok": False,
