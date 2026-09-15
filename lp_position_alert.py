@@ -15,7 +15,11 @@ import time
 import traceback
 
 import requests
-from Crypto.Hash import keccak
+
+try:
+    from Crypto.Hash import keccak
+except ImportError:
+    keccak = None
 
 from config import FEISHU_WEBHOOK
 from db import get_db_client
@@ -777,6 +781,8 @@ def _hex_address(word_hex):
 
 
 def _pool_id(c0_word, c1_word, fee, spacing, hooks_word):
+    if keccak is None:
+        return None
     packed = (bytes.fromhex(c0_word) + bytes.fromhex(c1_word)
               + int(fee).to_bytes(32, "big") + int(spacing).to_bytes(32, "big")
               + bytes.fromhex(hooks_word))
@@ -813,6 +819,8 @@ def _tick_to_price(tick, dec0, dec1):
 
 def fetch_evm_v4_positions(wallet):
     wallet = (wallet or "").strip()
+    if keccak is None:
+        return None
     if not wallet.lower().startswith("0x") or len(wallet) != 42:
         return None
     logs = _evm_rpc("eth_getLogs", [{
@@ -872,6 +880,11 @@ def preview_evm_wallet(wallet):
     wallet = (wallet or "").strip()
     if not wallet.lower().startswith("0x") or len(wallet) != 42:
         return {"ok": False, "error": "⚠️ 请填写 Robinhood 链的 EVM 钱包地址（0x 开头、42 位）。",
+                "positions": []}
+    if keccak is None:
+        return {"ok": False,
+                "error": "❌ 服务端缺少 pycryptodome 依赖，无法读取 Uniswap v4 仓位"
+                         "（请确认 requirements.txt 中的 pycryptodome 已安装）。",
                 "positions": []}
     positions = fetch_evm_v4_positions(wallet)
     if positions is None:
