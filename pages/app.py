@@ -218,7 +218,7 @@ with st.sidebar:
         submitted = st.form_submit_button("添加标的", type="primary")
         if submitted:
             if new_type == "token":
-                st.warning("⚠️ 链上代币请用下方「🔗 添加链上代币」区块（需先选确切合约）")
+                st.warning("⚠️ 链上代币请在「🔗 链上代币」标签页里添加（需先核对确切合约）")
             elif not new_code.strip():
                 st.warning("⚠️ 标的代码/池子地址不能为空！")
             else:
@@ -226,15 +226,18 @@ with st.sidebar:
                     st.success(f"✅ 成功添加: {new_code}")
                     st.rerun()
 
-    st.divider()
-    st.header("🔗 添加链上代币")
+def render_token_adder():
+    """链上代币的添加表单（放在链上代币标签页内，而不是侧边栏）."""
+    st.markdown("##### ➕ 添加链上代币")
     st.caption("填名称会列出候选（同名代币多，请核对后选择）；直接粘合约地址则跳过搜索。")
-    tok_chain = st.selectbox(
+    col_chain, col_query = st.columns([1.2, 3])
+    tok_chain = col_chain.selectbox(
         "所属公链", options=TOKEN_CHAINS,
         format_func=lambda x: CHAIN_LABELS.get(x, x), key="tok_chain")
-    tok_query = st.text_input(
+    tok_query = col_query.text_input(
         "代币名称或合约地址", key="tok_query",
         placeholder="例如 PENGU，或直接粘合约地址")
+
     if st.button("🔍 解析", key="tok_resolve"):
         if not tok_query.strip():
             st.warning("⚠️ 请先填写名称或地址")
@@ -243,33 +246,33 @@ with st.sidebar:
                 st.session_state["tok_candidates"] = token_candidates(tok_chain, tok_query)
 
     candidates = st.session_state.get("tok_candidates") or []
-    if candidates:
-        labels = {
-            c["address"]: (f"{c.get('symbol') or '?'} · {c.get('name') or '未知'} · "
-                           f"流动性 {c.get('liquidity') or 0:,.0f} · {c['address'][:10]}…")
-            for c in candidates
-        }
-        picked = st.selectbox("选择要监控的代币", options=list(labels),
-                              format_func=lambda a: labels[a], key="tok_pick")
-        if st.button("✅ 添加该代币", key="tok_add", type="primary"):
-            chosen = next(c for c in candidates if c["address"] == picked)
-            final_name = chosen.get("symbol") or chosen.get("name") or picked[:10]
-            if add_new_asset("token", chosen["address"], final_name, tok_chain):
-                st.session_state.pop("tok_candidates", None)
-                st.success(f"✅ 已添加: {final_name}（{picked[:10]}...）")
-                st.rerun()
+    if not candidates:
+        return
+    labels = {
+        c["address"]: (f"{c.get('symbol') or '?'} · {c.get('name') or '未知'} · "
+                       f"流动性 {c.get('liquidity') or 0:,.0f} · {c['address'][:10]}…")
+        for c in candidates
+    }
+    picked = st.selectbox("选择要监控的代币", options=list(labels),
+                          format_func=lambda a: labels[a], key="tok_pick")
+    if st.button("✅ 添加该代币", key="tok_add", type="primary"):
+        chosen = next(c for c in candidates if c["address"] == picked)
+        final_name = chosen.get("symbol") or chosen.get("name") or picked[:10]
+        if add_new_asset("token", chosen["address"], final_name, tok_chain):
+            st.session_state.pop("tok_candidates", None)
+            st.success(f"✅ 已添加: {final_name}（{picked[:10]}...）")
+            st.rerun()
+
 
 # --- 主界面：按分类展示与编辑配置 ---
 ensure_asset_schema()
 df = fetch_all_assets()
 
-if df.empty:
-    st.info("ℹ️ 数据库中暂无标的配置或未查到数据。")
-else:
+if not df.empty:
     # 顶部统计信息
     total_count = len(df)
     enabled_count = len(df[df["enabled"] == True])
-    
+
     col1, col2, col3 = st.columns(3)
     col1.metric("总标的数", total_count)
     col2.metric("已启用标的", enabled_count)
@@ -277,16 +280,20 @@ else:
 
     st.divider()
 
-    # 使用 Tab 标签页区分四大类资产
-    tabs = st.tabs([ASSET_TYPE_MAP[key] for key in ASSET_TYPE_MAP.keys()])
+# 使用 Tab 标签页区分各类资产（即使暂无数据也渲染，否则链上代币没有添加入口）
+tabs = st.tabs([ASSET_TYPE_MAP[key] for key in ASSET_TYPE_MAP.keys()])
 
-    for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
-        with tab:
-            sub_df = df[df["asset_type"] == type_key]
-            
-            if sub_df.empty:
-                st.caption(f"该类别 [{type_label}] 下暂无标的资产。")
-                continue
+for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
+    with tab:
+        if type_key == "token":
+            render_token_adder()
+            st.divider()
+
+        sub_df = df[df["asset_type"] == type_key] if not df.empty else df
+
+        if sub_df.empty:
+            st.caption(f"该类别 [{type_label}] 下暂无标的资产。")
+            continue
 
             # -----------------------------------------------------------------
             # 一键全选 / 全不选 工具栏
