@@ -3,8 +3,9 @@ import pandas as pd
 import streamlit as st
 from libsql_client import create_client_sync
 from config import FEISHU_WEBHOOK
-from db import get_db_client, ensure_asset_schema
-from dex_client import search_tokens
+from db import get_db_client
+import db as _db
+import dex_client as _dex
 
 # 链上代币：可用名称搜索，也可直接填合约地址
 TOKEN_CHAINS = ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"]
@@ -22,12 +23,29 @@ def looks_like_address(text: str) -> bool:
     return len(t) >= 32
 
 
+def ensure_asset_schema():
+    """调用 db.ensure_asset_schema；旧版 db 模块（Streamlit 会缓存已导入的模块）缺失时跳过."""
+    fn = getattr(_db, "ensure_asset_schema", None)
+    return fn() if callable(fn) else False
+
+
+def stale_module_names() -> list:
+    """本页依赖但当前模块里缺失的新函数（说明部署未更新）."""
+    missing = []
+    if not callable(getattr(_db, "ensure_asset_schema", None)):
+        missing.append("db.ensure_asset_schema")
+    if not callable(getattr(_dex, "search_tokens", None)):
+        missing.append("dex_client.search_tokens")
+    return missing
+
+
 def token_candidates(chain: str, text: str) -> list:
     """地址直通为唯一候选；名称则返回搜索结果列表，由人工挑选。"""
     t = (text or "").strip()
     if looks_like_address(t):
         return [{"address": t, "symbol": None, "name": None, "liquidity": None}]
-    return search_tokens(chain, t)
+    fn = getattr(_dex, "search_tokens", None)
+    return fn(chain, t) if callable(fn) else []
 
 # =============================================================================
 # 1. 设置页面属性（全程序仅保留这一个）
@@ -153,6 +171,11 @@ def delete_asset(asset_id: int):
 # =============================================================================
 st.title("⚙️ 监控标的配置管理")
 st.caption("在此页面配置需监控的资产标的及其启用/禁用状态，支持一键批量修改，变更实时同步至 Turso 数据库。")
+
+_missing = stale_module_names()
+if _missing:
+    st.warning("⚠️ 检测到当前运行的模块是旧版（缺失：" + "、".join(_missing) +
+               "），链上代币等新功能不可用。请在 Streamlit Cloud 上重启 / 重新部署后再试。")
 
 # 明确定义资产映射，包含对应数据库中的 'meteora'
 ASSET_TYPE_MAP = {
