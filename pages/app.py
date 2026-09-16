@@ -311,68 +311,68 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
             st.caption(f"该类别 [{type_label}] 下暂无标的资产。")
             continue
 
-            # -----------------------------------------------------------------
-            # 一键全选 / 全不选 工具栏
-            # -----------------------------------------------------------------
-            col_a, col_b, _ = st.columns([1.5, 1.5, 7])
-            with col_a:
-                if st.button(f"✅ 全选当前类标的", key=f"select_all_{type_key}"):
-                    if batch_update_status_by_type(type_key, True):
-                        st.toast(f"已全部启用所有 {type_label}", icon="🎉")
-                        st.rerun()
-            with col_b:
-                if st.button(f"🚫 全不选 (全部停用)", key=f"deselect_all_{type_key}"):
-                    if batch_update_status_by_type(type_key, False):
-                        st.toast(f"已全部禁用所有 {type_label}", icon="⏸️")
-                        st.rerun()
-
-            st.markdown(f"##### {type_label} 列表")
-            
-            # 区分不同类别的列表字段头显示
-            code_col_title = {"meteora": "池子 Address", "token": "合约地址"}.get(
-                type_key, "标的代码")
-
-            edited_df = st.data_editor(
-                sub_df,
-                column_config={
-                    "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
-                    "asset_type": None,  # 隐藏字段
-                    "code": st.column_config.TextColumn(code_col_title, disabled=True),
-                    "chain": st.column_config.TextColumn("链", disabled=True, width="small"),
-                    "name": st.column_config.TextColumn("标的/交易对名称", disabled=True),
-                    "enabled": st.column_config.CheckboxColumn("是否启用 🟢/🔴", default=True),
-                    "created_at": st.column_config.DatetimeColumn("添加时间", disabled=True, format="YYYY-MM-DD HH:mm"),
-                },
-                hide_index=True,
-                use_container_width=True,
-                key=f"editor_{type_key}"
-            )
-
-            # 保存对个别复选框手动微调的修改
-            if st.button("💾 保存状态微调", key=f"save_{type_key}", type="primary"):
-                changes_count = 0
-                for _, row in edited_df.iterrows():
-                    orig_row = sub_df[sub_df["id"] == row["id"]].iloc[0]
-                    if row["enabled"] != orig_row["enabled"]:
-                        update_asset_status(row["id"], row["enabled"])
-                        changes_count += 1
-                
-                if changes_count > 0:
-                    st.success(f"✅ 成功更新 {changes_count} 条标的状态！")
+        # -----------------------------------------------------------------
+        # 一键全选 / 全不选 工具栏
+        # -----------------------------------------------------------------
+        col_a, col_b, _ = st.columns([1.5, 1.5, 7])
+        with col_a:
+            if st.button(f"✅ 全选当前类标的", key=f"select_all_{type_key}"):
+                if batch_update_status_by_type(type_key, True):
+                    st.toast(f"已全部启用所有 {type_label}", icon="🎉")
                     st.rerun()
-                else:
-                    st.info("ℹ️ 未检测到状态变化。")
+        with col_b:
+            if st.button(f"🚫 全不选 (全部停用)", key=f"deselect_all_{type_key}"):
+                if batch_update_status_by_type(type_key, False):
+                    st.toast(f"已全部禁用所有 {type_label}", icon="⏸️")
+                    st.rerun()
 
-            # 下方删除工具
-            with st.expander("🗑️ 删除该分类下的标的"):
-                del_id = st.selectbox(
-                    "选择要删除的标的",
-                    options=sub_df["id"].tolist(),
-                    format_func=lambda x: f"ID:{x} - {sub_df[sub_df['id']==x]['code'].values[0]} ({sub_df[sub_df['id']==x]['name'].values[0]})",
-                    key=f"del_select_{type_key}"
-                )
-                if st.button("确认彻底删除", key=f"del_btn_{type_key}"):
-                    if delete_asset(del_id):
-                        st.success("✅ 删除成功！")
-                        st.rerun()
+        st.markdown(f"##### {type_label} 列表")
+        
+        # 区分不同类别的列表字段头显示
+        code_col_title = {"meteora": "池子 Address", "token": "合约地址"}.get(
+            type_key, "标的代码")
+
+        edited_df = st.data_editor(
+            sub_df,
+            column_config={
+                "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                "asset_type": None,  # 隐藏字段
+                "code": st.column_config.TextColumn(code_col_title, disabled=True),
+                "chain": st.column_config.TextColumn("链", disabled=True, width="small"),
+                "name": st.column_config.TextColumn("标的/交易对名称", disabled=True),
+                "enabled": st.column_config.CheckboxColumn("是否启用 🟢/🔴", default=True),
+                "created_at": st.column_config.DatetimeColumn("添加时间", disabled=True, format="YYYY-MM-DD HH:mm"),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key=f"editor_{type_key}"
+        )
+
+        # 保存对个别复选框手动微调的修改
+        if st.button("💾 保存状态微调", key=f"save_{type_key}", type="primary"):
+            changes_count = 0
+            for _, row in edited_df.iterrows():
+                orig_row = sub_df[sub_df["id"] == row["id"]].iloc[0]
+                if row["enabled"] != orig_row["enabled"]:
+                    update_asset_status(row["id"], row["enabled"])
+                    changes_count += 1
+            
+            if changes_count > 0:
+                st.success(f"✅ 成功更新 {changes_count} 条标的状态！")
+                st.rerun()
+            else:
+                st.info("ℹ️ 未检测到状态变化。")
+
+        # 下方删除工具
+        with st.expander("🗑️ 删除该分类下的标的"):
+            del_id = st.selectbox(
+                "选择要删除的标的",
+                options=sub_df["id"].tolist(),
+                format_func=lambda x: f"ID:{x} - {sub_df[sub_df['id']==x]['code'].values[0]} ({sub_df[sub_df['id']==x]['name'].values[0]})",
+                key=f"del_select_{type_key}"
+            )
+            if st.button("确认彻底删除", key=f"del_btn_{type_key}"):
+                if delete_asset(del_id):
+                    st.success("✅ 删除成功！")
+                    st.rerun()
 
