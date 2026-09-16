@@ -40,12 +40,29 @@ def stale_module_names() -> list:
 
 
 def token_candidates(chain: str, text: str) -> list:
-    """地址直通为唯一候选；名称则返回搜索结果列表，由人工挑选。"""
+    """地址直通为唯一候选（会补查名称/价格/市值）；名称则返回搜索结果列表。"""
     t = (text or "").strip()
     if looks_like_address(t):
-        return [{"address": t, "symbol": None, "name": None, "liquidity": None}]
+        lookup = getattr(_dex, "lookup_token", None)
+        if callable(lookup):
+            return [lookup(chain, t)]
+        return [{"address": t, "symbol": None, "name": None,
+                 "price": None, "market_cap": None, "liquidity": None, "found": False}]
     fn = getattr(_dex, "search_tokens", None)
     return fn(chain, t) if callable(fn) else []
+
+
+def format_candidate(c: dict) -> str:
+    """候选展示文案：符号 · 名称 · 价格 · 市值 · 流动性 · 地址前缀."""
+    parts = [f"{c.get('symbol') or '?'} · {c.get('name') or '未知'}"]
+    if c.get("price") is not None:
+        parts.append(f"价 {c['price']:.10g}")
+    if c.get("market_cap"):
+        parts.append(f"市值 {c['market_cap']:,.0f}")
+    if c.get("liquidity"):
+        parts.append(f"流动性 {c['liquidity']:,.0f}")
+    parts.append(f"{c['address'][:10]}…")
+    return " · ".join(parts)
 
 # =============================================================================
 # 1. 设置页面属性（全程序仅保留这一个）
@@ -248,11 +265,10 @@ def render_token_adder():
     candidates = st.session_state.get("tok_candidates") or []
     if not candidates:
         return
-    labels = {
-        c["address"]: (f"{c.get('symbol') or '?'} · {c.get('name') or '未知'} · "
-                       f"流动性 {c.get('liquidity') or 0:,.0f} · {c['address'][:10]}…")
-        for c in candidates
-    }
+    if not any(c.get("found", True) for c in candidates):
+        st.warning("⚠️ 没查到这个地址的信息，请确认所属公链与合约地址是否正确"
+                   "（仍可继续添加，但价格监控可能取不到数据）。")
+    labels = {c["address"]: format_candidate(c) for c in candidates}
     picked = st.selectbox("选择要监控的代币", options=list(labels),
                           format_func=lambda a: labels[a], key="tok_pick")
     if st.button("✅ 添加该代币", key="tok_add", type="primary"):

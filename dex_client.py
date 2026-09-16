@@ -279,6 +279,41 @@ def _resolve_pool_address(chain: str, token_address: str) -> Optional[str]:
     return best.get("pairAddress") if best else None
 
 
+def _to_num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def lookup_token(chain: str, address: str) -> Optional[dict]:
+    """按合约地址查单个代币的展示信息（地址直填时用）.
+
+    返回 {address, symbol, name, price, market_cap, liquidity, found}；
+    查不到时 found=False，但仍返回该地址，便于界面提示而不是直接拦住用户。
+    注意：fetch_token_info 有跨链兜底，这里强制校验命中的链与所选链一致，
+    否则选错链会静默拿到另一条链的同名/同址代币。
+    """
+    data, _source = fetch_token_info(chain, address)
+    raw = (data or {}).get("_raw") or {}
+    expected = _to_dexscreener_chain(chain)
+    if raw.get("chainId") and raw.get("chainId") != expected:
+        data = None
+    if not data:
+        return {"address": address, "symbol": None, "name": None,
+                "price": None, "market_cap": None, "liquidity": None,
+                "found": False}
+    return {
+        "address": address,
+        "symbol": data.get("symbol"),
+        "name": data.get("name"),
+        "price": _to_num((data.get("price") or {}).get("price")),
+        "market_cap": _to_num(data.get("market_cap")) or _to_num(data.get("fdv")),
+        "liquidity": _to_num(data.get("liquidity")),
+        "found": True,
+    }
+
+
 def search_tokens(chain: str, query: str, limit: int = 10) -> list:
     """按名称/符号搜索代币，返回候选列表供人工挑选.
 
@@ -309,7 +344,10 @@ def search_tokens(chain: str, query: str, limit: int = 10) -> list:
             "address": address,
             "symbol": base.get("symbol"),
             "name": base.get("name"),
+            "price": _to_num(pair.get("priceUsd")),
+            "market_cap": _to_num(pair.get("marketCap")) or _to_num(pair.get("fdv")),
             "liquidity": liquidity(pair),
+            "found": True,
         })
         if len(out) >= limit:
             break
