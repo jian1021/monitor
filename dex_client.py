@@ -20,6 +20,7 @@ import json
 import sys
 import time
 from typing import Optional
+from urllib.parse import quote
 
 try:
     import requests
@@ -276,6 +277,43 @@ def _resolve_pool_address(chain: str, token_address: str) -> Optional[str]:
         return None
     best = _select_best_pair(pairs, chain_id, token_address)
     return best.get("pairAddress") if best else None
+
+
+def search_tokens(chain: str, query: str, limit: int = 10) -> list:
+    """按名称/符号搜索代币，返回候选列表供人工挑选.
+
+    同名代币极多（仿盘、跨链版本、同名的不同项目），流动性最高的未必是你要的，
+    因此这里只返回候选、按流动性降序，由调用方（界面）让人选择。
+    """
+    if requests is None:
+        return []
+    chain_id = _to_dexscreener_chain(chain)
+    data = _safe_get(f"{DEXSCREENER_BASE}/latest/dex/search?q={quote(str(query))}")
+    pairs = (data or {}).get("pairs") or []
+    chain_pairs = [p for p in pairs if p.get("chainId") == chain_id] or pairs
+
+    def liquidity(pair):
+        try:
+            return float((pair.get("liquidity") or {}).get("usd") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    seen, out = set(), []
+    for pair in sorted(chain_pairs, key=liquidity, reverse=True):
+        base = pair.get("baseToken") or {}
+        address = base.get("address")
+        if not address or address in seen:
+            continue
+        seen.add(address)
+        out.append({
+            "address": address,
+            "symbol": base.get("symbol"),
+            "name": base.get("name"),
+            "liquidity": liquidity(pair),
+        })
+        if len(out) >= limit:
+            break
+    return out
 
 
 def fetch_ohlcv(chain: str, token_address: str, resolution: str = "1h",

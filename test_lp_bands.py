@@ -183,3 +183,81 @@ def test_build_chart_df_empty_bands():
     from lp_bands_chart import build_chart_df
     df = build_chart_df([], np.array([]), np.array([]), np.array([]), [])
     assert df.empty
+
+
+def _mock_resp(json_data, status=200):
+    m = MagicMock()
+    m.status_code = status
+    m.json.return_value = json_data
+    return m
+
+
+@patch("dex_client.requests")
+def test_search_tokens_returns_candidates_sorted_by_liquidity(mock_requests):
+    mock_requests.get.return_value = _mock_resp({"pairs": [
+        {"chainId": "solana", "baseToken": {"address": "A", "symbol": "PENGU", "name": "Pudgy Penguins"},
+         "liquidity": {"usd": 1000}},
+        {"chainId": "solana", "baseToken": {"address": "B", "symbol": "PENGU", "name": "Pudgy Penguins"},
+         "liquidity": {"usd": 5000}},
+        {"chainId": "bsc", "baseToken": {"address": "C", "symbol": "PENGU", "name": "仿盘"},
+         "liquidity": {"usd": 99999}},
+    ]})
+    out = dex_client.search_tokens("sol", "PENGU")
+    assert [c["address"] for c in out] == ["B", "A"]
+    assert out[0]["symbol"] == "PENGU"
+
+
+@patch("dex_client.requests")
+def test_search_tokens_dedupes_same_address(mock_requests):
+    mock_requests.get.return_value = _mock_resp({"pairs": [
+        {"chainId": "solana", "baseToken": {"address": "A", "symbol": "X"},
+         "liquidity": {"usd": 10}},
+        {"chainId": "solana", "baseToken": {"address": "A", "symbol": "X"},
+         "liquidity": {"usd": 20}},
+    ]})
+    out = dex_client.search_tokens("sol", "X")
+    assert len(out) == 1
+    assert out[0]["liquidity"] == 20
+
+
+@patch("dex_client.requests")
+def test_search_tokens_empty_when_no_pairs(mock_requests):
+    mock_requests.get.return_value = _mock_resp({"pairs": []})
+    assert dex_client.search_tokens("sol", "NOPE") == []
+
+
+@patch("monitor_rsi.ta")
+@patch("dex_client.fetch_ohlcv")
+def test_get_token_rsi_uses_close_series(mock_ohlcv, mock_ta):
+    import monitor_rsi
+    import pandas as pd
+    mock_ohlcv.return_value = (None, None, None, None,
+                               pd.Series([1.0, 2.0, 3.0, 4.0, 5.0]).to_numpy(), None)
+    mock_ta.momentum.rsi.return_value = pd.Series([0, 0, 0, 0, 42.5])
+    rsi, price = monitor_rsi.get_token_rsi("sol", "ADDR", "1h", 3)
+    assert rsi == pytest.approx(42.5)
+    assert price == pytest.approx(5.0)
+    mock_ohlcv.assert_called_once_with("sol", "ADDR", "1h")
+
+
+@patch("dex_client.fetch_ohlcv")
+def test_get_token_rsi_returns_none_on_failure(mock_ohlcv):
+    import monitor_rsi
+    mock_ohlcv.side_effect = SystemExit("未找到交易对")
+    assert monitor_rsi.get_token_rsi("sol", "ADDR", "1h", 3) == (None, None)
+
+
+@patch("dex_client.fetch_ohlcv")
+def test_get_token_rsi_returns_none_when_too_few_candles(mock_ohlcv):
+    import monitor_rsi
+    mock_ohlcv.return_value = (None, None, None, None, [1.0, 2.0], None)
+    assert monitor_rsi.get_token_rsi("sol", "ADDR", "1h", 3) == (None, None)
+
+
+def test_token_settings_share_params_with_other_modules():
+    import monitor_rsi
+    tok = monitor_rsi.DEFAULT_SETTINGS["token"]
+    etf = monitor_rsi.DEFAULT_SETTINGS["etf"]
+    assert tok["period"] == etf["period"] == 3
+    assert tok["rsi_low"] == etf["rsi_low"] == 10
+    assert tok["rsi_high"] == etf["rsi_high"] == 90

@@ -119,7 +119,31 @@ if __name__ == "__main__":
     if bs_login_ok:
         bs.logout()
 
-    # 5.发送RSI告警
+    # 5. 链上代币监控
+    token_list = config.get("tokens", [])
+    t_set = monitor_rsi.DEFAULT_SETTINGS["token"]
+    token_tf = monitor_rsi.timeframe_label(t_set["resolution"])
+    for item in token_list:
+        if not item.get("enabled", True):
+            continue
+        code = str(item.get("code"))
+        chain = item.get("chain") or "sol"
+        cfg_name = item.get("name", code)
+        rsi, price = monitor_rsi.get_token_rsi(
+            chain, code, t_set["resolution"], t_set["period"])
+        if rsi is not None and price is not None:
+            short = code[:10]
+            print(f"✅ [链上代币] {cfg_name}({short}...) {chain} 现价: {price:.8g}, "
+                  f"{token_tf} RSI({t_set['period']}): {rsi:.2f}")
+            if rsi < t_set["rsi_low"]:
+                messages.append(f"🚨 【链上代币 RSI 超卖】{cfg_name}({short}...) 链 {chain} "
+                                f"现价: {price:.8g}，{token_tf} RSI: {rsi:.2f} (低于 {t_set['rsi_low']})")
+            elif rsi > t_set["rsi_high"]:
+                messages.append(f"⚠️ 【链上代币 RSI 超买】{cfg_name}({short}...) 链 {chain} "
+                                f"现价: {price:.8g}，{token_tf} RSI: {rsi:.2f} (高于 {t_set['rsi_high']})")
+        time.sleep(random.uniform(0.8, 1.5))
+
+    # 6.发送RSI告警
     if messages:
         full_msg = "\n\n".join(messages)
         send_feishu_msg(FEISHU_WEBHOOK, full_msg)

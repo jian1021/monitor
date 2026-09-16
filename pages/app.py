@@ -3,7 +3,32 @@ import pandas as pd
 import streamlit as st
 from libsql_client import create_client_sync
 from config import FEISHU_WEBHOOK
-from db import get_db_client
+from db import get_db_client, ensure_asset_schema
+from dex_client import search_tokens
+
+# 链上代币：可用名称搜索，也可直接填合约地址
+TOKEN_CHAINS = ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"]
+CHAIN_LABELS = {
+    "sol": "Solana (SOL)", "bsc": "BNB Chain (BSC)", "base": "Base",
+    "eth": "Ethereum (ETH)", "robinhood": "Robinhood (RH)",
+    "arc": "ARC", "stable": "Stable",
+}
+
+
+def looks_like_address(text: str) -> bool:
+    t = (text or "").strip()
+    if t.startswith("0x") and len(t) == 42:
+        return True
+    return len(t) >= 32
+
+
+def token_candidates(chain: str, text: str) -> list:
+    """地址直通为唯一候选；名称则返回搜索结果列表，由人工挑选。"""
+    t = (text or "").strip()
+    if looks_like_address(t):
+        return [{"address": t, "symbol": None, "name": None, "liquidity": None}]
+    return search_tokens(chain, t)
+
 # =============================================================================
 # 1. 设置页面属性（全程序仅保留这一个）
 # =============================================================================
@@ -20,9 +45,18 @@ def fetch_all_assets():
     if not client:
         return pd.DataFrame()
     try:
-        rs = client.execute(
-            "SELECT id, asset_type, code, name, enabled, created_at FROM asset_config ORDER BY id ASC"
-        )
+        try:
+            rs = client.execute(
+                "SELECT id, asset_type, code, name, enabled, created_at, chain"
+                " FROM asset_config ORDER BY id ASC"
+            )
+            has_chain = True
+        except Exception:
+            rs = client.execute(
+                "SELECT id, asset_type, code, name, enabled, created_at"
+                " FROM asset_config ORDER BY id ASC"
+            )
+            has_chain = False
         data = []
         for row in rs.rows:
             data.append({
@@ -32,6 +66,7 @@ def fetch_all_assets():
                 "name": row[3],
                 "enabled": bool(row[4]),
                 "created_at": row[5],
+                "chain": (row[6] if has_chain and len(row) > 6 else None) or "sol",
             })
         return pd.DataFrame(data)
     except Exception as e:
@@ -79,15 +114,16 @@ def batch_update_status_by_type(asset_type: str, enabled: bool):
         client.close()
 
 
-def add_new_asset(asset_type: str, code: str, name: str):
+def add_new_asset(asset_type: str, code: str, name: str, chain: str = None):
     """新增标的"""
     client = get_db_client()
     if not client:
         return False
     try:
         client.execute(
-            "INSERT INTO asset_config (asset_type, code, name, enabled) VALUES (?, ?, ?, 1)",
-            [asset_type, code.strip(), name.strip() or code.strip()]
+            "INSERT INTO asset_config (asset_type, code, name, enabled, chain)"
+            " VALUES (?, ?, ?, 1, ?)",
+            [asset_type, code.strip(), name.strip() or code.strip(), chain or "sol"]
         )
         return True
     except Exception as e:
@@ -124,6 +160,7 @@ ASSET_TYPE_MAP = {
     "meteora": "☄️ Meteora 流动池",
     "bond": "📈 可转债",
     "etf": "📊 ETF 基金",
+    "token": "🔗 链上代币",
 }
 
 # --- 侧边栏：添加新标的与登出 ---
@@ -141,24 +178,66 @@ with st.sidebar:
             options=list(ASSET_TYPE_MAP.keys()),
             format_func=lambda x: ASSET_TYPE_MAP[x]
         )
-        
-        # 根据选择类型动态提供友好提示
-        code_placeholder = "例如: Cgnuirsk5dQ9..." if new_type == "meteora" else "例如: BTC-USDT 或 113052"
-        name_placeholder = "例如: TROLL-SOL" if new_type == "meteora" else "例如: 兴业转债"
 
-        new_code = st.text_input("标的代码 / 池子 Address", placeholder=code_placeholder)
+        new_chain = "sol"
+        if new_type == "meteora":
+            code_label = "标的代码 / 池子 Address"
+            code_placeholder = "例如: Cgnuirsk5dQ9..."
+            name_placeholder = "例如: TROLL-SOL"
+        else:
+            code_label = "标的代码 / 池子 Address"
+            code_placeholder = "例如: BTC-USDT 或 113052"
+            name_placeholder = "例如: 兴业转债"
+
+        new_code = st.text_input(code_label, placeholder=code_placeholder)
         new_name = st.text_input("标的名称 (可选)", placeholder=name_placeholder)
-        
+
         submitted = st.form_submit_button("添加标的", type="primary")
         if submitted:
-            if not new_code.strip():
+            if new_type == "token":
+                st.warning("⚠️ 链上代币请用下方「🔗 添加链上代币」区块（需先选确切合约）")
+            elif not new_code.strip():
                 st.warning("⚠️ 标的代码/池子地址不能为空！")
             else:
                 if add_new_asset(new_type, new_code, new_name):
                     st.success(f"✅ 成功添加: {new_code}")
                     st.rerun()
 
+    st.divider()
+    st.header("🔗 添加链上代币")
+    st.caption("填名称会列出候选（同名代币多，请核对后选择）；直接粘合约地址则跳过搜索。")
+    tok_chain = st.selectbox(
+        "所属公链", options=TOKEN_CHAINS,
+        format_func=lambda x: CHAIN_LABELS.get(x, x), key="tok_chain")
+    tok_query = st.text_input(
+        "代币名称或合约地址", key="tok_query",
+        placeholder="例如 PENGU，或直接粘合约地址")
+    if st.button("🔍 解析", key="tok_resolve"):
+        if not tok_query.strip():
+            st.warning("⚠️ 请先填写名称或地址")
+        else:
+            with st.spinner("正在搜索 ..."):
+                st.session_state["tok_candidates"] = token_candidates(tok_chain, tok_query)
+
+    candidates = st.session_state.get("tok_candidates") or []
+    if candidates:
+        labels = {
+            c["address"]: (f"{c.get('symbol') or '?'} · {c.get('name') or '未知'} · "
+                           f"流动性 {c.get('liquidity') or 0:,.0f} · {c['address'][:10]}…")
+            for c in candidates
+        }
+        picked = st.selectbox("选择要监控的代币", options=list(labels),
+                              format_func=lambda a: labels[a], key="tok_pick")
+        if st.button("✅ 添加该代币", key="tok_add", type="primary"):
+            chosen = next(c for c in candidates if c["address"] == picked)
+            final_name = chosen.get("symbol") or chosen.get("name") or picked[:10]
+            if add_new_asset("token", chosen["address"], final_name, tok_chain):
+                st.session_state.pop("tok_candidates", None)
+                st.success(f"✅ 已添加: {final_name}（{picked[:10]}...）")
+                st.rerun()
+
 # --- 主界面：按分类展示与编辑配置 ---
+ensure_asset_schema()
 df = fetch_all_assets()
 
 if df.empty:
@@ -204,7 +283,8 @@ else:
             st.markdown(f"##### {type_label} 列表")
             
             # 区分不同类别的列表字段头显示
-            code_col_title = "池子 Address" if type_key == "meteora" else "标的代码"
+            code_col_title = {"meteora": "池子 Address", "token": "合约地址"}.get(
+                type_key, "标的代码")
 
             edited_df = st.data_editor(
                 sub_df,
@@ -212,6 +292,7 @@ else:
                     "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
                     "asset_type": None,  # 隐藏字段
                     "code": st.column_config.TextColumn(code_col_title, disabled=True),
+                    "chain": st.column_config.TextColumn("链", disabled=True, width="small"),
                     "name": st.column_config.TextColumn("标的/交易对名称", disabled=True),
                     "enabled": st.column_config.CheckboxColumn("是否启用 🟢/🔴", default=True),
                     "created_at": st.column_config.DatetimeColumn("添加时间", disabled=True, format="YYYY-MM-DD HH:mm"),

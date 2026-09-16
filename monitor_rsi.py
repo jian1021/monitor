@@ -35,6 +35,12 @@ DEFAULT_SETTINGS = {
         "period": 3,
         "rsi_low": 10,
         "rsi_high": 90
+    },
+    "token": {
+        "resolution": "1h",
+        "period": 3,
+        "rsi_low": 10,
+        "rsi_high": 90
     }
 }
 
@@ -47,6 +53,28 @@ _TIMEFRAME_LABELS = {
 
 def timeframe_label(key):
     return _TIMEFRAME_LABELS.get(str(key).strip(), str(key))
+
+
+def get_token_rsi(chain, address, resolution="1h", length=14):
+    """链上代币 RSI：Dexscreener 解析出池子，再取 GeckoTerminal K线算 RSI.
+
+    与其它模块一致的返回约定：成功 (rsi, close)，失败 (None, None)。
+    """
+    try:
+        from dex_client import fetch_ohlcv
+
+        _t, _o, _h, _l, closes, _v = fetch_ohlcv(chain, address, resolution)
+        if closes is None or len(closes) < length:
+            print(f"⚠️ 链上代币 [{address[:10]}...] K线不足 ({0 if closes is None else len(closes)} 根)")
+            return None, None
+        close = pd.Series(closes)
+        rsi = ta.momentum.rsi(close, window=length)
+        return rsi.iloc[-1], close.iloc[-1]
+    except (SystemExit, ValueError) as e:
+        print(f"❌ 链上代币 [{address[:10]}...] 取数失败: {e}")
+    except Exception as e:
+        print(f"❌ 链上代币 [{address[:10]}...] 异常: {e}")
+    return None, None
 
 
 # ================= 1. 数据获取与 RSI 计算 =================
