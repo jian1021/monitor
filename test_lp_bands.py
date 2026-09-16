@@ -334,3 +334,25 @@ def test_get_token_rsi_forwards_days_window(mock_ohlcv):
     mock_ohlcv.return_value = (None, None, None, None, [1.0, 2.0, 3.0, 4.0], None)
     monitor_rsi.get_token_rsi("sol", "ADDR", "1d", 3, 15)
     assert mock_ohlcv.call_args[0][3] == 15
+
+
+@patch("dex_client.time.sleep")
+@patch("dex_client.requests")
+def test_safe_get_retries_on_transient_exception(mock_requests, mock_sleep):
+    """SSL/连接抖动是瞬时的，应重试而不是直接丢标的."""
+    ok = MagicMock()
+    ok.status_code = 200
+    ok.json.return_value = {"ok": 1}
+    mock_requests.get.side_effect = [ConnectionError("SSL EOF"), ok]
+
+    assert dex_client._safe_get("http://example.invalid") == {"ok": 1}
+    assert mock_requests.get.call_count == 2
+    assert mock_sleep.called
+
+
+@patch("dex_client.time.sleep")
+@patch("dex_client.requests")
+def test_safe_get_gives_up_after_persistent_exception(mock_requests, mock_sleep):
+    mock_requests.get.side_effect = ConnectionError("always down")
+    assert dex_client._safe_get("http://example.invalid") is None
+    assert mock_requests.get.call_count == dex_client.RATE_LIMIT_RETRIES + 1

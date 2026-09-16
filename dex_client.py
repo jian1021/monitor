@@ -65,6 +65,19 @@ _RESOLUTION_TO_GECKO = {
 
 DEXSCREENER_BASE = "https://api.dexscreener.com"
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
+OKX_BASE = "https://www.okx.com"
+
+# OKX DEX K线：按代币合约地址直查（无需先解析池子），限流比 GeckoTerminal 宽松得多。
+# 不支持 Robinhood Chain（实测 chainIndex 报 51001），那条链仍走 GeckoTerminal。
+OKX_DEX_CHAIN_INDEX = {"eth": "1", "bsc": "56", "base": "8453", "sol": "501"}
+OKX_DEX_BAR = {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D"}
+_OKX_BARS_PER_DAY = {"1m": 1440, "5m": 288, "15m": 96, "1h": 24, "4h": 6, "1d": 1}
+
+# 未显式指定 days 时，按周期估算取数窗口（1d 默认 100 天，与历史行为一致）
+_RESOLUTION_DAYS = {
+    "30s": 0.034, "1m": 0.069, "5m": 0.34, "15m": 1.04,
+    "1h": 4.16, "4h": 16.6, "1d": 100,
+}
 
 # GeckoTerminal 免费额度很紧（约 30 次/分钟），批量监控时容易撞 429
 RATE_LIMIT_RETRIES = 4
@@ -109,6 +122,13 @@ def _safe_get(url: str, timeout: int = 15, **kwargs) -> Optional[dict]:
             print(f"⚠️ HTTP {resp.status_code}: {url}", file=sys.stderr)
             return None
         except Exception as e:
+            # SSL 中断 / 连接超时这类瞬时故障也应退避重试，否则一次抖动就丢一个标的
+            if attempt < RATE_LIMIT_RETRIES:
+                wait = RATE_LIMIT_BACKOFF * (2 ** attempt)
+                print(f"⏳ 请求异常，{wait:.0f}s 后重试 ({attempt + 1}/{RATE_LIMIT_RETRIES}): {e}",
+                      file=sys.stderr)
+                time.sleep(wait)
+                continue
             print(f"⚠️ 请求异常: {e}", file=sys.stderr)
             return None
     return None
@@ -375,6 +395,43 @@ def search_tokens(chain: str, query: str, limit: int = 10) -> list:
     return out
 
 
+def _fetch_ohlcv_okx_dex(chain: str, token_address: str, resolution: str, days):
+    """用 OKX DEX 取 K 线；链不支持或取不到时返回 None（由调用方回退 GeckoTerminal）."""
+    index = OKX_DEX_CHAIN_INDEX.get((chain or "").lower())
+    bar = OKX_DEX_BAR.get(resolution)
+    if not index or not bar:
+        return None
+    import numpy as np
+
+    window_days = float(days) if days is not None else float(
+        _RESOLUTION_DAYS.get(resolution, 4.16))
+    per_day = _OKX_BARS_PER_DAY.get(resolution, 24)
+    limit = max(10, min(int(window_days * per_day) + 5, 1000))
+    data = _safe_get(
+        f"{OKX_BASE}/api/v5/dex/market/candles?chainIndex={index}"
+        f"&tokenContractAddress={token_address}&bar={bar}&limit={limit}")
+    rows = (data or {}).get("data") or []
+    if not rows:
+        return None
+
+    # OKX 返回新 -> 旧，需反转为旧 -> 新（与 GeckoTerminal 路径一致）
+    rows = list(reversed(rows))
+    t, o, h, l, c, v = [], [], [], [], [], []
+    for row in rows:
+        if len(row) < 6:
+            continue
+        t.append(datetime.datetime.fromtimestamp(int(row[0]) / 1000).strftime("%m-%d %H:%M"))
+        o.append(float(row[1]))
+        h.append(float(row[2]))
+        l.append(float(row[3]))
+        c.append(float(row[4]))
+        v.append(float(row[5]))
+    if not c:
+        return None
+    print(f"✅ 已从 OKX DEX 拉取 {len(c)} 根 {resolution} K线 ({chain})", file=sys.stderr)
+    return t, np.array(o), np.array(h), np.array(l), np.array(c), np.array(v)
+
+
 def fetch_ohlcv(chain: str, token_address: str, resolution: str = "1h",
                 days: Optional[float] = None) -> tuple:
     """从 GeckoTerminal 拉取 OHLCV K线数据.
@@ -396,6 +453,12 @@ def fetch_ohlcv(chain: str, token_address: str, resolution: str = "1h",
     if requests is None:
         raise ValueError("缺少 requests 库 (pip install requests)")
 
+    # 优先 OKX DEX：一次请求即可（无需解析池子）、限流宽松；
+    # 链不支持或取不到时回退下面的 GeckoTerminal 逻辑。
+    okx_result = _fetch_ohlcv_okx_dex(chain, token_address, resolution, days)
+    if okx_result is not None:
+        return okx_result
+
     # 解析 resolution → GeckoTerminal timeframe + aggregate
     tf_info = _RESOLUTION_TO_GECKO.get(resolution)
     if tf_info is None:
@@ -405,11 +468,8 @@ def fetch_ohlcv(chain: str, token_address: str, resolution: str = "1h",
     # 计算时间范围
     bar_seconds = {"30s": 30, "1m": 60, "5m": 300, "15m": 900,
                    "1h": 3600, "4h": 14400, "1d": 86400}.get(resolution, 3600)
-    resolution_days_map = {
-        "30s": 0.034, "1m": 0.069, "5m": 0.34, "15m": 1.04,
-        "1h": 4.16, "4h": 16.6, "1d": 100,
-    }
-    window_days = float(days) if days is not None else float(resolution_days_map.get(resolution, 4.16))
+    window_days = float(days) if days is not None else float(
+        _RESOLUTION_DAYS.get(resolution, 4.16))
     to_ts = int(time.time())
     from_ts = to_ts - int(window_days * 86400)
 
