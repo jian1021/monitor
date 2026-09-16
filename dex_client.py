@@ -66,6 +66,11 @@ _RESOLUTION_TO_GECKO = {
 DEXSCREENER_BASE = "https://api.dexscreener.com"
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
 
+# GeckoTerminal 免费额度很紧（约 30 次/分钟），批量监控时容易撞 429
+RATE_LIMIT_RETRIES = 4
+RATE_LIMIT_BACKOFF = 3.0
+RATE_LIMIT_MAX_WAIT = 60.0
+
 
 # ============================================================
 # 内部工具
@@ -80,16 +85,30 @@ def _to_gecko_network(chain: str) -> str:
 
 
 def _safe_get(url: str, timeout: int = 15, **kwargs) -> Optional[dict]:
-    """带错误处理的 GET 请求."""
+    """带错误处理的 GET 请求；遇到 429 限流会退避重试而不是直接放弃."""
     if requests is None:
         return None
-    try:
-        resp = requests.get(url, timeout=timeout, **kwargs)
-        if resp.status_code == 200:
-            return resp.json()
-        print(f"⚠️ HTTP {resp.status_code}: {url}", file=sys.stderr)
-    except Exception as e:
-        print(f"⚠️ 请求异常: {e}", file=sys.stderr)
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        try:
+            resp = requests.get(url, timeout=timeout, **kwargs)
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code == 429 and attempt < RATE_LIMIT_RETRIES:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    wait = float(retry_after)
+                except (TypeError, ValueError):
+                    wait = RATE_LIMIT_BACKOFF * (2 ** attempt)
+                wait = min(wait, RATE_LIMIT_MAX_WAIT)
+                print(f"⏳ HTTP 429 限流，{wait:.0f}s 后重试 ({attempt + 1}/{RATE_LIMIT_RETRIES})",
+                      file=sys.stderr)
+                time.sleep(wait)
+                continue
+            print(f"⚠️ HTTP {resp.status_code}: {url}", file=sys.stderr)
+            return None
+        except Exception as e:
+            print(f"⚠️ 请求异常: {e}", file=sys.stderr)
+            return None
     return None
 
 

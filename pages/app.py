@@ -196,10 +196,10 @@ if _missing:
 
 # 明确定义资产映射，包含对应数据库中的 'meteora'
 ASSET_TYPE_MAP = {
-    "crypto": "🪙 加密货币 (OKX)",
-    "meteora": "☄️ Meteora 流动池",
+    "crypto": "🪙 加密货币",
+    "meteora": "☄️ Meteora 池",
     "bond": "📈 可转债",
-    "etf": "📊 ETF 基金",
+    "etf": "📊 ETF",
     "token": "🔗 链上代币",
 }
 
@@ -311,23 +311,22 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
             st.caption(f"该类别 [{type_label}] 下暂无标的资产。")
             continue
 
-        # -----------------------------------------------------------------
-        # 一键全选 / 全不选 工具栏
-        # -----------------------------------------------------------------
-        col_a, col_b, _ = st.columns([1.5, 1.5, 7])
-        with col_a:
-            if st.button(f"✅ 全选当前类标的", key=f"select_all_{type_key}"):
+        # 标题与批量操作同一行，避免控件散落
+        head_left, head_right = st.columns([3, 2])
+        head_left.markdown(f"##### {type_label} 列表（{len(sub_df)} 条）")
+        with head_right:
+            btn_all, btn_none = st.columns(2)
+            if btn_all.button("✅ 全选", key=f"select_all_{type_key}",
+                              use_container_width=True):
                 if batch_update_status_by_type(type_key, True):
                     st.toast(f"已全部启用所有 {type_label}", icon="🎉")
                     st.rerun()
-        with col_b:
-            if st.button(f"🚫 全不选 (全部停用)", key=f"deselect_all_{type_key}"):
+            if btn_none.button("🚫 全不选", key=f"deselect_all_{type_key}",
+                               use_container_width=True):
                 if batch_update_status_by_type(type_key, False):
                     st.toast(f"已全部禁用所有 {type_label}", icon="⏸️")
                     st.rerun()
 
-        st.markdown(f"##### {type_label} 列表")
-        
         # 区分不同类别的列表字段头显示
         code_col_title = {"meteora": "池子 Address", "token": "合约地址"}.get(
             type_key, "标的代码")
@@ -348,15 +347,17 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
             key=f"editor_{type_key}"
         )
 
-        # 保存对个别复选框手动微调的修改
-        if st.button("💾 保存状态微调", key=f"save_{type_key}", type="primary"):
+        # 保存按钮只占左侧窄栏，不要横贯整页
+        save_col, _ = st.columns([1, 4])
+        if save_col.button("💾 保存状态", key=f"save_{type_key}", type="primary",
+                           use_container_width=True):
             changes_count = 0
             for _, row in edited_df.iterrows():
                 orig_row = sub_df[sub_df["id"] == row["id"]].iloc[0]
                 if row["enabled"] != orig_row["enabled"]:
                     update_asset_status(row["id"], row["enabled"])
                     changes_count += 1
-            
+
             if changes_count > 0:
                 st.success(f"✅ 成功更新 {changes_count} 条标的状态！")
                 st.rerun()

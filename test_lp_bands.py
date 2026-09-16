@@ -261,3 +261,44 @@ def test_token_settings_share_params_with_other_modules():
     assert tok["period"] == etf["period"] == 3
     assert tok["rsi_low"] == etf["rsi_low"] == 10
     assert tok["rsi_high"] == etf["rsi_high"] == 90
+
+
+@patch("dex_client.time.sleep")
+@patch("dex_client.requests")
+def test_safe_get_retries_after_429_then_succeeds(mock_requests, mock_sleep):
+    limited = MagicMock()
+    limited.status_code = 429
+    limited.headers = {}
+    ok = MagicMock()
+    ok.status_code = 200
+    ok.json.return_value = {"ok": 1}
+    mock_requests.get.side_effect = [limited, ok]
+
+    assert dex_client._safe_get("http://example.invalid") == {"ok": 1}
+    assert mock_requests.get.call_count == 2
+    assert mock_sleep.called, "429 后必须等待再重试"
+
+
+@patch("dex_client.time.sleep")
+@patch("dex_client.requests")
+def test_safe_get_gives_up_after_max_retries(mock_requests, mock_sleep):
+    limited = MagicMock()
+    limited.status_code = 429
+    limited.headers = {}
+    mock_requests.get.return_value = limited
+
+    assert dex_client._safe_get("http://example.invalid") is None
+    assert mock_requests.get.call_count == dex_client.RATE_LIMIT_RETRIES + 1
+
+
+@patch("dex_client.time.sleep")
+@patch("dex_client.requests")
+def test_safe_get_does_not_retry_other_errors(mock_requests, mock_sleep):
+    missing = MagicMock()
+    missing.status_code = 404
+    missing.headers = {}
+    mock_requests.get.return_value = missing
+
+    assert dex_client._safe_get("http://example.invalid") is None
+    assert mock_requests.get.call_count == 1, "404 不该重试"
+    assert not mock_sleep.called
