@@ -237,7 +237,7 @@ def test_get_token_rsi_uses_close_series(mock_ohlcv, mock_ta):
     rsi, price = monitor_rsi.get_token_rsi("sol", "ADDR", "1h", 3)
     assert rsi == pytest.approx(42.5)
     assert price == pytest.approx(5.0)
-    mock_ohlcv.assert_called_once_with("sol", "ADDR", "1h")
+    mock_ohlcv.assert_called_once_with("sol", "ADDR", "1h", None)
 
 
 @patch("dex_client.fetch_ohlcv")
@@ -302,3 +302,35 @@ def test_safe_get_does_not_retry_other_errors(mock_requests, mock_sleep):
     assert dex_client._safe_get("http://example.invalid") is None
     assert mock_requests.get.call_count == 1, "404 不该重试"
     assert not mock_sleep.called
+
+
+@patch("dex_client.time.sleep")
+@patch("dex_client.requests")
+def test_safe_get_ignores_zero_retry_after(mock_requests, mock_sleep):
+    """服务器回 Retry-After: 0 时不能「等 0 秒」重试，必须有真实退避."""
+    limited = MagicMock()
+    limited.status_code = 429
+    limited.headers = {"Retry-After": "0"}
+    mock_requests.get.return_value = limited
+
+    assert dex_client._safe_get("http://example.invalid") is None
+    waits = [c.args[0] for c in mock_sleep.call_args_list]
+    assert waits, "必须发生过等待"
+    assert all(w >= 1 for w in waits), f"等待时间过短: {waits}"
+    assert waits == sorted(waits), f"退避应递增: {waits}"
+
+
+def test_token_days_window_is_configurable_and_small():
+    """取数窗口必须可配且明显小于全局 1d 默认（100 天），以免无谓拉满."""
+    import monitor_rsi
+    days = monitor_rsi.DEFAULT_SETTINGS["token"]["days"]
+    assert days <= 30, f"窗口过大: {days} 天"
+    assert days >= 10, f"窗口过小会让 RSI 未收敛: {days} 天"
+
+
+@patch("dex_client.fetch_ohlcv")
+def test_get_token_rsi_forwards_days_window(mock_ohlcv):
+    import monitor_rsi
+    mock_ohlcv.return_value = (None, None, None, None, [1.0, 2.0, 3.0, 4.0], None)
+    monitor_rsi.get_token_rsi("sol", "ADDR", "1d", 3, 15)
+    assert mock_ohlcv.call_args[0][3] == 15

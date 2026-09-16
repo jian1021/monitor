@@ -94,11 +94,13 @@ def _safe_get(url: str, timeout: int = 15, **kwargs) -> Optional[dict]:
             if resp.status_code == 200:
                 return resp.json()
             if resp.status_code == 429 and attempt < RATE_LIMIT_RETRIES:
-                retry_after = resp.headers.get("Retry-After")
+                # 服务器常回 Retry-After: 0，直接采信会导致「等 0 秒」瞬间重试完、
+                # 重试形同虚设；因此以指数退避为下限，仅当服务器要求更久时才加长。
+                wait = RATE_LIMIT_BACKOFF * (2 ** attempt)
                 try:
-                    wait = float(retry_after)
+                    wait = max(wait, float(resp.headers.get("Retry-After")))
                 except (TypeError, ValueError):
-                    wait = RATE_LIMIT_BACKOFF * (2 ** attempt)
+                    pass
                 wait = min(wait, RATE_LIMIT_MAX_WAIT)
                 print(f"⏳ HTTP 429 限流，{wait:.0f}s 后重试 ({attempt + 1}/{RATE_LIMIT_RETRIES})",
                       file=sys.stderr)

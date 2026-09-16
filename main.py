@@ -130,7 +130,7 @@ if __name__ == "__main__":
         chain = item.get("chain") or "sol"
         cfg_name = item.get("name", code)
         rsi, price = monitor_rsi.get_token_rsi(
-            chain, code, t_set["resolution"], t_set["period"])
+            chain, code, t_set["resolution"], t_set["period"], t_set.get("days"))
         if rsi is not None and price is not None:
             short = code[:10]
             print(f"✅ [链上代币] {cfg_name}({short}...) {chain} 现价: {price:.8g}, "
