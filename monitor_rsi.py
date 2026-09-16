@@ -37,7 +37,7 @@ DEFAULT_SETTINGS = {
         "rsi_high": 90
     },
     "token": {
-        "resolution": "1h",
+        "resolution": "1d",
         "period": 3,
         "rsi_low": 10,
         "rsi_high": 90
