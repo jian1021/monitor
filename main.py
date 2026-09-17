@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import ta
 import baostock as bs
-from db import  get_db_client,load_instruments
+from db import get_db_client, load_instruments
 import monitor_meteora_pump
 from send_feishu_msg import send_feishu_msg
 import traceback
@@ -15,23 +15,24 @@ import lp_position_alert
 from config import FEISHU_WEBHOOK
 from monitor_meteora_pump import run_pump_strategy_monitor
 from monitor_robinhood_pump import run_monitor
+
 headers = {'User-Agent': 'Mozilla/5.0'}
 
 
+# ================= 各子程序执行间隔配置（秒） =================
+INTERVALS = {
+    "rsi":              60 *24* 60,   # RSI 监控（OKX / Meteora / 可转债 / ETF / 链上代币）：30 分钟
+    "meteora_pump":      5 * 60,   # Meteora pump 策略监控：5 分钟
+    "robinhood_pump":    5 * 60,   # RobinHood pump 策略监控：5 分钟
+    "lp_alert":          5 * 60,   # LP 仓位 / 池子价格告警：5 分钟
+}
+
+# 主循环轮询间隔（秒）—— 决定对"到期"的感知精度，设短一点即可
+POLL_INTERVAL = 30
 
 
-
-# ================= 主程序逻辑 =================
-if __name__ == "__main__":
-    import traceback
-    
-  
-    config = load_instruments()
-
-    if not config:
-        print("停止运行：未能加载有效的配置文件。")
-        exit(1)
-
+# ================= RSI 监控（原 main 核心逻辑，抽成函数） =================
+def run_rsi_monitor(config: dict) -> None:
     messages = []
     bs_login_ok = False
     try:
@@ -143,7 +144,7 @@ if __name__ == "__main__":
                                 f"现价: {price:.8g}，{token_tf} RSI: {rsi:.2f} (高于 {t_set['rsi_high']})")
         time.sleep(random.uniform(0.8, 1.5))
 
-    # 6.发送RSI告警
+    # 6. 发送 RSI 告警
     if messages:
         full_msg = "\n\n".join(messages)
         send_feishu_msg(FEISHU_WEBHOOK, full_msg)
@@ -151,29 +152,74 @@ if __name__ == "__main__":
         print("所有标的 RSI 均处于正常区间，不触发推送。")
 
 
-    print("\n====== 开始执行 meteora pump 策略监控 ======")
-    try:
-     
-        run_pump_strategy_monitor()
-    except Exception as e:
-        print(f"❌ run_pump_strategy_monitor() 发生异常：{e}")
-        traceback.print_exc()
+# ================= 主程序逻辑 =================
+if __name__ == "__main__":
 
-    print("\n====== 开始执行 RobinHood pump 策略监控 ======")
-    try:
-        run_monitor()
-    except Exception as e:
-        print(f"❌ run_monitor() 发生异常：{e}")
-        traceback.print_exc()
+    config = load_instruments()
+    if not config:
+        print("停止运行：未能加载有效的配置文件。")
+        exit(1)
 
-    print("\n====== 开始执行 LP 仓位 / 池子价格告警监控 ======")
-    try:
-        lp_position_alert.ensure_table()
-        lp_position_alert.run_once()
-    except Exception as e:
-        print(f"❌ lp_position_alert 发生异常：{e}")
-        traceback.print_exc()
+    # 各子任务上次执行时间（初始化为 0，让程序启动时立即执行一轮）
+    last_run: dict[str, float] = {key: 0.0 for key in INTERVALS}
 
-    print("\n✅ main.py 全部任务执行完毕")
+    print("🚀 主循环启动，各子程序独立间隔：")
+    for name, secs in INTERVALS.items():
+        print(f"   {name}: 每 {secs // 60} 分钟执行一次")
 
+    while True:
+        now = time.time()
 
+        # ── RSI 监控 ──────────────────────────────────────────
+        if now - last_run["rsi"] >= INTERVALS["rsi"]:
+            print(f"\n{'='*50}")
+            print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 RSI 监控")
+            try:
+                run_rsi_monitor(config)
+            except Exception as e:
+                print(f"❌ run_rsi_monitor() 发生异常：{e}")
+                traceback.print_exc()
+            last_run["rsi"] = time.time()
+
+        # ── Meteora pump 策略监控 ──────────────────────────────
+        if now - last_run["meteora_pump"] >= INTERVALS["meteora_pump"]:
+            print(f"\n{'='*50}")
+            print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 Meteora pump 策略监控")
+            try:
+                run_pump_strategy_monitor()
+            except Exception as e:
+                print(f"❌ run_pump_strategy_monitor() 发生异常：{e}")
+                traceback.print_exc()
+            last_run["meteora_pump"] = time.time()
+
+        # ── RobinHood pump 策略监控 ────────────────────────────
+        if now - last_run["robinhood_pump"] >= INTERVALS["robinhood_pump"]:
+            print(f"\n{'='*50}")
+            print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 RobinHood pump 策略监控")
+            try:
+                run_monitor()
+            except Exception as e:
+                print(f"❌ run_monitor() 发生异常：{e}")
+                traceback.print_exc()
+            last_run["robinhood_pump"] = time.time()
+
+        # ── LP 仓位 / 池子价格告警 ─────────────────────────────
+        if now - last_run["lp_alert"] >= INTERVALS["lp_alert"]:
+            print(f"\n{'='*50}")
+            print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 LP 仓位 / 池子价格告警")
+            try:
+                lp_position_alert.ensure_table()
+                lp_position_alert.run_once()
+            except Exception as e:
+                print(f"❌ lp_position_alert 发生异常：{e}")
+                traceback.print_exc()
+            last_run["lp_alert"] = time.time()
+
+        # 计算距离下一个最近到期任务还有多少秒，精准 sleep
+        next_due = min(
+            last_run[key] + interval
+            for key, interval in INTERVALS.items()
+        )
+        sleep_secs = max(1.0, min(next_due - time.time(), POLL_INTERVAL))
+        print(f"\n💤 [{time.strftime('%H:%M:%S')}] 等待 {sleep_secs:.0f} 秒后检查下一轮...")
+        time.sleep(sleep_secs)
