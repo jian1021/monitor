@@ -11,6 +11,9 @@ import streamlit as st
 from asset_config import ASSET_TYPE_MAP
 from asset_config import add_new_asset, batch_update_status_by_type, delete_asset
 from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_status
+from dex_client import search_okx_symbols
+
+CRYPTO_TIMEFRAMES = {"1W": "周线", "1D": "日线", "4H": "4H", "1H": "1H", "15m": "15分钟"}
 
 st.set_page_config(
     page_title="主流加密货币 · 监控标的",
@@ -30,13 +33,27 @@ def render_crypto_adder():
             "标的代码", placeholder="例如: BTC-USDT 或 SOL-USDT",
             help="OKX 交易对格式，例如 BTC-USDT",
         )
+        if st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
+                                   use_container_width=True, type="secondary"):
+            with st.spinner("正在搜索 ..."):
+                st.session_state["crypto_candidates"] = search_okx_symbols(new_code or "BTC")
+
+        candidates = st.session_state.get("crypto_candidates") or []
+        if candidates:
+            picked = st.selectbox("选择要添加的交易对", options=[c["symbol"] for c in candidates],
+                                  key="crypto_pick")
+            if picked and not new_code.strip():
+                new_code = picked
+
         new_name = st.text_input(
             "标的名称 (可选)", placeholder="例如: 比特币",
             help="仅用于展示，留空则取代码",
         )
+        new_timeframe = st.selectbox("时间级别", options=list(CRYPTO_TIMEFRAMES.keys()),
+                                     format_func=lambda x: CRYPTO_TIMEFRAMES[x])
         submitted = st.form_submit_button("添加主流加密货币", type="primary")
         if submitted and new_code.strip():
-            if add_new_asset("crypto", new_code, new_name or new_code):
+            if add_new_asset("crypto", new_code, new_name or new_code, timeframe=new_timeframe):
                 st.success(f"✅ 已添加主流加密货币: {new_code.strip()}")
                 st.rerun()
 
@@ -66,13 +83,16 @@ for type_key in FOCUS_TYPES:
         st.rerun()
 
     for _, row in sub_df.iterrows():
-        c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 1])
-        c1.write(f"**{row['name']}** ({row['code']})")
-        c2.write(f"ID: {row['id']}")
-        c3.write("✅ 启用" if row["enabled"] else "⛔ 停用")
-        if c4.button("切换启用/停用", key=f"toggle_{type_key}_{row['id']}"):
-            update_asset_status(row["id"], not row["enabled"])
-            st.rerun()
-        if c5.button("🗑️", key=f"delete_{type_key}_{row['id']}"):
-            delete_asset(row["id"])
-            st.rerun()
+        c1, c2, c3, c4, c5, c6 = st.columns([2.5, 1.5, 1, 1.5, 1, 1])
+        with c1: st.caption(f"**{row['name']}** ({row['code']})")
+        with c2: st.caption(f"⏱ {row.get('timeframe', '—')}")
+        with c3: st.caption(f"ID: {row['id']}")
+        with c4: st.caption("✅ 启用" if row["enabled"] else "⛔ 停用")
+        with c5:
+            if st.button("切换启用/停用", key=f"toggle_{type_key}_{row['id']}"):
+                update_asset_status(row["id"], not row["enabled"])
+                st.rerun()
+        with c6:
+            if st.button("🗑️", key=f"delete_{type_key}_{row['id']}"):
+                delete_asset(row["id"])
+                st.rerun()

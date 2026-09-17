@@ -200,13 +200,11 @@ if _missing:
     st.warning("⚠️ 检测到当前运行的模块是旧版（缺失：" + "、".join(_missing) +
                "），链上代币等新功能不可用。请在 Streamlit Cloud 上重启 / 重新部署后再试。")
 
-# 明确定义资产映射，包含对应数据库中的 'meteora'
+# 明确定义资产映射（加密货币和链上代币已移至独立页面）
 ASSET_TYPE_MAP = {
-    "crypto": "🪙 加密货币",
     "meteora": "☄️ Meteora 池",
     "bond": "📈 可转债",
     "etf": "📊 ETF",
-    "token": "🔗 链上代币",
 }
 
 # --- 侧边栏：添加新标的与登出 ---
@@ -302,15 +300,11 @@ if not df.empty:
 
     st.divider()
 
-# 使用 Tab 标签页区分各类资产（即使暂无数据也渲染，否则链上代币没有添加入口）
+# 使用 Tab 标签页区分各类资产
 tabs = st.tabs([ASSET_TYPE_MAP[key] for key in ASSET_TYPE_MAP.keys()])
 
 for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
     with tab:
-        if type_key == "token":
-            render_token_adder()
-            st.divider()
-
         sub_df = df[df["asset_type"] == type_key] if not df.empty else df
 
         if sub_df.empty:
@@ -334,7 +328,7 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
                     st.rerun()
 
         # 区分不同类别的列表字段头显示
-        code_col_title = {"meteora": "池子 Address", "token": "合约地址"}.get(
+        code_col_title = {"meteora": "池子 Address"}.get(
             type_key, "标的代码")
 
         edited_df = st.data_editor(

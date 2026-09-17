@@ -78,16 +78,18 @@ def fetch_all_assets():
     try:
         try:
             rs = client.execute(
+                "SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe"
+                " FROM asset_config ORDER BY id ASC"
+            )
+            has_chain = True
+            has_timeframe = True
+        except Exception:
+            rs = client.execute(
                 "SELECT id, asset_type, code, name, enabled, created_at, chain"
                 " FROM asset_config ORDER BY id ASC"
             )
             has_chain = True
-        except Exception:
-            rs = client.execute(
-                "SELECT id, asset_type, code, name, enabled, created_at"
-                " FROM asset_config ORDER BY id ASC"
-            )
-            has_chain = False
+            has_timeframe = False
         data = []
         for row in rs.rows:
             data.append({
@@ -98,6 +100,7 @@ def fetch_all_assets():
                 "enabled": bool(row[4]),
                 "created_at": row[5],
                 "chain": (row[6] if has_chain and len(row) > 6 else None) or "sol",
+                "timeframe": (row[7] if has_timeframe and len(row) > 7 else None) or "1W",
             })
         return pd.DataFrame(data)
     except Exception as e:
@@ -145,16 +148,16 @@ def batch_update_status_by_type(asset_type: str, enabled: bool):
         client.close()
 
 
-def add_new_asset(asset_type: str, code: str, name: str, chain: str = None):
+def add_new_asset(asset_type: str, code: str, name: str, chain: str = None, timeframe: str = None):
     """新增标的"""
     client = get_db_client()
     if not client:
         return False
     try:
         client.execute(
-            "INSERT INTO asset_config (asset_type, code, name, enabled, chain)"
-            " VALUES (?, ?, ?, 1, ?)",
-            [asset_type, code.strip(), name.strip() or code.strip(), chain or "sol"]
+            "INSERT INTO asset_config (asset_type, code, name, enabled, chain, timeframe)"
+            " VALUES (?, ?, ?, 1, ?, ?)",
+            [asset_type, code.strip(), name.strip() or code.strip(), chain or "sol", timeframe or "1W"]
         )
         return True
     except Exception as e:

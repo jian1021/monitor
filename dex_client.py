@@ -395,6 +395,31 @@ def search_tokens(chain: str, query: str, limit: int = 10) -> list:
     return out
 
 
+def search_okx_symbols(query: str, limit: int = 10) -> list:
+    """按符号搜索 OKX 现货交易对，返回候选列表供人工挑选.
+
+    匹配 instId 或 base 包含 query 的交易对。
+    """
+    if requests is None or not query.strip():
+        return []
+    data = _safe_get(f"{OKX_BASE}/api/v5/public/instruments?instType=SPOT")
+    instruments = (data or {}).get("data") or []
+    q = query.strip().upper()
+    matches = [i for i in instruments if q in i.get("instId", "").upper()
+               or q in i.get("base", "").upper()]
+    out = []
+    seen = set()
+    for inst in matches[:limit * 2]:
+        symbol = inst.get("instId")
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        out.append({"symbol": symbol, "name": f"{inst.get('base', '')}/{inst.get('quote', '')}"})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _fetch_ohlcv_okx_dex(chain: str, token_address: str, resolution: str, days):
     """用 OKX DEX 取 K 线；链不支持或取不到时返回 None（由调用方回退 GeckoTerminal）."""
     index = OKX_DEX_CHAIN_INDEX.get((chain or "").lower())

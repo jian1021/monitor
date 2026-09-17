@@ -14,6 +14,8 @@ from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_sta
 from asset_config import stale_module_names, token_candidates, format_candidate
 from asset_config import TOKEN_CHAINS, CHAIN_LABELS
 
+TOKEN_TIMEFRAMES = {"1d": "日线", "4h": "4H", "1h": "1H"}
+
 st.set_page_config(
     page_title="链上代币 · 监控标的",
     page_icon="🔗",
@@ -36,6 +38,9 @@ def render_token_adder():
     tok_chain = col_chain.selectbox(
         "所属公链", options=TOKEN_CHAINS,
         format_func=lambda x: CHAIN_LABELS.get(x, x), key="tok_chain")
+    tok_timeframe = col_chain.selectbox(
+        "时间级别", options=list(TOKEN_TIMEFRAMES.keys()),
+        format_func=lambda x: TOKEN_TIMEFRAMES[x], key="tok_tf")
     tok_query = col_query.text_input(
         "代币名称或合约地址", key="tok_query",
         placeholder="例如 PENGU，或直接粘合约地址")
@@ -59,7 +64,7 @@ def render_token_adder():
     if st.button("✅ 添加该代币", key="tok_add", type="primary"):
         chosen = next(c for c in candidates if c["address"] == picked)
         final_name = chosen.get("symbol") or chosen.get("name") or picked[:10]
-        if add_new_asset("token", chosen["address"], final_name, tok_chain):
+        if add_new_asset("token", chosen["address"], final_name, tok_chain, tok_timeframe):
             st.session_state.pop("tok_candidates", None)
             st.success(f"✅ 已添加: {final_name}（{picked[:10]}...）")
             st.rerun()
@@ -91,15 +96,17 @@ for type_key in FOCUS_TYPES:
         st.rerun()
 
     for _, row in sub_df.iterrows():
-        c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 1])
-        c1.write(f"**{row['name']}** ({row['code']})")
-        c2.write(f"ID: {row['id']}")
+        c1, c2, c3, c4, c5, c6 = st.columns([2.5, 1.5, 1, 1.5, 1, 1])
+        with c1: st.caption(f"**{row['name']}** ({row['code']})")
+        with c2: st.caption(f"⏱ {row.get('timeframe', '—')}")
+        with c3: st.caption(f"ID: {row['id']}")
         chain_label = CHAIN_LABELS.get(row["chain"], row["chain"])
-        c3.write(f"🔗 {chain_label}")
-        c4.write("✅ 启用" if row["enabled"] else "⛔ 停用")
-        if c5.button("切换启用/停用", key=f"toggle_{type_key}_{row['id']}"):
-            update_asset_status(row["id"], not row["enabled"])
-            st.rerun()
-        if st.button("🗑️", key=f"delete_{type_key}_{row['id']}"):
-            delete_asset(row["id"])
-            st.rerun()
+        with c4: st.caption(f"🔗 {chain_label}")
+        with c5:
+            if st.button("切换启用/停用", key=f"toggle_{type_key}_{row['id']}"):
+                update_asset_status(row["id"], not row["enabled"])
+                st.rerun()
+        with c6:
+            if st.button("🗑️", key=f"delete_{type_key}_{row['id']}"):
+                delete_asset(row["id"])
+                st.rerun()
