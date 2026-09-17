@@ -11,7 +11,10 @@ import streamlit as st
 from asset_config import ASSET_TYPE_MAP
 from asset_config import add_new_asset, batch_update_status_by_type, delete_asset
 from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_status
-from dex_client import search_okx_symbols
+try:
+    from dex_client import search_okx_symbols
+except ImportError:
+    search_okx_symbols = None
 
 CRYPTO_TIMEFRAMES = {"1W": "周线", "1D": "日线", "4H": "4H", "1H": "1H", "15m": "15分钟"}
 
@@ -33,10 +36,13 @@ def render_crypto_adder():
             "标的代码", placeholder="例如: BTC-USDT 或 SOL-USDT",
             help="OKX 交易对格式，例如 BTC-USDT",
         )
-        if st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
+        if search_okx_symbols is not None and st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
                                    use_container_width=True, type="secondary"):
             with st.spinner("正在搜索 ..."):
                 st.session_state["crypto_candidates"] = search_okx_symbols(new_code or "BTC")
+        elif search_okx_symbols is None and st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
+                                   use_container_width=True, type="secondary"):
+            st.warning("⚠️ 搜索功能暂时不可用，请直接输入交易对名称添加。")
 
         candidates = st.session_state.get("crypto_candidates") or []
         if candidates:
