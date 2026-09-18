@@ -48,8 +48,12 @@ DEFAULT_SETTINGS = {
 _TIMEFRAME_LABELS = {
     "1W": "周线", "1w": "周线", "w": "周线", "week": "周线",
     "1D": "日线", "1d": "日线", "d": "日线", "day": "日线",
+    "4H": "4H", "4h": "4H",
     "1H": "1H", "1h": "1H", "hour": "1H",
 }
+
+# 链上代币：各 K 线周期的取数窗口（天），与页面 TOKEN_TIMEFRAMES 的 key 对齐
+TOKEN_RESOLUTION_DAYS = {"1h": 5, "4h": 7, "1d": 15}
 
 
 def timeframe_label(key):

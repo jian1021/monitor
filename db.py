@@ -29,12 +29,16 @@ def get_db_client():
 
 
 def ensure_asset_schema():
-    """确保 asset_config 有 chain 列（链上代币需要，老表自动补列）."""
+    """确保 asset_config 有 chain / timeframe 列（链上代币需要，老表自动补列）."""
     client = get_db_client()
     if not client:
         return False
     try:
         client.execute("ALTER TABLE asset_config ADD COLUMN chain TEXT DEFAULT 'sol'")
+    except Exception:
+        pass
+    try:
+        client.execute("ALTER TABLE asset_config ADD COLUMN timeframe TEXT DEFAULT '1d'")
     except Exception:
         pass
     finally:
@@ -138,22 +142,30 @@ def load_instruments():
     try:
         try:
             rs = client.execute(
-                "SELECT asset_type, code, name, chain FROM asset_config"
+                "SELECT asset_type, code, name, chain, timeframe FROM asset_config"
                 " WHERE enabled = 1 ORDER BY id"
             )
-            has_chain = True
+            has_chain, has_timeframe = True, True
         except Exception:
-            rs = client.execute(
-                "SELECT asset_type, code, name FROM asset_config"
-                " WHERE enabled = 1 ORDER BY id"
-            )
-            has_chain = False
+            try:
+                rs = client.execute(
+                    "SELECT asset_type, code, name, chain FROM asset_config"
+                    " WHERE enabled = 1 ORDER BY id"
+                )
+                has_chain, has_timeframe = True, False
+            except Exception:
+                rs = client.execute(
+                    "SELECT asset_type, code, name FROM asset_config"
+                    " WHERE enabled = 1 ORDER BY id"
+                )
+                has_chain, has_timeframe = False, False
     finally:
         client.close()
 
     for row in rs.rows:
         asset_type, code, name = row[0], row[1], row[2]
         chain = (row[3] if has_chain and len(row) > 3 else None) or "sol"
+        timeframe = (row[4] if has_timeframe and len(row) > 4 else None) or "1d"
         if asset_type == "crypto":
             cfg["crypto_okx"].append({"symbol": code})
         elif asset_type == "meteora":
@@ -163,7 +175,7 @@ def load_instruments():
         elif asset_type == "etf":
             cfg["etfs"].append({"code": code, "name": name or code})
         elif asset_type == "token":
-            cfg["tokens"].append({"code": code, "name": name or code, "chain": chain})
+            cfg["tokens"].append({"code": code, "name": name or code, "chain": chain, "timeframe": timeframe})
 
     return cfg
 

@@ -154,11 +154,10 @@ def run_crypto_monitor(config: dict) -> None:
 
 # ================= 链上代币 RSI 监控 =================
 def run_onchain_token_monitor(config: dict) -> None:
-    """独立子程序：链上代币 RSI 监控，独立间隔与告警。"""
+    """独立子程序：链上代币 RSI 监控，独立间隔与告警；时间级别取每个标的的 timeframe。"""
     messages = []
     token_list = config.get("tokens", [])
     t_set = monitor_rsi.DEFAULT_SETTINGS["token"]
-    token_tf = monitor_rsi.timeframe_label(t_set["resolution"])
 
     for item in token_list:
         if not item.get("enabled", True):
@@ -166,8 +165,11 @@ def run_onchain_token_monitor(config: dict) -> None:
         code = str(item.get("code"))
         chain = item.get("chain") or "sol"
         cfg_name = item.get("name", code)
+        resolution = item.get("timeframe") or t_set["resolution"]
+        days = monitor_rsi.TOKEN_RESOLUTION_DAYS.get(resolution, t_set.get("days"))
+        token_tf = monitor_rsi.timeframe_label(resolution)
         rsi, price = monitor_rsi.get_token_rsi(
-            chain, code, t_set["resolution"], t_set["period"], t_set.get("days"))
+            chain, code, resolution, t_set["period"], days)
         if rsi is not None and price is not None:
             short = code[:10]
             print(f"✅ [链上代币] {cfg_name}({short}...) {chain} 现价: {price:.8g}, "
