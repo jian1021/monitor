@@ -21,10 +21,12 @@ class ActionRenderer {
     this.eGui = document.createElement('button');
     this.eGui.innerText = params.colDef.headerName;
     this.eGui.className = 'stButton';
-    this.eGui.onclick = () => params.node.setDataValue(
-      params.colDef.field,
-      true
-    );
+    this.eGui.onclick = (event) => {
+      event.stopPropagation();
+      params.api.stopEditing();
+      params.node.setDataValue(params.colDef.field, true);
+      params.api.refreshCells({rowNodes: [params.node], force: true});
+    };
   }
   getGui() { return this.eGui; }
 }
@@ -93,7 +95,7 @@ def render_asset_grid(
         table,
         gridOptions=grid_options,
         data_return_mode=DataReturnMode.AS_INPUT,
-        update_on=["cellValueChanged"],
+        update_on=["cellValueChanged", "rowValueChanged"],
         allow_unsafe_jscode=True,
         height=min(600, 105 + len(table) * 38),
         key=key,
