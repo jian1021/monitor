@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import ta
 import baostock as bs
-from db import get_db_client, load_instruments, update_asset_alert_state
+from db import get_db_client, load_instruments
 import monitor_meteora_pump
 from send_feishu_msg import send_feishu_msg
 import traceback
@@ -66,29 +66,6 @@ def compute_sleep_seconds(
     return max(1.0, min(next_due - now, POLL_INTERVAL))
 
 
-def process_rsi_alert(item, rsi, price, settings, label):
-    """更新单个 A 股 RSI 标的状态并返回本轮需要推送的消息。"""
-    low, high = settings["rsi_low"], settings["rsi_high"]
-    direction = "超卖" if rsi < low else ("超买" if rsi > high else None)
-    if direction is None:
-        update_asset_alert_state(
-            item.get("id"), active=False, latched=False,
-            rsi=rsi, price=price, alert=False)
-        return None
-
-    already_latched = bool(item.get("alert_latched"))
-    is_currently_active = bool(item.get("alarm_active"))
-    update_asset_alert_state(
-        item.get("id"), active=(is_currently_active or not already_latched), latched=True,
-        rsi=rsi, price=price, alert=not already_latched)
-    if already_latched:
-        return None
-    code = item.get("code") or item.get("symbol") or "-"
-    name = item.get("name") or code
-    return (f"🚨 【{label} RSI {direction}】{name}"
-            f"({code}) 现价: {price:.3f}，RSI: {rsi:.2f}")
-
-
 # ================= RSI 监控（Meteora 池 / 可转债 / ETF） =================
 def run_rsi_monitor(config: dict) -> None:
     messages = []
@@ -132,9 +109,10 @@ def run_rsi_monitor(config: dict) -> None:
         rsi, price = monitor_rsi.get_a_share_rsi(code, bs_login_ok, length=b_set["period"], frequency=b_set["frequency"])
         if rsi is not None and price is not None:
             print(f"✅ [可转债] {cfg_name}({code}) 现价: {price:.2f}, {bond_tf} RSI({b_set['period']}): {rsi:.2f}")
-            alert = process_rsi_alert(item, rsi, price, b_set, "可转债")
-            if alert:
-                messages.append(alert)
+            if rsi < b_set["rsi_low"]:
+                messages.append(f"🚨 【可转债 RSI 超卖】{cfg_name}({code}) 现价: {price:.2f} 元，{bond_tf} RSI: {rsi:.2f} (低于 {b_set['rsi_low']})")
+            elif rsi > b_set["rsi_high"]:
+                messages.append(f"⚠️ 【可转债 RSI 超买】{cfg_name}({code}) 现价: {price:.2f} 元，{bond_tf} RSI: {rsi:.2f} (高于 {b_set['rsi_high']})")
         time.sleep(random.uniform(0.8, 1.5))
 
     # 3. ETF 监控
@@ -149,9 +127,10 @@ def run_rsi_monitor(config: dict) -> None:
         rsi, price = monitor_rsi.get_a_share_rsi(code, bs_login_ok, length=e_set["period"], frequency=e_set["frequency"])
         if rsi is not None and price is not None:
             print(f"✅ [ETF] {cfg_name}({code}) 现价: {price:.3f}, {etf_tf} RSI({e_set['period']}): {rsi:.2f}")
-            alert = process_rsi_alert(item, rsi, price, e_set, "ETF")
-            if alert:
-                messages.append(alert)
+            if rsi < e_set["rsi_low"]:
+                messages.append(f"🚨 【ETF RSI 超卖】{cfg_name}({code}) 现价: {price:.3f} 元，{etf_tf} RSI: {rsi:.2f} (低于 {e_set['rsi_low']})")
+            elif rsi > e_set["rsi_high"]:
+                messages.append(f"⚠️ 【ETF RSI 超买】{cfg_name}({code}) 现价: {price:.3f} 元，{etf_tf} RSI: {rsi:.2f} (高于 {e_set['rsi_high']})")
         time.sleep(random.uniform(0.8, 1.5))
 
     if bs_login_ok:
@@ -182,9 +161,10 @@ def run_crypto_monitor(config: dict) -> None:
         rsi, price = monitor_rsi.get_okx_rsi(symbol, c_set["interval"], c_set["period"])
         if rsi is not None and price is not None:
             print(f"✅ [OKX] {symbol} 现价: ${price:.4f}, {crypto_tf} RSI({c_set['period']}): {rsi:.2f}")
-            alert = process_rsi_alert(coin, rsi, price, c_set, symbol)
-            if alert:
-                messages.append(alert.replace("现价:", "现价 $", 1))
+            if rsi < c_set["rsi_low"]:
+                messages.append(f"🚨 【{symbol} 超卖】现价 ${price:.4f}，{crypto_tf} RSI: {rsi:.2f} (低于 {c_set['rsi_low']})")
+            elif rsi > c_set["rsi_high"]:
+                messages.append(f"⚠️ 【{symbol} 超买】现价 ${price:.4f}，{crypto_tf} RSI: {rsi:.2f} (高于 {c_set['rsi_high']})")
 
     if messages:
         send_feishu_msg(FEISHU_WEBHOOK, "\n\n".join(messages))
@@ -211,13 +191,14 @@ def run_onchain_token_monitor(config: dict) -> None:
         rsi, price = monitor_rsi.get_token_rsi(
             chain, code, resolution, t_set["period"], days)
         if rsi is not None and price is not None:
-            print(f"✅ [链上代币] {cfg_name}({code}) {chain} 现价: {price:.8g}, "
+            short = code[:10]
+            print(f"✅ [链上代币] {cfg_name}({short}...) {chain} 现价: {price:.8g}, "
                   f"{token_tf} RSI({t_set['period']}): {rsi:.2f}")
             if rsi < t_set["rsi_low"]:
-                messages.append(f"🚨 【链上代币 RSI 超卖】{cfg_name}({code}) 链 {chain} "
+                messages.append(f"🚨 【链上代币 RSI 超卖】{cfg_name}({short}...) 链 {chain} "
                                 f"现价: {price:.8g}，{token_tf} RSI: {rsi:.2f} (低于 {t_set['rsi_low']})")
             elif rsi > t_set["rsi_high"]:
-                messages.append(f"⚠️ 【链上代币 RSI 超买】{cfg_name}({code}) 链 {chain} "
+                messages.append(f"⚠️ 【链上代币 RSI 超买】{cfg_name}({short}...) 链 {chain} "
                                 f"现价: {price:.8g}，{token_tf} RSI: {rsi:.2f} (高于 {t_set['rsi_high']})")
         time.sleep(random.uniform(0.8, 1.5))
 
