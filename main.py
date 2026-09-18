@@ -46,6 +46,26 @@ def refresh_intervals(force: bool = False) -> dict[str, int]:
     return _intervals_cache
 
 
+def compute_sleep_seconds(
+    intervals: dict[str, int],
+    module_settings: dict,
+    last_run: dict[str, float],
+    now: float,
+) -> float:
+    """本轮应睡眠的秒数：取"启用中"任务里最近到期的时间，封顶 POLL_INTERVAL。
+    停用任务的 last_run 永远停在 0（从未执行），若参与计算会把到期时间算到 1970 年，
+    导致每轮空转 1 秒，所以必须排除；全部停用时按轮询间隔空转。"""
+    enabled_due = [
+        last_run[key] + interval
+        for key, interval in intervals.items()
+        if module_settings.get(key, True)
+    ]
+    if not enabled_due:
+        return POLL_INTERVAL
+    next_due = min(enabled_due)
+    return max(1.0, min(next_due - now, POLL_INTERVAL))
+
+
 # ================= RSI 监控（Meteora 池 / 可转债 / ETF） =================
 def run_rsi_monitor(config: dict) -> None:
     messages = []
@@ -278,10 +298,6 @@ if __name__ == "__main__":
             last_run["lp_alert"] = time.time()
 
         # 计算距离下一个最近到期任务还有多少秒，精准 sleep
-        next_due = min(
-            last_run[key] + interval
-            for key, interval in intervals.items()
-        )
-        sleep_secs = max(1.0, min(next_due - time.time(), POLL_INTERVAL))
+        sleep_secs = compute_sleep_seconds(intervals, module_settings, last_run, now)
         print(f"\n💤 [{time.strftime('%H:%M:%S')}] 等待 {sleep_secs:.0f} 秒后检查下一轮...")
         time.sleep(sleep_secs)
