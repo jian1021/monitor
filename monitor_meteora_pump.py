@@ -46,6 +46,42 @@ def load_active_strategies():
     return strategies
 
 
+def fetch_tokens_by_strategy(strategy: dict):
+    """兼容旧版策略表：按策略参数查询历史 token_market_data。"""
+    client = get_db_client()
+    if not client:
+        return []
+
+    params = strategy.get("params") or {}
+    query = """
+    SELECT address, symbol, market_cap, liquidity, total_fee_sol, created_at,
+           ROUND((julianday('now') - julianday(created_at)) * 24, 1) AS age_hours
+    FROM token_market_data
+    WHERE market_cap >= ?
+      AND liquidity >= ?
+      AND total_fee_sol >= ?
+      AND julianday(created_at) <= julianday('now', '-' || ? || ' hours')
+      AND julianday(created_at) >= julianday('now', '-' || ? || ' hours')
+    ORDER BY created_at DESC
+    """
+    values = [
+        params.get("min_market_cap", 0),
+        params.get("min_liquidity", 0),
+        params.get("min_fee_sol", 0),
+        params.get("min_age_hours", 0),
+        params.get("max_age_hours", 9999),
+    ]
+    try:
+        result = client.execute(query, values)
+        columns = [column[0] for column in result.columns]
+        return [dict(zip(columns, row)) for row in result.rows]
+    except Exception as exc:
+        print(f"❌ 执行策略 [{strategy.get('config_name', '')}] 检索失败: {exc}")
+        return []
+    finally:
+        client.close()
+
+
 # ================= 3. 全量抓取 100+ 池子（安全抗封锁版） =================
 def fetch_meteora_raw_pools():
     session = requests.Session()

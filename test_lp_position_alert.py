@@ -154,6 +154,37 @@ def test_evaluate_never_raises_on_missing_current_values():
     assert lpa.evaluate(_rule(), {}) == {"target": False, "floor": False}
 
 
+def test_alert_state_columns_are_persisted_and_reset_keeps_deduplication_flags():
+    assert "alarm_active" in lpa.COLUMNS
+    assert "last_alert_at" in lpa.COLUMNS
+    assert "alarm_active" in lpa.CREATE_TABLE_SQL
+    assert "last_alert_at" in lpa.CREATE_TABLE_SQL
+
+
+@patch("lp_position_alert._execute")
+def test_reset_alerts_only_clears_current_alarm_state(mock_execute):
+    mock_execute.return_value = True
+
+    assert lpa.reset_alerts(7) is True
+    sql, params = mock_execute.call_args.args
+    assert "alarm_active = 0" in sql
+    assert "target_alerted = 0" not in sql
+    assert "floor_alerted = 0" not in sql
+    assert params == [7]
+
+
+@patch("lp_position_alert._execute")
+def test_mark_alerted_records_alarm_state_and_timestamp(mock_execute):
+    mock_execute.return_value = True
+
+    assert lpa.mark_alerted(7, "floor_alerted") is True
+    sql, params = mock_execute.call_args.args
+    assert "floor_alerted = 1" in sql
+    assert "alarm_active = 1" in sql
+    assert "last_alert_at = datetime('now')" in sql
+    assert params == [7]
+
+
 def test_evaluate_pool_price_ignores_zero_or_missing_entry():
     rule = _rule(kind="pool_price", target_mode="price_pct", target_pct=10.0, entry_price=0.0)
     assert lpa.evaluate(rule, {"price": 999.0})["target"] is False
@@ -889,3 +920,35 @@ def test_check_rule_evm_v4_returns_error_when_rpc_fails(mock_cur, mock_status):
     assert res["status"] == "error"
     assert res["fired"] == []
     assert res["message"] is None
+
+
+# ---- target_alerted 自动恢复（needs_rearm_target）----
+def test_target_price():
+    assert lpa._target_price({"entry_price": "100", "target_pct": "10"}) == 110.0
+    assert lpa._target_price({"entry_price": "100", "target_pct": "0"}) == 100.0
+    assert lpa._target_price({"entry_price": None, "target_pct": "10"}) is None
+
+
+def test_needs_rearm_target_false_when_not_alerted():
+    assert lpa.needs_rearm_target({"rearm": True, "target_alerted": False,
+                                  "entry_price": "100", "target_pct": "10"}, {}) is False
+
+
+def test_needs_rearm_target_false_when_price_above_target():
+    """价格仍在目标价之上（处于告警区间）→ 不恢复。"""
+    rule = {"rearm": True, "target_alerted": True, "entry_price": "100",
+            "target_pct": "10", "kind": "pool_price"}
+    assert lpa.needs_rearm_target(rule, {"price": 120.0}) is False
+
+
+def test_needs_rearm_target_true_when_price_below_target():
+    """价格回落至目标价以下 → 恢复 target_alerted。"""
+    rule = {"rearm": True, "target_alerted": True, "entry_price": "100",
+            "target_pct": "10", "kind": "pool_price"}
+    assert lpa.needs_rearm_target(rule, {"price": 105.0}) is True
+
+
+def test_needs_rearm_target_respects_rearm_flag():
+    rule = {"rearm": False, "target_alerted": True, "entry_price": "100",
+            "target_pct": "10", "kind": "pool_price"}
+    assert lpa.needs_rearm_target(rule, {"price": "105"}) is False

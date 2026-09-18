@@ -344,6 +344,8 @@ view = pd.DataFrame([{
         if r["kind"] == "evm_v4" and r.get("min_price") and r.get("max_price")
         else "-"),
     "状态": {"open": "🟢 监控中", "closed": "⚫ 已关闭", "error": "🔴 取数失败"}.get(r["status"], r["status"]),
+    "报警状态": "🔴 报警中" if r["alarm_active"] else "🟢 未报警",
+    "最近报警时间": r["last_alert_at"] or "-",
     "启用": r["enabled"],
     "已告警": "".join([
         "盈利" if r["target_alerted"] else "",
@@ -359,7 +361,7 @@ for r in rules:
     if o2.button("暂停" if r["enabled"] else "启用", key=f"tg_{r['id']}"):
         lpa.set_enabled(r["id"], not r["enabled"])
         st.rerun()
-    if o3.button("重置告警", key=f"rs_{r['id']}"):
+    if o3.button("重置报警", key=f"rs_{r['id']}"):
         lpa.reset_alerts(r["id"])
         st.rerun()
     if o4.button("删除", key=f"dl_{r['id']}"):

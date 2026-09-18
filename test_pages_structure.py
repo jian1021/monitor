@@ -49,3 +49,29 @@ def test_detector_actually_catches_the_pattern():
         "        print('永远不会执行')\n"
     )
     assert _unreachable_after_terminator(tree) != []
+
+
+def test_onchain_token_page_does_not_rerun_for_unalerted_rows():
+    source = open("pages/st_onchain_token.py", encoding="utf-8").read()
+    assert 'st.caption("—")\n                st.rerun()' not in source
+
+
+def test_monitor_settings_page_owns_module_controls():
+    settings_source = open("pages/monitor_settings.py", encoding="utf-8").read()
+    assets_source = open("pages/app.py", encoding="utf-8").read()
+    assert "监控模块启停" in settings_source
+    assert "监控模块执行间隔" in settings_source
+    assert "监控模块启停" not in assets_source
+    assert "监控模块执行间隔" not in assets_source
+
+
+def test_monitor_settings_page_is_registered_under_system_management():
+    source = open("index.py", encoding="utf-8").read()
+    assert 'pages/monitor_settings.py' in source
+    assert "系统管理" in source
+
+
+def test_mainstream_crypto_assets_render_as_a_table():
+    source = open("pages/st_mainstream_crypto.py", encoding="utf-8").read()
+    assert "render_asset_grid" in source
+    assert "for _, row in sub_df.iterrows()" not in source

@@ -78,18 +78,19 @@ def fetch_all_assets():
     try:
         try:
             rs = client.execute(
-                "SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe"
+                "SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe, "
+                "alarm_active, last_alert_at"
                 " FROM asset_config ORDER BY id ASC"
             )
             has_chain = True
             has_timeframe = True
         except Exception:
             rs = client.execute(
-                "SELECT id, asset_type, code, name, enabled, created_at, chain"
+                "SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe"
                 " FROM asset_config ORDER BY id ASC"
             )
             has_chain = True
-            has_timeframe = False
+            has_timeframe = True
         data = []
         for row in rs.rows:
             data.append({
@@ -101,6 +102,8 @@ def fetch_all_assets():
                 "created_at": row[5],
                 "chain": (row[6] if has_chain and len(row) > 6 else None) or "sol",
                 "timeframe": (row[7] if has_timeframe and len(row) > 7 else None) or "1W",
+                "alarm_active": bool(row[8]) if len(row) > 8 else False,
+                "last_alert_at": row[9] if len(row) > 9 else None,
             })
         return pd.DataFrame(data)
     except Exception as e:

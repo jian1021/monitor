@@ -53,6 +53,7 @@ price_monitor = st.Page("pages/st_monitor_price.py", title="价格监控", icon=
 pool_simulator = st.Page("pages/st_pool_simulator.py", title="池子价格模拟", icon=":material/science:")
 token_distribution = st.Page("pages/distribution.py", title="代币分布图", icon=":material/bar_chart:")
 lp_position_alert_page = st.Page("pages/lp_position_alert.py", title="LP 仓位告警", icon=":material/notifications_active:")
+monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设置", icon=":material/tune:")
 
 
 # ================= 4. 路由守卫与导航挂载 =================
@@ -61,7 +62,7 @@ if st.session_state.logged_in:
     pg = st.navigation(
         {
             "策略与数据": [dashboard, mainstream_crypto, onchain_token, discover_lp, lp_bands, price_monitor, pool_simulator, token_distribution, lp_position_alert_page],
-            "系统管理": [logout_page],
+            "系统管理": [monitor_settings, logout_page],
         }
     )
 else:

@@ -11,6 +11,8 @@ import streamlit as st
 from asset_config import ASSET_TYPE_MAP
 from asset_config import add_new_asset, batch_update_status_by_type, delete_asset
 from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_status
+from db import reset_asset_alert
+from asset_grid import render_asset_grid
 try:
     from dex_client import search_okx_symbols
 except ImportError:
@@ -88,17 +90,10 @@ for type_key in FOCUS_TYPES:
         batch_update_status_by_type(type_key, False)
         st.rerun()
 
-    for _, row in sub_df.iterrows():
-        c1, c2, c3, c4, c5, c6 = st.columns([2.5, 1.5, 1, 1.5, 1, 1])
-        with c1: st.caption(f"**{row['name']}** ({row['code']})")
-        with c2: st.caption(f"⏱ {row.get('timeframe', '—')}")
-        with c3: st.caption(f"ID: {row['id']}")
-        with c4: st.caption("✅ 启用" if row["enabled"] else "⛔ 停用")
-        with c5:
-            if st.button("切换启用/停用", key=f"toggle_{type_key}_{row['id']}"):
-                update_asset_status(row["id"], not row["enabled"])
-                st.rerun()
-        with c6:
-            if st.button("🗑️", key=f"delete_{type_key}_{row['id']}"):
-                delete_asset(row["id"])
-                st.rerun()
+    table = sub_df[["name", "code", "timeframe", "id", "enabled", "alarm_active", "last_alert_at"]].rename(columns={
+        "name": "名称", "code": "交易对", "timeframe": "时间级别", "id": "ID",
+        "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
+    })
+    render_asset_grid(table, key=f"crypto_table_{type_key}", reset_asset_alert=reset_asset_alert,
+                      delete_asset=delete_asset,
+                      update_asset_status=update_asset_status)

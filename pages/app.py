@@ -4,10 +4,10 @@ import streamlit as st
 from libsql_client import create_client_sync
 from config import FEISHU_WEBHOOK
 from db import get_db_client
-from db import get_module_settings, update_module_setting
-from db import DEFAULT_INTERVALS, get_module_intervals, update_module_interval
+from db import reset_asset_alert
 import db as _db
 import dex_client as _dex
+from asset_grid import render_asset_grid
 
 # 链上代币：可用名称搜索，也可直接填合约地址
 TOKEN_CHAINS = ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"]
@@ -90,7 +90,7 @@ def fetch_all_assets():
     try:
         try:
             rs = client.execute(
-                "SELECT id, asset_type, code, name, enabled, created_at, chain"
+                "SELECT id, asset_type, code, name, enabled, created_at, chain, alarm_active, last_alert_at"
                 " FROM asset_config ORDER BY id ASC"
             )
             has_chain = True
@@ -110,6 +110,8 @@ def fetch_all_assets():
                 "enabled": bool(row[4]),
                 "created_at": row[5],
                 "chain": (row[6] if has_chain and len(row) > 6 else None) or "sol",
+                "alarm_active": bool(row[7]) if has_chain and len(row) > 7 else False,
+                "last_alert_at": row[8] if has_chain and len(row) > 8 else None,
             })
         return pd.DataFrame(data)
     except Exception as e:
@@ -196,48 +198,6 @@ def delete_asset(asset_id: int):
 # =============================================================================
 st.title("⚙️ 监控标的配置管理")
 st.caption("在此页面配置需监控的资产标的及其启用/禁用状态，支持一键批量修改，变更实时同步至 Turso 数据库。")
-
-# --- 模块启停控制 ---
-MODULE_LABELS = {
-    "rsi": "📊 RSI 监控",
-    "crypto": "🪙 加密货币",
-    "onchain_token": "🔗 链上代币",
-    "meteora_pump": "☄️ Meteora pump 策略监控",
-    "robinhood_pump": "🎰 RobinHood pump 策略监控",
-    "lp_alert": "💧 LP 仓位 / 池子价格告警",
-}
-
-st.markdown("##### 🎛️ 监控模块启停")
-module_settings = get_module_settings()
-
-cols = st.columns(len(MODULE_LABELS))
-for idx, (mod_key, mod_label) in enumerate(MODULE_LABELS.items()):
-    with cols[idx]:
-        current = module_settings.get(mod_key, True)
-        enabled = st.toggle(mod_label, value=current, key=f"mod_{mod_key}")
-        if enabled != current:
-            update_module_setting(mod_key, enabled)
-            st.rerun()
-
-# --- 模块执行间隔设置（分钟，实时写入，主循环 ≤60s 内生效） ---
-st.markdown("##### ⏱️ 监控模块执行间隔（分钟）")
-intervals = get_module_intervals(DEFAULT_INTERVALS)
-
-int_cols = st.columns(len(MODULE_LABELS))
-for idx, (mod_key, mod_label) in enumerate(MODULE_LABELS.items()):
-    with int_cols[idx]:
-        current_min = int(intervals.get(mod_key, DEFAULT_INTERVALS.get(mod_key, 5)))
-        new_min = st.number_input(
-            mod_label,
-            min_value=1,
-            max_value=10080,
-            value=current_min,
-            step=5,
-            key=f"interval_{mod_key}",
-        )
-        if new_min != current_min:
-            update_module_interval(mod_key, new_min)
-            st.rerun()
 
 st.divider()
 
@@ -377,49 +337,9 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
         code_col_title = {"meteora": "池子 Address"}.get(
             type_key, "标的代码")
 
-        edited_df = st.data_editor(
-            sub_df,
-            column_config={
-                "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
-                "asset_type": None,  # 隐藏字段
-                "code": st.column_config.TextColumn(code_col_title, disabled=True),
-                "chain": st.column_config.TextColumn("链", disabled=True, width="small"),
-                "name": st.column_config.TextColumn("标的/交易对名称", disabled=True),
-                "enabled": st.column_config.CheckboxColumn("是否启用 🟢/🔴", default=True),
-                "created_at": st.column_config.DatetimeColumn("添加时间", disabled=True, format="YYYY-MM-DD HH:mm"),
-            },
-            hide_index=True,
-            use_container_width=True,
-            key=f"editor_{type_key}"
-        )
-
-        # 保存按钮只占左侧窄栏，不要横贯整页
-        save_col, _ = st.columns([1, 4])
-        if save_col.button("💾 保存状态", key=f"save_{type_key}", type="primary",
-                           use_container_width=True):
-            changes_count = 0
-            for _, row in edited_df.iterrows():
-                orig_row = sub_df[sub_df["id"] == row["id"]].iloc[0]
-                if row["enabled"] != orig_row["enabled"]:
-                    update_asset_status(row["id"], row["enabled"])
-                    changes_count += 1
-
-            if changes_count > 0:
-                st.success(f"✅ 成功更新 {changes_count} 条标的状态！")
-                st.rerun()
-            else:
-                st.info("ℹ️ 未检测到状态变化。")
-
-        # 下方删除工具
-        with st.expander("🗑️ 删除该分类下的标的"):
-            del_id = st.selectbox(
-                "选择要删除的标的",
-                options=sub_df["id"].tolist(),
-                format_func=lambda x: f"ID:{x} - {sub_df[sub_df['id']==x]['code'].values[0]} ({sub_df[sub_df['id']==x]['name'].values[0]})",
-                key=f"del_select_{type_key}"
-            )
-            if st.button("确认彻底删除", key=f"del_btn_{type_key}"):
-                if delete_asset(del_id):
-                    st.success("✅ 删除成功！")
-                    st.rerun()
-
+        grid_df = sub_df[["id", "name", "code", "chain", "enabled", "alarm_active", "last_alert_at"]].rename(columns={
+            "id": "ID", "name": "名称", "code": code_col_title, "chain": "链",
+            "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
+        })
+        render_asset_grid(grid_df, key=f"editor_{type_key}", reset_asset_alert=reset_asset_alert,
+                          delete_asset=delete_asset, update_asset_status=update_asset_status)

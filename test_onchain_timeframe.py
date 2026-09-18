@@ -46,6 +46,17 @@ def test_alert_message_uses_asset_resolution_label():
     assert "1H RSI" in msg
 
 
+def test_alert_message_contains_full_token_contract_address():
+    address = "Dz9mQ9NzkB1234567890abcdefghijkLMNOPQRST"
+    with patch.object(monitor_rsi, "get_token_rsi", return_value=(5.0, 0.5)), \
+         patch("main.send_feishu_msg") as send:
+        main.run_onchain_token_monitor(fake_config(
+            {"code": address, "name": "USELESS", "chain": "sol", "timeframe": "1h"},
+        ))
+
+    assert address in send.call_args[0][1]
+
+
 def test_timeframe_label_knows_4h():
     assert monitor_rsi.timeframe_label("4h") == "4H"
     assert monitor_rsi.TOKEN_RESOLUTION_DAYS["4h"] == 7

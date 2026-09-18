@@ -169,6 +169,34 @@ def needs_rearm(rule, cur):
     return value > float(rule["floor_price"])
 
 
+def _target_price(rule):
+    """目标价门槛 = entry_price * (100 + target_pct) / 100。"""
+    entry = rule.get("entry_price")
+    tgt = rule.get("target_pct")
+    if entry is None or tgt is None:
+        return None
+    try:
+        return float(entry) * (100.0 + float(tgt)) / 100.0
+    except (TypeError, ValueError):
+        return None
+
+
+def needs_rearm_target(rule, cur):
+    """目标价回落至门槛以下时解除 target_alerted，使下次达标重新告警。"""
+    if not rule.get("rearm") or not rule.get("target_alerted"):
+        return False
+    tp = _target_price(rule)
+    if tp is None:
+        return False
+    if rule.get("kind") == "evm_v4":
+        price = cur.get("active_price")
+        return price is not None and price < tp
+    price = cur.get("price")
+    if price is None or float(rule.get("entry_price")) <= 0:
+        return False
+    return price < tp
+
+
 def units_plausible(active_price, pool_current_price, tolerance=100.0):
     """校验 poolActivePrice 与池子 current_price 同尺度.
 
@@ -196,6 +224,7 @@ COLUMNS = (
     "target_mode", "target_pct", "entry_price",
     "enable_target_alert", "enable_floor_alert", "rearm", "enabled",
     "target_alerted", "floor_alerted",
+    "alarm_active", "last_alert_at",
     "last_pnl_pct", "last_active_price", "last_checked_at",
     "is_out_of_range", "status",
     "token_id", "entry_tick", "price_basis",
@@ -205,6 +234,8 @@ MIGRATION_COLUMNS = (
     ("token_id", "INTEGER"),
     ("entry_tick", "INTEGER"),
     ("price_basis", "TEXT"),
+    ("alarm_active", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_alert_at", "TEXT"),
 )
 
 CREATE_TABLE_SQL = """
@@ -232,6 +263,8 @@ CREATE TABLE IF NOT EXISTS lp_position_alert (
     enabled             INTEGER NOT NULL DEFAULT 1,
     target_alerted      INTEGER NOT NULL DEFAULT 0,
     floor_alerted       INTEGER NOT NULL DEFAULT 0,
+    alarm_active        INTEGER NOT NULL DEFAULT 0,
+    last_alert_at       TEXT,
     last_pnl_pct        REAL,
     last_active_price   REAL,
     last_checked_at     TEXT,
@@ -254,7 +287,7 @@ def _row_to_rule(row):
     rule = {name: row[i] for i, name in enumerate(COLUMNS)}
     rule["id"] = row[len(COLUMNS)]
     for flag in ("enable_target_alert", "enable_floor_alert", "rearm",
-                 "enabled", "target_alerted", "floor_alerted"):
+                 "enabled", "target_alerted", "floor_alerted", "alarm_active"):
         rule[flag] = bool(rule[flag])
     if rule.get("is_out_of_range") is not None:
         rule["is_out_of_range"] = bool(rule["is_out_of_range"])
@@ -324,7 +357,9 @@ def load_rules(enabled_only=True, kind=None):
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY id"
     rows = _execute(sql, params, fetch=True)
-    return [_row_to_rule(r) for r in (rows or [])]
+    if not isinstance(rows, list):
+        return []
+    return [_row_to_rule(r) for r in rows]
 
 
 def delete_rule(rule_id):
@@ -338,14 +373,17 @@ def set_enabled(rule_id, enabled):
 
 def reset_alerts(rule_id):
     return _execute(
-        "UPDATE lp_position_alert SET target_alerted = 0, floor_alerted = 0 WHERE id = ?",
+        "UPDATE lp_position_alert SET alarm_active = 0 WHERE id = ?",
         [rule_id]) is True
 
 
 def clear_alert_flag(rule_id, field):
     if field not in ("target_alerted", "floor_alerted"):
         raise ValueError(f"非法字段: {field}")
-    return _execute(f"UPDATE lp_position_alert SET {field} = 0 WHERE id = ?",
+    other = "floor_alerted" if field == "target_alerted" else "target_alerted"
+    return _execute(
+        f"UPDATE lp_position_alert SET {field} = 0, "
+        f"alarm_active = CASE WHEN {other} = 1 THEN 1 ELSE 0 END WHERE id = ?",
                     [rule_id]) is True
 
 
@@ -368,7 +406,8 @@ def mark_alerted(rule_id, field):
         raise ValueError(f"非法字段: {field}")
     return _execute(
         f"UPDATE lp_position_alert SET {field} = 1, "
-        f"last_checked_at = datetime('now') WHERE id = ?",
+        "alarm_active = 1, last_alert_at = datetime('now'), "
+        "last_checked_at = datetime('now') WHERE id = ?",
         [rule_id]) is True
 
 
@@ -585,6 +624,8 @@ def check_rule(rule):
 
     if needs_rearm(rule, cur):
         clear_alert_flag(rule["id"], "floor_alerted")
+    if needs_rearm_target(rule, cur):
+        clear_alert_flag(rule["id"], "target_alerted")
 
     return {"status": STATUS_OPEN, "fired": fired, "cur": cur, "message": message}
 
