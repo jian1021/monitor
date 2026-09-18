@@ -68,10 +68,8 @@ def render_asset_grid(
     table["删除"] = False
     gb = GridOptionsBuilder.from_dataframe(table)
     gb.configure_default_column(resizable=True, sortable=True, filter=True)
-    gb.configure_column("ID", editable=False, width=80)
     gb.configure_column("名称", editable=False)
     gb.configure_column("交易对", editable=False)
-    gb.configure_column("合约地址", editable=False)
     gb.configure_column("时间级别", editable=False, width=100)
     gb.configure_column("报警中", editable=False, width=100)
     gb.configure_column("最近报警时间", editable=False, width=180)
