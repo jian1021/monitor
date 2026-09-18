@@ -13,8 +13,10 @@ from asset_config import add_new_asset, batch_update_status_by_type, delete_asse
 from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_status
 from asset_config import stale_module_names, token_candidates, format_candidate
 from asset_config import TOKEN_CHAINS, CHAIN_LABELS
+from db import get_db_client
 
 TOKEN_TIMEFRAMES = {"1d": "日线", "4h": "4H", "1h": "1H"}
+TIMEFRAME_LABELS = {v: k for k, v in TOKEN_TIMEFRAMES.items()}
 
 st.set_page_config(
     page_title="链上代币 · 监控标的",
@@ -95,10 +97,41 @@ for type_key in FOCUS_TYPES:
         batch_update_status_by_type(type_key, False)
         st.rerun()
 
+    col_tf1, col_tf2 = st.columns(2)
+    with col_tf1:
+        if st.button("🔄 批量切换为日线", key=f"batch_daily_{type_key}"):
+            client = get_db_client()
+            if client:
+                try:
+                    client.execute(
+                        "UPDATE asset_config SET timeframe = '1d' WHERE asset_type = 'token' AND timeframe != '1d'"
+                    )
+                    st.success("✅ 已将所有链上代币时间级别更新为日线")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 更新失败: {e}")
+                finally:
+                    client.close()
+    with col_tf2:
+        if st.button("🔄 批量切换为1H", key=f"batch_1h_{type_key}"):
+            client = get_db_client()
+            if client:
+                try:
+                    client.execute(
+                        "UPDATE asset_config SET timeframe = '1h' WHERE asset_type = 'token' AND timeframe != '1h'"
+                    )
+                    st.success("✅ 已将所有链上代币时间级别更新为1H")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 更新失败: {e}")
+                finally:
+                    client.close()
+
     for _, row in sub_df.iterrows():
         c1, c2, c3, c4, c5, c6 = st.columns([2.5, 1.5, 1, 1.5, 1, 1])
         with c1: st.caption(f"**{row['name']}** ({row['code']})")
-        with c2: st.caption(f"⏱ {row.get('timeframe', '—')}")
+        raw_tf = row.get('timeframe', '—')
+        with c2: st.caption(f"⏱ {TIMEFRAME_LABELS.get(raw_tf, raw_tf)}")
         with c3: st.caption(f"ID: {row['id']}")
         chain_label = CHAIN_LABELS.get(row["chain"], row["chain"])
         with c4: st.caption(f"🔗 {chain_label}")

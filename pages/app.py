@@ -4,6 +4,8 @@ import streamlit as st
 from libsql_client import create_client_sync
 from config import FEISHU_WEBHOOK
 from db import get_db_client
+from db import get_module_settings, update_module_setting
+from db import DEFAULT_INTERVALS, get_module_intervals, update_module_interval
 import db as _db
 import dex_client as _dex
 
@@ -194,6 +196,50 @@ def delete_asset(asset_id: int):
 # =============================================================================
 st.title("⚙️ 监控标的配置管理")
 st.caption("在此页面配置需监控的资产标的及其启用/禁用状态，支持一键批量修改，变更实时同步至 Turso 数据库。")
+
+# --- 模块启停控制 ---
+MODULE_LABELS = {
+    "rsi": "📊 RSI 监控",
+    "crypto": "🪙 加密货币",
+    "onchain_token": "🔗 链上代币",
+    "meteora_pump": "☄️ Meteora pump 策略监控",
+    "robinhood_pump": "🎰 RobinHood pump 策略监控",
+    "lp_alert": "💧 LP 仓位 / 池子价格告警",
+}
+
+st.markdown("##### 🎛️ 监控模块启停")
+module_settings = get_module_settings()
+
+cols = st.columns(len(MODULE_LABELS))
+for idx, (mod_key, mod_label) in enumerate(MODULE_LABELS.items()):
+    with cols[idx]:
+        current = module_settings.get(mod_key, True)
+        enabled = st.toggle(mod_label, value=current, key=f"mod_{mod_key}")
+        if enabled != current:
+            update_module_setting(mod_key, enabled)
+            st.rerun()
+
+# --- 模块执行间隔设置（分钟，实时写入，主循环 ≤60s 内生效） ---
+st.markdown("##### ⏱️ 监控模块执行间隔（分钟）")
+intervals = get_module_intervals(DEFAULT_INTERVALS)
+
+int_cols = st.columns(len(MODULE_LABELS))
+for idx, (mod_key, mod_label) in enumerate(MODULE_LABELS.items()):
+    with int_cols[idx]:
+        current_min = int(intervals.get(mod_key, DEFAULT_INTERVALS.get(mod_key, 5)))
+        new_min = st.number_input(
+            mod_label,
+            min_value=1,
+            max_value=10080,
+            value=current_min,
+            step=5,
+            key=f"interval_{mod_key}",
+        )
+        if new_min != current_min:
+            update_module_interval(mod_key, new_min)
+            st.rerun()
+
+st.divider()
 
 _missing = stale_module_names()
 if _missing:
