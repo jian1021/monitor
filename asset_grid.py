@@ -114,3 +114,4 @@ def render_asset_grid(
             st.rerun()
         if row.get("删除"):
             st.session_state["pending_delete_asset"] = asset_id
+            st.rerun()
