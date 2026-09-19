@@ -33,6 +33,22 @@ class ActionRenderer {
 """
 
 
+GRID_CSS = {
+    ".ag-header-cell-label": {"justify-content": "center", "font-weight": "600"},
+    ".ag-row-hover": {"background-color": "#eef4fb"},
+    ".stButton": {
+        "height": "26px",
+        "padding": "0 12px",
+        "border-radius": "6px",
+        "border": "1px solid #d0d5dd",
+        "background": "#ffffff",
+        "color": "#1f2933",
+        "font-size": "12px",
+        "cursor": "pointer",
+    },
+}
+
+
 def render_asset_grid(
     data: pd.DataFrame,
     *,
@@ -97,6 +113,8 @@ def render_asset_grid(
         update_on=["cellValueChanged", "rowValueChanged"],
         allow_unsafe_jscode=True,
         height=min(600, 105 + len(table) * 38),
+        theme="material",
+        custom_css=GRID_CSS,
         key=key,
     )
 

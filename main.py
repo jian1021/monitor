@@ -237,6 +237,10 @@ if __name__ == "__main__":
         print("停止运行：未能加载有效的配置文件。")
         exit(1)
 
+    # 界面增删改资产后，常驻进程需周期性重载配置才会生效
+    CONFIG_REFRESH_SECONDS = 60
+    last_config_refresh = time.time()
+
     # 各子任务上次执行时间（初始化为 0，让程序启动时立即执行一轮）
     last_run: dict[str, float] = {key: 0.0 for key in DEFAULT_INTERVALS}
 
@@ -248,6 +252,14 @@ if __name__ == "__main__":
 
     while True:
         now = time.time()
+        # 定期重载资产配置：让界面上的删除/新增在 60 秒内生效
+        if now - last_config_refresh >= CONFIG_REFRESH_SECONDS:
+            try:
+                config = load_instruments()
+            except Exception as e:
+                print(f"⚠️ 刷新资产配置失败，沿用上一次配置: {e}")
+            last_config_refresh = now
+
         module_settings = get_module_settings()
         intervals = refresh_intervals()
 
