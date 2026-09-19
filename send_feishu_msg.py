@@ -2,14 +2,16 @@ import requests
 import os
 
 
-def send_feishu_msg(webhook, msg):
+def send_feishu_msg(webhook, msg) -> bool:
     if not webhook:
         print(f"未配置 Webhook，仅日志打印:\n{msg}")
-        return
+        return False
     try:
         resp = requests.post(webhook, json={"msg_type": "text", "content": {"text": msg}}, timeout=10)
         print(f"📩飞书推送 status={resp.status_code}")
+        return resp.status_code == 200
     except Exception as e:
         import traceback
         print(f"❌飞书消息发送异常 {e}")
         traceback.print_exc()
+        return False
