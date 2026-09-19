@@ -186,15 +186,15 @@ def load_instruments():
             "last_price": row[10] if len(row) > 10 else None,
         }
         if asset_type == "crypto":
-            cfg["crypto_okx"].append({"symbol": code, **alert_state})
+            cfg["crypto_okx"].append({"symbol": code, "timeframe": timeframe, **alert_state})
         elif asset_type == "meteora":
-            cfg["meteora"].append({"code": code, "name": name or code})
+            cfg["meteora"].append({"code": code, "name": name or code, **alert_state})
         elif asset_type == "bond":
             cfg["convertible_bonds"].append({"code": code, "name": name or code, **alert_state})
         elif asset_type == "etf":
             cfg["etfs"].append({"code": code, "name": name or code, **alert_state})
         elif asset_type == "token":
-            cfg["tokens"].append({"code": code, "name": name or code, "chain": chain, "timeframe": timeframe})
+            cfg["tokens"].append({"code": code, "name": name or code, "chain": chain, "timeframe": timeframe, **alert_state})
 
     return cfg
 
@@ -279,7 +279,9 @@ def get_module_intervals(defaults: dict | None = None) -> dict:
         rs = client.execute("SELECT module_name, interval_minutes FROM module_intervals")
         for row in rs.rows:
             try:
-                base[str(row[0])] = max(1, int(str(row[1])))
+                name = str(row[0])
+                if name in base:
+                    base[name] = max(1, int(str(row[1])))
             except (TypeError, ValueError):
                 continue
         return base
@@ -307,6 +309,82 @@ def update_module_interval(module_name: str, interval_minutes: int):
         return True
     except Exception as e:
         print(f"❌ 更新模块间隔设置失败: {e}")
+        return False
+    finally:
+        client.close()
+
+
+# ================= 推送去重（pump 类监控，跨轮 / 跨重启） =================
+PUMP_ALERT_TTL_HOURS = 24
+
+
+def ensure_pump_alert_schema():
+    """确保 pump_alert_sent 表存在（记录已推送过的代币地址）."""
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute("""
+            CREATE TABLE IF NOT EXISTS pump_alert_sent (
+                module TEXT NOT NULL,
+                address TEXT NOT NULL,
+                sent_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (module, address)
+            )
+        """)
+        return True
+    except Exception as e:
+        print(f"❌ 创建 pump_alert_sent 表失败: {e}")
+        return False
+    finally:
+        client.close()
+
+
+def filter_unpushed(module: str, addresses, ttl_hours: int = PUMP_ALERT_TTL_HOURS) -> list:
+    """返回 addresses 中 TTL 内尚未推送过的地址（保序去重）；出错时全部返回，宁可重复也不漏报."""
+    unique = list(dict.fromkeys(a for a in addresses if a))
+    if not unique:
+        return []
+    ensure_pump_alert_schema()
+    client = get_db_client()
+    if not client:
+        return unique
+    try:
+        placeholders = ",".join("?" for _ in unique)
+        rs = client.execute(
+            f"SELECT address FROM pump_alert_sent WHERE module = ?"
+            f" AND address IN ({placeholders}) AND sent_at >= datetime('now', ?)",
+            [module, *unique, f"-{int(ttl_hours)} hours"],
+        )
+        pushed = {row[0] for row in rs.rows}
+        return [a for a in unique if a not in pushed]
+    except Exception as e:
+        print(f"❌ 读取推送去重失败: {e}")
+        return unique
+    finally:
+        client.close()
+
+
+def mark_pushed(module: str, addresses) -> bool:
+    """记录已推送地址；失败不抛异常，不阻塞告警发送."""
+    unique = list(dict.fromkeys(a for a in addresses if a))
+    if not unique:
+        return False
+    ensure_pump_alert_schema()
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        for address in unique:
+            client.execute(
+                "INSERT INTO pump_alert_sent (module, address, sent_at)"
+                " VALUES (?, ?, datetime('now'))"
+                " ON CONFLICT(module, address) DO UPDATE SET sent_at = datetime('now')",
+                [module, address],
+            )
+        return True
+    except Exception as e:
+        print(f"❌ 写入推送去重失败: {e}")
         return False
     finally:
         client.close()

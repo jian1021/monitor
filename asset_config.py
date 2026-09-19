@@ -101,7 +101,7 @@ def fetch_all_assets():
                 "enabled": bool(row[4]),
                 "created_at": row[5],
                 "chain": (row[6] if has_chain and len(row) > 6 else None) or "sol",
-                "timeframe": (row[7] if has_timeframe and len(row) > 7 else None) or "1W",
+                "timeframe": (row[7] if has_timeframe and len(row) > 7 else None) or "1d",
                 "alarm_active": bool(row[8]) if len(row) > 8 else False,
                 "last_alert_at": row[9] if len(row) > 9 else None,
             })

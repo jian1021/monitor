@@ -182,9 +182,15 @@ def _target_price(rule):
 
 
 def needs_rearm_target(rule, cur):
-    """目标价回落至门槛以下时解除 target_alerted，使下次达标重新告警。"""
+    """目标回落至门槛以下时解除 target_alerted，使下次达标重新告警。"""
     if not rule.get("rearm") or not rule.get("target_alerted"):
         return False
+    if rule.get("target_mode") == "pnl_pct":
+        value = cur.get("pnl_pct")
+        tgt = rule.get("target_pct")
+        if value is None or tgt is None:
+            return False
+        return value < float(tgt)
     tp = _target_price(rule)
     if tp is None:
         return False

@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 import requests
 from config import FEISHU_WEBHOOK
-from db import get_db_client
+from db import get_db_client, filter_unpushed, mark_pushed
 from send_feishu_msg import send_feishu_msg
 
 # ================= 1. 代理配置（根据需要取消注释或调整端口） =================
@@ -229,21 +229,23 @@ def filter_pools_by_strategy(pools: list, strategy: dict, sol_price: float = 150
             except Exception:
                 created_ts = 0
 
-        age_hours = (now - created_ts) / 3600.0 if created_ts > 0 else 0
+        age_hours = (now - created_ts) / 3600.0 if created_ts > 0 else None
 
         # 控制台打印进度
         mc_display = (
             f"${market_cap:>10,.0f}" if raw_mc > 0 else f"~$ {market_cap:>9,.0f}"
         )
+        age_display = f"{age_hours:>5.1f}h" if age_hours is not None else "   未知"
         print(
-            f"  [扫描中] 池子: {pool_name:<25} | 市值(估): {mc_display} | TVL: ${tvl:>8,.0f} | 创池: {age_hours:>5.1f}h"
+            f"  [扫描中] 池子: {pool_name:<25} | 市值(估): {mc_display} | TVL: ${tvl:>8,.0f} | 创池: {age_display}"
         )
 
-        # 阀值判断
+        # 创建时间未知的池子无法判断新老，跳过，避免把老池当成"刚开盘"误报
         if (
             market_cap >= min_market_cap
             and tvl >= min_liquidity
             and total_fee_sol >= min_fee_sol
+            and age_hours is not None
             and min_age_hours <= age_hours <= max_age_hours
         ):
             mint_x = pool.get("mint_x", "")
@@ -287,6 +289,8 @@ def run_pump_strategy_monitor():
 
     total_hits = 0
     all_push_messages = []
+    pushed_this_run = []
+    seen_this_run = set()
 
     for strat in strategies:
         config_name = strat["config_name"]
@@ -294,35 +298,45 @@ def run_pump_strategy_monitor():
 
         print(f"🔍 正在执行策略: 【{config_name}】({config_id})...")
         tokens = filter_pools_by_strategy(raw_pools, strat)
-
+        tokens = [t for t in tokens if t.get("address") and t["address"] not in seen_this_run]
         if tokens:
-            count = len(tokens)
-            total_hits += count
-            print(f"\n  🎯 策略【{config_name}】命中 {count} 个标的！")
+            fresh = set(filter_unpushed("meteora_pump", [t["address"] for t in tokens]))
+            tokens = [t for t in tokens if t["address"] in fresh]
 
-            msg_lines = [f"📌 匹配策略: 【{config_name}】(符合标的: {count} 个)"]
+        if not tokens:
+            print(f"\n  ℹ️ 策略【{config_name}】暂无（新的）符合条件的标的。")
+            continue
 
-            for t in tokens[:5]:
-                gmgn_url = (
-                    f"https://gmgn.ai/sol/token/{t['address']}"
-                    if t["address"]
-                    else "N/A"
-                )
-                meteora_url = (
-                    f"https://app.meteora.ag/dlmm/{t['pool_address']}"
-                    if t["pool_address"]
-                    else "N/A"
-                )
-                msg_lines.append(
-                    f"• {t['symbol']} | 估算市值:${t['market_cap']:,.0f} | TVL:${t['liquidity']:,.0f}\n"
-                    f"  预估24h手续费:{t['total_fee_sol']} SOL | 开盘:{t['age_hours']}h 前\n"
-                    f"  🔗 GMGN: {gmgn_url}\n"
-                    f"  🌊 Meteora: {meteora_url}"
-                )
+        count = len(tokens)
+        total_hits += count
+        seen_this_run.update(t["address"] for t in tokens)
+        pushed_this_run.extend(t["address"] for t in tokens)
+        print(f"\n  🎯 策略【{config_name}】命中 {count} 个新标的！")
 
-            all_push_messages.append("\n".join(msg_lines))
-        else:
-            print(f"\n  ℹ️ 策略【{config_name}】暂无符合条件的标的。")
+        shown = tokens[:5]
+        msg_lines = [f"📌 匹配策略: 【{config_name}】(符合标的: {count} 个)"]
+        if count > len(shown):
+            msg_lines.append(f"（消息仅列出前 {len(shown)} 个）")
+
+        for t in shown:
+            gmgn_url = (
+                f"https://gmgn.ai/sol/token/{t['address']}"
+                if t["address"]
+                else "N/A"
+            )
+            meteora_url = (
+                f"https://app.meteora.ag/dlmm/{t['pool_address']}"
+                if t["pool_address"]
+                else "N/A"
+            )
+            msg_lines.append(
+                f"• {t['symbol']} | 估算市值:${t['market_cap']:,.0f} | TVL:${t['liquidity']:,.0f}\n"
+                f"  预估24h手续费:{t['total_fee_sol']} SOL | 开盘:{t['age_hours']}h 前\n"
+                f"  🔗 GMGN: {gmgn_url}\n"
+                f"  🌊 Meteora: {meteora_url}"
+            )
+
+        all_push_messages.append("\n".join(msg_lines))
 
     if all_push_messages:
         final_push_text = (
@@ -333,6 +347,7 @@ def run_pump_strategy_monitor():
             )
         )
         send_feishu_msg(FEISHU_WEBHOOK, final_push_text)
+        mark_pushed("meteora_pump", pushed_this_run)
         print(f"\n🎉 监控完毕，已向飞书发送告警，累计命中 {total_hits} 个标的。")
     else:
         print("\n✨ 所有策略轮询完毕，当前没有满足阀值的新标的。")

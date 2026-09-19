@@ -17,7 +17,7 @@ def compute_sleep_seconds(
     enabled_due = [
         last_run[key] + interval
         for key, interval in intervals.items()
-        if module_settings.get(key, True)
+        if key in last_run and module_settings.get(key, True)
     ]
     if not enabled_due:
         return poll_interval

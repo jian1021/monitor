@@ -3,6 +3,7 @@ import requests
 from datetime import datetime
 from config import FEISHU_WEBHOOK
 from send_feishu_msg import send_feishu_msg
+from db import filter_unpushed, mark_pushed
 
 DEXSCREENER_BASE = "https://api.dexscreener.com"
 GECKO_BASE = "https://api.geckoterminal.com/api/v2"
@@ -11,9 +12,6 @@ SCAN_INTERVAL = 60          # 扫描间隔（秒）
 MAX_AGE_HOURS = 5.0
 MIN_MC = 1_000_000
 MIN_TVL = 100_000
-
-# 已推送过的地址，防止重复报警
-pushed_addresses = set()
 
 
 def safe_get(url, timeout=15):
@@ -174,7 +172,7 @@ def filter_tokens(raw_pairs):
     for p in raw_pairs:
         base = p.get("baseToken", {})
         address = (base.get("address") or "").lower()
-        if not address or address in pushed_addresses:
+        if not address:
             continue
 
         symbol = base.get("symbol", "UNKNOWN")
@@ -214,7 +212,8 @@ def filter_tokens(raw_pairs):
                 "source": p.get("source", "unknown"),
             })
 
-    return matched
+    fresh = set(filter_unpushed("robinhood_pump", [m["address"] for m in matched]))
+    return [m for m in matched if m["address"] in fresh]
 
 
 # ================= 5. 主循环 =================
@@ -235,7 +234,6 @@ def run_monitor():
                     print(f"\n🎯 命中 {len(hits)} 个代币！推送飞书...")
                     msg_lines = []
                     for h in hits:
-                        pushed_addresses.add(h["address"])
                         short = h["address"][-6:]
                         msg_lines.append(
                             f"• {h['symbol']} ({h['name']}) | ..{short}\n"
@@ -252,6 +250,7 @@ def run_monitor():
                         + "\n\n" + "-"*30 + "\n\n".join(msg_lines)
                     )
                     send_feishu_msg(FEISHU_WEBHOOK, final_text)
+                    mark_pushed("robinhood_pump", [h["address"] for h in hits])
                     print("🎉 飞书推送成功！")
                 else:
                     print("✨ 本次无满足条件的新币")
