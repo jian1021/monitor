@@ -44,7 +44,7 @@ login_page = st.Page(login, title="登录", icon=":material/login:")
 logout_page = st.Page(logout, title="退出登录", icon=":material/logout:")
 
 # 业务页面（指向 pages/ 目录下的独立文件）
-dashboard = st.Page("pages/app.py", title="超卖监控", icon=":material/dashboard:", default=True)
+dashboard = st.Page("pages/dashboard.py", title="超卖监控", icon=":material/dashboard:", default=True)
 mainstream_crypto = st.Page("pages/st_mainstream_crypto.py", title="主流加密货币", icon=":material/monetization_on:")
 onchain_token = st.Page("pages/st_onchain_token.py", title="链上代币", icon=":material/link:")
 discover_lp = st.Page("pages/discover_lp.py", title="LP 策略探索", icon=":material/find_in_page:")
