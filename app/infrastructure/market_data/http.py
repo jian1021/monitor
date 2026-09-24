@@ -9,6 +9,8 @@ try:
 except ImportError:
     requests = None  # type: ignore[assignment]
 
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+
 # GeckoTerminal 免费额度很紧（约 30 次/分钟），批量监控时容易撞 429
 RATE_LIMIT_RETRIES = 4
 RATE_LIMIT_BACKOFF = 3.0
