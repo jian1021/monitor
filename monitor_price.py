@@ -181,6 +181,20 @@ def mark_alerted(rule_id: int):
         client.close()
 
 
+def clear_alerted(rule_id: int):
+    """条件解除后清除告警标志，使下次条件满足时重新推送。"""
+    client = get_db_client()
+    if not client:
+        return
+    try:
+        client.execute(
+            "UPDATE price_alert SET alerted = 0 WHERE id = ?", [rule_id])
+    except Exception as e:
+        print(f"❌ 清除告警状态失败 (id={rule_id}): {e}")
+    finally:
+        client.close()
+
+
 # ============================================================
 # 单轮监控
 # ============================================================
@@ -235,6 +249,9 @@ def run_once():
             send_feishu_msg(FEISHU_WEBHOOK, msg)
             mark_alerted(rule["id"])
             print(f"🚨 已推送告警: [{sym}] {price} {'>=' if rule['direction']=='gte' else '<='} {target}")
+        elif rule["alerted"]:
+            clear_alerted(rule["id"])
+            print(f"🔁 [{sym}] 价格已离开目标价，告警标志自动重置，下次达标将重新推送")
 
     print(f"📊 本轮完成: 成功 {ok}，失败 {fail}")
 

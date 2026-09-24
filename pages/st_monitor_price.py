@@ -150,21 +150,6 @@ def delete_rule(rule_id: int):
         client.close()
 
 
-def reset_alert(rule_id: int):
-    """重置告警标志，允许再次触发推送"""
-    client = get_client()
-    if not client:
-        return False
-    try:
-        client.execute("UPDATE price_alert SET alerted = 0 WHERE id = ?", [rule_id])
-        return True
-    except Exception as e:
-        st.error(f"❌ 重置告警标志失败: {e}")
-        return False
-    finally:
-        client.close()
-
-
 # ============================================================
 # 界面
 # ============================================================
@@ -341,7 +326,7 @@ with st.expander("🔍 立即检查选中规则价格"):
             else:
                 st.error(f"无法解析价格字段: {raw}")
 
-with st.expander("⚙️ 启用 / 停用 / 重置 / 删除", expanded=True):
+with st.expander("⚙️ 启用 / 停用 / 删除", expanded=True):
     manage_sel = st.selectbox(
         "选择规则 ID",
         options=df["id"].tolist(),
@@ -351,7 +336,7 @@ with st.expander("⚙️ 启用 / 停用 / 重置 / 删除", expanded=True):
     manage_id = int(manage_sel)
     rule_row = df[df["id"] == manage_id].iloc[0]
 
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3 = st.columns(3)
     with m1:
         if rule_row["enabled"]:
             if st.button("⏸️ 停用", width="stretch"):
@@ -364,13 +349,8 @@ with st.expander("⚙️ 启用 / 停用 / 重置 / 删除", expanded=True):
                     st.toast("已启用", icon="▶️")
                     st.rerun()
     with m2:
-        if st.button("🔓 重置告警", width="stretch", help="重置后将可再次触发推送"):
-            if reset_alert(manage_id):
-                st.toast("告警标志已重置", icon="🔓")
-                st.rerun()
-    with m3:
         st.caption(f"当前: {'已触发' if rule_row['alerted'] else '未触发'} / 目标 {'≥' if rule_row['direction']=='gte' else '≤'} {rule_row['target_price']}")
-    with m4:
+    with m3:
         with st.popover("🗑️ 删除规则", width="stretch"):
             st.write("⚠️ 删除后不可恢复，确认删除该规则？")
             if st.button("确认删除", type="primary"):
@@ -394,8 +374,8 @@ python monitor_price.py --loop
 python monitor_price.py --loop --interval 300   # 自定义间隔(秒)
 ```
 
-**告警去重**：同一规则首次触发后标记为「已触发」，避免重复轰炸；
-需再次提醒可点「重置告警」。
+**告警去重**：同一规则达标后标记为「已触发」，避免重复轰炸；
+价格离开目标价后自动重置，再次达标会重新推送。
 
 **数据源**：Dexscreener API，无需配置 API Key 或代理。
 """
