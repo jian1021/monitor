@@ -377,12 +377,6 @@ def set_enabled(rule_id, enabled):
                     [1 if enabled else 0, rule_id]) is True
 
 
-def reset_alerts(rule_id):
-    return _execute(
-        "UPDATE lp_position_alert SET alarm_active = 0 WHERE id = ?",
-        [rule_id]) is True
-
-
 def clear_alert_flag(rule_id, field):
     if field not in ("target_alerted", "floor_alerted"):
         raise ValueError(f"非法字段: {field}")

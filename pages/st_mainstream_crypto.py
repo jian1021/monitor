@@ -11,7 +11,6 @@ import streamlit as st
 from asset_config import ASSET_TYPE_MAP
 from asset_config import add_new_asset, batch_update_status_by_type, delete_asset
 from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_status
-from db import reset_asset_alert
 from asset_grid import render_asset_grid
 try:
     from dex_client import search_okx_symbols
@@ -94,6 +93,6 @@ for type_key in FOCUS_TYPES:
         "name": "名称", "code": "交易对", "timeframe": "时间级别", "id": "ID",
         "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
     })
-    render_asset_grid(table, key=f"crypto_table_{type_key}", reset_asset_alert=reset_asset_alert,
+    render_asset_grid(table, key=f"crypto_table_{type_key}",
                       delete_asset=delete_asset,
                       update_asset_status=update_asset_status)

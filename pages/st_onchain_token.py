@@ -13,7 +13,7 @@ from asset_config import add_new_asset, batch_update_status_by_type, delete_asse
 from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_status
 from asset_config import stale_module_names, token_candidates, format_candidate
 from asset_config import TOKEN_CHAINS, CHAIN_LABELS
-from db import get_db_client, reset_asset_alert
+from db import get_db_client
 from asset_grid import render_asset_grid
 
 TOKEN_TIMEFRAMES = {"1d": "日线", "4h": "4H", "1h": "1H"}
@@ -132,6 +132,6 @@ for type_key in FOCUS_TYPES:
         "name": "名称", "code": "合约地址", "timeframe": "时间级别", "id": "ID",
         "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
     })
-    render_asset_grid(table, key=f"token_table_{type_key}", reset_asset_alert=reset_asset_alert,
+    render_asset_grid(table, key=f"token_table_{type_key}",
                       delete_asset=delete_asset,
                       update_asset_status=update_asset_status)

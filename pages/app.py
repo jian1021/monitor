@@ -4,7 +4,6 @@ import streamlit as st
 from libsql_client import create_client_sync
 from config import FEISHU_WEBHOOK
 from db import get_db_client
-from db import reset_asset_alert
 import db as _db
 import dex_client as _dex
 from asset_grid import render_asset_grid
@@ -341,5 +340,5 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
             "id": "ID", "name": "名称", "code": code_col_title, "chain": "链",
             "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
         })
-        render_asset_grid(grid_df, key=f"editor_{type_key}", reset_asset_alert=reset_asset_alert,
+        render_asset_grid(grid_df, key=f"editor_{type_key}",
                           delete_asset=delete_asset, update_asset_status=update_asset_status)

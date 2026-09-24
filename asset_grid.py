@@ -53,7 +53,6 @@ def render_asset_grid(
     data: pd.DataFrame,
     *,
     key: str,
-    reset_asset_alert: Callable[[int], bool],
     delete_asset: Callable[[int], bool],
     update_asset_status: Callable[[int, bool], bool],
 ) -> None:
@@ -80,7 +79,6 @@ def render_asset_grid(
         return
 
     table = data.copy()
-    table["操作"] = False
     table["删除"] = False
     gb = GridOptionsBuilder.from_dataframe(table)
     gb.configure_default_column(resizable=True, sortable=True, filter=True)
@@ -91,13 +89,6 @@ def render_asset_grid(
     gb.configure_column("报警中", editable=False, width=100)
     gb.configure_column("最近报警时间", editable=False, width=180)
     gb.configure_column("启用", editable=True, width=90)
-    gb.configure_column(
-        "操作",
-        header_name="重置报警",
-        editable=True,
-        width=90,
-        cellRenderer=JsCode(ACTION_RENDERER),
-    )
     gb.configure_column(
         "删除",
         editable=True,
@@ -126,10 +117,6 @@ def render_asset_grid(
 
     for row in response.data.to_dict("records"):
         asset_id = int(row["ID"])
-        if row.get("操作"):
-            reset_asset_alert(asset_id)
-            st.toast("✅ 报警状态已重置")
-            st.rerun()
         if row.get("删除"):
             st.session_state["pending_delete_asset"] = asset_id
             st.rerun()

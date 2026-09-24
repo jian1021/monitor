@@ -220,21 +220,6 @@ def update_asset_alert_state(asset_id, *, active, latched, rsi, price, alert):
         client.close()
 
 
-def reset_asset_alert(asset_id):
-    """重置当前显示状态，保留锁直到 RSI 恢复，防止重复报警。"""
-    client = get_db_client()
-    if not client:
-        return False
-    try:
-        client.execute("UPDATE asset_config SET alarm_active = 0 WHERE id = ?", [asset_id])
-        return True
-    except Exception as exc:
-        print(f"❌ 重置资产报警失败: {exc}")
-        return False
-    finally:
-        client.close()
-
-
 # ================= 模块执行间隔设置（分钟，UI 可改） =================
 # 各子程序默认执行间隔（分钟）；module_intervals 表可按模块覆盖。
 DEFAULT_INTERVALS = {

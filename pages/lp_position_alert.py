@@ -356,14 +356,11 @@ st.dataframe(view, use_container_width=True)
  
 st.caption("操作")
 for r in rules:
-    o1, o2, o3, o4 = st.columns([1, 1, 1, 3])
+    o1, o2, o3 = st.columns([1, 1, 3])
     o1.write(f"#{r['id']}")
     if o2.button("暂停" if r["enabled"] else "启用", key=f"tg_{r['id']}"):
         lpa.set_enabled(r["id"], not r["enabled"])
         st.rerun()
-    if o3.button("重置报警", key=f"rs_{r['id']}"):
-        lpa.reset_alerts(r["id"])
-        st.rerun()
-    if o4.button("删除", key=f"dl_{r['id']}"):
+    if o3.button("删除", key=f"dl_{r['id']}"):
         lpa.delete_rule(r["id"])
         st.rerun()
