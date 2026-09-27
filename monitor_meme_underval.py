@@ -4,7 +4,12 @@ from datetime import datetime, timezone
 import requests
 
 from config import FEISHU_WEBHOOK
-from db import filter_unpushed, mark_pushed
+from db import (
+    MEME_PARAM_DEFAULTS,
+    filter_unpushed,
+    get_meme_underval_params,
+    mark_pushed,
+)
 from send_feishu_msg import send_feishu_msg
 
 DATAPI_BASE = "https://dlmm.datapi.meteora.ag"
@@ -14,12 +19,12 @@ USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 USDT_MINT = "Es9vMEdh6CkPauqoXNqcy2FWT8MFL5Sdf5N8V6etG5h"
 QUOTE_MINTS = frozenset({SOL_MINT, USDC_MINT, USDT_MINT})
 
-DEFAULT_MIN_MARKET_CAP = 1_000_000.0
-DEFAULT_MIN_TVL_USD = 100_000.0
-DEFAULT_MIN_BIN_STEP = 100
-DEFAULT_MIN_BASE_FEE_PCT = 2.0
+DEFAULT_MIN_MARKET_CAP = float(MEME_PARAM_DEFAULTS["min_market_cap"])
+DEFAULT_MIN_TVL_USD = float(MEME_PARAM_DEFAULTS["min_tvl_usd"])
+DEFAULT_MIN_BIN_STEP = int(MEME_PARAM_DEFAULTS["min_bin_step"])
+DEFAULT_MIN_BASE_FEE_PCT = float(MEME_PARAM_DEFAULTS["min_base_fee_pct"])
 DEFAULT_RSI_PERIOD = 3
-DEFAULT_RSI_MAX = 10.0
+DEFAULT_RSI_MAX = float(MEME_PARAM_DEFAULTS["rsi_max"])
 DEFAULT_MAX_PAGES = 2
 DEFAULT_PAGE_SIZE = 500
 DEFAULT_RSI_TOP_N = 30
@@ -218,7 +223,8 @@ def build_push_message(hits):
 
 
 def run_meme_underval_monitor(params=None):
-    cfg = dict(params or {})
+    cfg = dict(get_meme_underval_params())
+    cfg.update(params or {})
     min_market_cap = float(cfg.get("min_market_cap", DEFAULT_MIN_MARKET_CAP))
     min_tvl_usd = float(cfg.get("min_tvl_usd", DEFAULT_MIN_TVL_USD))
     min_bin_step = int(cfg.get("min_bin_step", DEFAULT_MIN_BIN_STEP))

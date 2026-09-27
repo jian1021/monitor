@@ -3,11 +3,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import monitor_meme_underval as mu
+from db import get_meme_underval_params, update_meme_underval_params
 from monitor_rsi import get_meteora_rsi
 
 st.set_page_config(page_title="Meme 低估监控", layout="wide")
 st.title("🧲 Meme 低估监控")
 st.caption("直连 Meteora Top Performers（按 24h 费 / TVL 排序），经市值 / TVL / bin_step / 基础费率预筛后，对头部候选计算 RSI(3, 1h)，只保留超卖钝化标的。")
+
+saved = get_meme_underval_params()
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -23,19 +26,19 @@ def _cached_rsi(pool_address, period):
 f1, f2, f3, f4, f5 = st.columns(5)
 with f1:
     min_market_cap = st.number_input("市值下限 (USD)", min_value=0.0,
-                                     value=float(mu.DEFAULT_MIN_MARKET_CAP), step=100_000.0)
+                                     value=float(saved["min_market_cap"]), step=100_000.0)
 with f2:
     min_tvl = st.number_input("TVL 下限 (USD)", min_value=0.0,
-                              value=float(mu.DEFAULT_MIN_TVL_USD), step=5_000.0)
+                              value=float(saved["min_tvl_usd"]), step=5_000.0)
 with f3:
     min_bin_step = st.number_input("bin_step 下限", min_value=0,
-                                   value=int(mu.DEFAULT_MIN_BIN_STEP), step=1)
+                                   value=int(saved["min_bin_step"]), step=1)
 with f4:
     min_base_fee = st.number_input("基础费率下限 (Fee %)", min_value=0.0,
-                                   value=float(mu.DEFAULT_MIN_BASE_FEE_PCT), step=0.5)
+                                   value=float(saved["min_base_fee_pct"]), step=0.5)
 with f5:
     rsi_max = st.number_input("RSI(3, 1h) 上限", min_value=0.0, max_value=100.0,
-                              value=float(mu.DEFAULT_RSI_MAX), step=1.0)
+                              value=float(saved["rsi_max"]), step=1.0)
 
 with st.expander("高级参数", expanded=False):
     a1, a2, a3 = st.columns(3)
@@ -51,6 +54,24 @@ with st.expander("高级参数", expanded=False):
     if st.button("🧹 清除缓存并重拉"):
         st.cache_data.clear()
         st.rerun()
+
+s1, s2 = st.columns([1, 4])
+with s1:
+    save = st.button("💾 保存参数", use_container_width=True)
+with s2:
+    st.caption("保存后同时作为手动扫描默认值与后台定时任务的参数。")
+if save:
+    ok = update_meme_underval_params({
+        "min_market_cap": float(min_market_cap),
+        "min_tvl_usd": float(min_tvl),
+        "min_bin_step": int(min_bin_step),
+        "min_base_fee_pct": float(min_base_fee),
+        "rsi_max": float(rsi_max),
+    })
+    if ok:
+        st.success("✅ 参数已保存，手动与自动运行同步生效")
+    else:
+        st.error("❌ 参数保存失败（数据库不可用），本次扫描仍用页面值")
 
 scan = st.button("🔍 开始扫描", type="primary", use_container_width=True)
 if not scan:

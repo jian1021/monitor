@@ -13,6 +13,12 @@ from app.infrastructure.db.intervals import (
     get_module_intervals,
     update_module_interval,
 )
+from app.infrastructure.db.meme_config import (
+    MEME_PARAM_DEFAULTS,
+    ensure_meme_config_schema,
+    get_meme_underval_params,
+    update_meme_underval_params,
+)
 from app.infrastructure.db.module_settings import (
     ensure_module_settings,
     get_module_settings,
@@ -38,6 +44,10 @@ __all__ = [
     "ensure_interval_schema",
     "get_module_intervals",
     "update_module_interval",
+    "MEME_PARAM_DEFAULTS",
+    "ensure_meme_config_schema",
+    "get_meme_underval_params",
+    "update_meme_underval_params",
     "PUMP_ALERT_TTL_HOURS",
     "ensure_pump_alert_schema",
     "filter_unpushed",

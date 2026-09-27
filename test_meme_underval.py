@@ -121,12 +121,12 @@ def test_scheduler_interval_registered():
     assert DEFAULT_INTERVALS.get("meme_underval") == 30
 
 
-def test_page_inputs_default_to_module_constants():
+def test_page_inputs_default_to_saved_params():
     page_src = (REPO_ROOT / "pages" / "discover_lp.py").read_text(encoding="utf-8")
-    for const in ("DEFAULT_MIN_MARKET_CAP", "DEFAULT_MIN_TVL_USD",
-                  "DEFAULT_MIN_BIN_STEP", "DEFAULT_MIN_BASE_FEE_PCT",
-                  "DEFAULT_RSI_MAX", "DEFAULT_PAGE_SIZE", "DEFAULT_MAX_PAGES"):
-        assert f"mu.{const}" in page_src
+    for key in ("min_market_cap", "min_tvl_usd", "min_bin_step",
+                "min_base_fee_pct", "rsi_max"):
+        assert f'saved["{key}"]' in page_src
+    assert "update_meme_underval_params" in page_src
 
 
 def test_dedupe_keeps_max_tvl_pool_per_mint():
@@ -160,6 +160,53 @@ def test_scan_reports_progress_per_candidate():
     )
     assert [c[0] for c in calls] == [1, 2]
     assert [c[1] for c in calls] == [2, 2]
+
+
+def test_meme_param_defaults_match_module_constants():
+    from app.infrastructure.db.meme_config import MEME_PARAM_DEFAULTS
+    import monitor_meme_underval as mu
+
+    assert MEME_PARAM_DEFAULTS["min_market_cap"] == mu.DEFAULT_MIN_MARKET_CAP
+    assert MEME_PARAM_DEFAULTS["min_tvl_usd"] == mu.DEFAULT_MIN_TVL_USD
+    assert MEME_PARAM_DEFAULTS["min_bin_step"] == mu.DEFAULT_MIN_BIN_STEP
+    assert MEME_PARAM_DEFAULTS["min_base_fee_pct"] == mu.DEFAULT_MIN_BASE_FEE_PCT
+    assert MEME_PARAM_DEFAULTS["rsi_max"] == mu.DEFAULT_RSI_MAX
+
+
+def test_get_params_falls_back_to_defaults_without_db(monkeypatch):
+    import app.infrastructure.db.meme_config as mc
+
+    monkeypatch.setattr(mc, "get_db_client", lambda: None)
+    assert mc.get_meme_underval_params() == dict(mc.MEME_PARAM_DEFAULTS)
+
+
+def test_update_params_fails_gracefully_without_db(monkeypatch):
+    import app.infrastructure.db.meme_config as mc
+
+    monkeypatch.setattr(mc, "get_db_client", lambda: None)
+    assert mc.update_meme_underval_params({"rsi_max": 8.0}) is False
+
+
+def test_monitor_run_loads_saved_params_when_none_given(monkeypatch):
+    import monitor_meme_underval as mu
+
+    seen = {}
+    monkeypatch.setattr(
+        mu, "get_meme_underval_params",
+        lambda: {"min_market_cap": 1.0, "min_tvl_usd": 1.0, "min_bin_step": 1,
+                 "min_base_fee_pct": 0.0, "rsi_max": 100.0,
+                 "rsi_top_n": 7, "page_size": 50, "max_pages": 1,
+                 "rsi_period": 3},
+    )
+
+    def fake_fetch(page_size=100, max_pages=3, timeout=20):
+        seen["page_size"] = page_size
+        seen["max_pages"] = max_pages
+        return []
+
+    monkeypatch.setattr(mu, "fetch_top_performers", fake_fetch)
+    assert mu.run_meme_underval_monitor() == []
+    assert (seen["page_size"], seen["max_pages"]) == (50, 1)
 
 
 def test_dead_pump_monitor_fully_removed():
