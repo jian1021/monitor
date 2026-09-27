@@ -111,7 +111,47 @@ def get_okx_rsi(symbol, interval="1H", length=14):
     return None, None
 
 
+METEORA_DATAPI_BASE = "https://dlmm.datapi.meteora.ag"
+
+# Meteora 原生 OHLCV 允许的 timeframe；调用方传 "hour" 等旧写法时映射到这里。
+_METEORA_TF_SECONDS = {
+    "5m": 300, "30m": 1800, "1h": 3600, "2h": 7200,
+    "4h": 14400, "12h": 43200, "24h": 86400,
+}
+_METEORA_TF_ALIAS = {
+    "hour": "1h", "1h": "1h", "1H": "1h", "60m": "1h",
+    "30m": "30m", "30min": "30m",
+    "5m": "5m",
+    "2h": "2h", "4h": "4h", "12h": "12h",
+    "day": "24h", "1d": "24h", "24h": "24h",
+}
+
+# quote 币 mint（与 monitor_meme_underval.QUOTE_MINTS 同源；为避免循环导入在此复刻，
+# 仅用于从池子元数据里挑 meme 边 USD 价格）。
+_QUOTE_MINTS = frozenset({
+    "So11111111111111111111111111111111111111112",
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "Es9vMEdh6CkPauqoXNqcy2FWT8MFL5Sdf5N8V6etG5h",
+})
+
+
+def _meme_side_usd_price(pool_meta):
+    """从 /pools/{address} 元数据取 meme 边 token 的 USD 价格（保持旧 Gecko 口径的 $ 显示）。"""
+    sides = [pool_meta.get("token_x") or {}, pool_meta.get("token_y") or {}]
+    sides = [s for s in sides if isinstance(s, dict) and s]
+    if not sides:
+        return None
+    candidates = [s for s in sides if str(s.get("address", "")) not in _QUOTE_MINTS]
+    if not candidates:
+        candidates = sides
+    try:
+        return float(min(float(s.get("price") or 0) for s in candidates))
+    except (TypeError, ValueError):
+        return None
+
+
 def get_meteora_rsi(pool_address, timeframe="hour", aggregate=1, length=14):
+    """Meteora 池 RSI（GeckoTerminal 池 K 线口径；除 meme 低估监控外各调用方共用）。"""
     url = f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/{timeframe}?aggregate={aggregate}&limit=100"
     try:
         res = requests.get(url, headers=headers, timeout=10).json()
@@ -124,6 +164,53 @@ def get_meteora_rsi(pool_address, timeframe="hour", aggregate=1, length=14):
     except Exception as e:
         import traceback
         print(f"❌ Meteora [{pool_address}] 获取失败: {e}")
+        traceback.print_exc()
+    return None, None
+
+
+def get_meteora_native_rsi(pool_address, timeframe="hour", aggregate=1, length=14):
+    """Meteora 池 RSI（原生 DLMM datapi 口径，仅 meme 低估监控使用）.
+
+    与其它模块一致的返回约定：成功 (rsi, price_usd)，失败 (None, None)。
+    RSI 本身无量纲，直接用原生 base/quote 收盘价序列计算；price 腿为保持
+    旧 Gecko 口径（USD 计价展示），取池子元数据里 meme 边的 token USD 价格。
+    """
+    try:
+        tf = _METEORA_TF_ALIAS.get(str(timeframe).strip(), "1h")
+        tf_seconds = _METEORA_TF_SECONDS[tf]
+        minimum = int(length) + RSI_BAR_OFFSET - 1
+        end_ts = int(time.time())
+        # 实测原生接口单次窗口上限约 96 根（100h 直接返回空），从大到小逐档尝试。
+        counts = sorted({min(max(100, minimum + 5), 96), 48, 24}, reverse=True)
+        data_list = []
+        for count in counts:
+            url = (f"{METEORA_DATAPI_BASE}/pools/{pool_address}/ohlcv"
+                   f"?timeframe={tf}&start_time={end_ts - count * tf_seconds}&end_time={end_ts}")
+            res = requests.get(url, headers=headers, timeout=10).json()
+            data_list = res.get("data", []) if isinstance(res, dict) else []
+            if len(data_list) >= minimum:
+                break
+        if not data_list or len(data_list) < minimum:
+            print(f"⚠️ Meteora [{str(pool_address)[:10]}...] K线不足 ({len(data_list)} 根)")
+            return None, None
+        # 原生接口按时间升序返回；防御性再排一次序（Gecko 侧是降序要反转，这里不要反转）。
+        data_list = sorted(data_list, key=lambda c: c.get("timestamp", 0))
+        close = pd.Series([float(c["close"]) for c in data_list])
+        rsi, _native_close = _calc_rsi(close, length)
+        meta = None
+        try:
+            meta = requests.get(f"{METEORA_DATAPI_BASE}/pools/{pool_address}",
+                                headers=headers, timeout=10).json()
+        except Exception:
+            meta = None
+        price = _meme_side_usd_price(meta) if isinstance(meta, dict) else None
+        if price is None:
+            # 元数据失败时降级用原生收盘价（quote 计价，仅保证告警不断流）。
+            price = float(close.iloc[-1])
+        return rsi, price
+    except Exception as e:
+        import traceback
+        print(f"❌ Meteora [{str(pool_address)[:10]}...] 获取失败: {e}")
         traceback.print_exc()
     return None, None
 

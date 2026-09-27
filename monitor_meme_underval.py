@@ -161,10 +161,10 @@ def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
     candidates = prefiltered[:max(0, int(rsi_top_n))]
 
     if rsi_fetcher is None:
-        from monitor_rsi import get_meteora_rsi
+        from monitor_rsi import get_meteora_native_rsi
 
         def _default_fetcher(pool_address, timeframe="hour", aggregate=1, length=3):
-            return get_meteora_rsi(pool_address, timeframe, aggregate, length)
+            return get_meteora_native_rsi(pool_address, timeframe, aggregate, length)
 
         rsi_fetcher = _default_fetcher
 

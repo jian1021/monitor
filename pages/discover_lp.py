@@ -4,7 +4,7 @@ import streamlit as st
 
 import monitor_meme_underval as mu
 from db import get_meme_underval_params, update_meme_underval_params
-from monitor_rsi import get_meteora_rsi
+from monitor_rsi import get_meteora_native_rsi
 
 st.set_page_config(page_title="Meme 低估监控", layout="wide")
 st.title("🧲 Meme 低估监控")
@@ -20,7 +20,7 @@ def _cached_pools(page_size, max_pages):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _cached_rsi(pool_address, period):
-    return get_meteora_rsi(pool_address, "hour", 1, int(period))
+    return get_meteora_native_rsi(pool_address, "hour", 1, int(period))
 
 
 f1, f2, f3, f4, f5 = st.columns(5)
