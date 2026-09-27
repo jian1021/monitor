@@ -121,6 +121,19 @@ def test_scheduler_interval_registered():
     assert DEFAULT_INTERVALS.get("meme_underval") == 30
 
 
+def test_dead_pump_monitor_fully_removed():
+    main_src = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
+    assert "meteora_pump" not in main_src
+    assert not (REPO_ROOT / "monitor_meteora_pump.py").exists()
+    settings_src = (
+        REPO_ROOT / "app" / "infrastructure" / "db" / "module_settings.py"
+    ).read_text(encoding="utf-8")
+    assert "meteora_pump" not in settings_src
+    from app.infrastructure.db.intervals import DEFAULT_INTERVALS
+
+    assert "meteora_pump" not in DEFAULT_INTERVALS
+
+
 def test_monitor_settings_labels_expose_meme_module():
     import ast
     from pathlib import Path

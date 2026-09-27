@@ -28,16 +28,16 @@ def get_module_settings() -> dict:
     ensure_module_settings()
     client = get_db_client()
     if not client:
-        return {"rsi": True, "crypto": True, "onchain_token": True, "meteora_pump": True, "robinhood_pump": True, "lp_alert": True}
+        return {"rsi": True, "crypto": True, "onchain_token": True, "robinhood_pump": True, "lp_alert": True}
     try:
         rs = client.execute("SELECT module_name, enabled FROM module_settings")
         result = {row[0]: bool(row[1]) for row in rs.rows}
-        defaults = {"rsi": True, "crypto": True, "onchain_token": True, "meteora_pump": True, "robinhood_pump": True, "lp_alert": True}
+        defaults = {"rsi": True, "crypto": True, "onchain_token": True, "robinhood_pump": True, "lp_alert": True}
         defaults.update(result)
         return defaults
     except Exception as e:
         print(f"❌ 读取模块设置失败: {e}")
-        return {"rsi": True, "crypto": True, "onchain_token": True, "meteora_pump": True, "robinhood_pump": True, "lp_alert": True}
+        return {"rsi": True, "crypto": True, "onchain_token": True, "robinhood_pump": True, "lp_alert": True}
     finally:
         client.close()
 
