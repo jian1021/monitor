@@ -121,6 +121,14 @@ def test_scheduler_interval_registered():
     assert DEFAULT_INTERVALS.get("meme_underval") == 30
 
 
+def test_page_inputs_default_to_module_constants():
+    page_src = (REPO_ROOT / "pages" / "discover_lp.py").read_text(encoding="utf-8")
+    for const in ("DEFAULT_MIN_MARKET_CAP", "DEFAULT_MIN_TVL_USD",
+                  "DEFAULT_MIN_BIN_STEP", "DEFAULT_MIN_BASE_FEE_PCT",
+                  "DEFAULT_RSI_MAX"):
+        assert f"mu.{const}" in page_src
+
+
 def test_dead_pump_monitor_fully_removed():
     main_src = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
     assert "meteora_pump" not in main_src

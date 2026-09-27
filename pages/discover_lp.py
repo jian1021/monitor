@@ -23,19 +23,19 @@ def _cached_rsi(pool_address, period):
 f1, f2, f3, f4, f5 = st.columns(5)
 with f1:
     min_market_cap = st.number_input("市值下限 (USD)", min_value=0.0,
-                                     value=1_000_000.0, step=100_000.0)
+                                     value=float(mu.DEFAULT_MIN_MARKET_CAP), step=100_000.0)
 with f2:
     min_tvl = st.number_input("TVL 下限 (USD)", min_value=0.0,
-                              value=10_000.0, step=5_000.0)
+                              value=float(mu.DEFAULT_MIN_TVL_USD), step=5_000.0)
 with f3:
     min_bin_step = st.number_input("bin_step 下限", min_value=0,
-                                   value=100, step=1)
+                                   value=int(mu.DEFAULT_MIN_BIN_STEP), step=1)
 with f4:
     min_base_fee = st.number_input("基础费率下限 (Fee %)", min_value=0.0,
-                                   value=2.0, step=0.5)
+                                   value=float(mu.DEFAULT_MIN_BASE_FEE_PCT), step=0.5)
 with f5:
     rsi_max = st.number_input("RSI(3, 1h) 上限", min_value=0.0, max_value=100.0,
-                              value=10.0, step=1.0)
+                              value=float(mu.DEFAULT_RSI_MAX), step=1.0)
 
 with st.expander("高级参数", expanded=False):
     a1, a2, a3 = st.columns(3)
