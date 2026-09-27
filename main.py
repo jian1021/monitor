@@ -15,6 +15,7 @@ import monitor_rsi
 from config import FEISHU_WEBHOOK
 from db import DEFAULT_INTERVALS, get_module_intervals, get_module_settings
 from db import load_instruments, update_asset_alert_state
+from monitor_meme_underval import run_meme_underval_monitor
 from monitor_meteora_pump import run_pump_strategy_monitor
 from monitor_robinhood_pump import run_monitor
 from send_feishu_msg import send_feishu_msg
@@ -253,6 +254,16 @@ def _run_meteora_pump():
         traceback.print_exc()
 
 
+def _run_meme_underval():
+    print(f"\n{'='*50}")
+    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 Meme 低估监控")
+    try:
+        run_meme_underval_monitor()
+    except Exception as e:
+        print(f"❌ run_meme_underval_monitor() 发生异常：{e}")
+        traceback.print_exc()
+
+
 def _run_robinhood_pump():
     print(f"\n{'='*50}")
     print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 RobinHood pump 策略监控")
@@ -280,6 +291,7 @@ def build_scheduler() -> MonitoringScheduler:
     registry.register(MonitorSpec("crypto", "crypto", _run_crypto))
     registry.register(MonitorSpec("onchain_token", "onchain_token", _run_onchain_token))
     registry.register(MonitorSpec("meteora_pump", "meteora_pump", _run_meteora_pump))
+    registry.register(MonitorSpec("meme_underval", "meme_underval", _run_meme_underval))
     registry.register(MonitorSpec("robinhood_pump", "robinhood_pump", _run_robinhood_pump))
     registry.register(MonitorSpec("lp_alert", "lp_alert", _run_lp_alert))
     return MonitoringScheduler(registry, poll_interval=POLL_INTERVAL)

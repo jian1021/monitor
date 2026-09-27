@@ -1,138 +1,139 @@
-import streamlit as st
-import os
-import json
 import pandas as pd
-from libsql_client import create_client_sync
-from db import get_db_client
+import plotly.graph_objects as go
+import streamlit as st
+
+import monitor_meme_underval as mu
+from monitor_rsi import get_meteora_rsi
+
+st.set_page_config(page_title="Meme 低估监控", layout="wide")
+st.title("🧲 Meme 低估监控")
+st.caption("直连 Meteora Top Performers（按 24h 费率 / TVL 排序），经市值 / TVL / bin_step / 费率预筛后，对头部候选计算 RSI(3, 1h)，只保留超卖钝化标的。")
 
 
-# 1. 动态获取所有已激活的策略列表（用于下拉选择框）
-@st.cache_data(ttl=60, show_spinner=False)
-def fetch_active_configs():
-    client = get_db_client()
-    if not client:
-        return {}
-    
-    try:
-        res = client.execute("SELECT config_id, config_name, filter_params FROM sys_lp_config WHERE is_active = 1")
-        # 返回结构: {'meme_breakout_2m_v1': {'name': '2M市值大池子策略', 'params': {...}}}
-        configs = {}
-        for row in res.rows:
-            configs[row[0]] = {
-                "name": row[1],
-                "params": json.loads(row[2])
-            }
-        return configs
-    except Exception as e:
-        st.error(f"加载策略配置失败: {e}")
-        return {}
+@st.cache_data(ttl=120, show_spinner=False)
+def _cached_pools(page_size, max_pages):
+    return mu.fetch_top_performers(page_size=page_size, max_pages=max_pages)
 
-# 2. 根据选中的策略动态查询符合条件的代币 (加 10秒 缓存)
-@st.cache_data(ttl=10, show_spinner=False)
-def fetch_tokens_by_config(config_id: str, params: dict):
-    client = get_db_client()
-    if not client or not params:
-        return []
 
-    # libSQL / Turso 绑参查询
-    query = """
-    SELECT 
-        address,
-        symbol,
-        market_cap,
-        liquidity,
-        total_fee_sol,
-        created_at,
-        ROUND((julianday('now') - julianday(created_at)) * 24, 1) AS age_hours
-    FROM 
-        token_market_data
-    WHERE 
-        market_cap >= ?
-        AND liquidity >= ?
-        AND total_fee_sol >= ?
-        AND julianday(created_at) <= julianday('now', '-' || ? || ' hours')
-        AND julianday(created_at) >= julianday('now', '-' || ? || ' hours')
-    ORDER BY 
-        created_at DESC;
-    """
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_rsi(pool_address, period):
+    return get_meteora_rsi(pool_address, "hour", 1, int(period))
 
-    try:
-        res = client.execute(query, [
-            params['min_market_cap'],
-            params['min_liquidity'],
-            params['min_fee_sol'],
-            params['min_age_hours'],
-            params['max_age_hours']
-        ])
-        
-        columns = [col[0] for col in res.columns]
-        data = [dict(zip(columns, row)) for row in res.rows]
-        return data
-    except Exception as e:
-        st.error(f"数据查询失败: {e}")
-        return []
 
-# ----------------- Streamlit UI 展现 -----------------
-st.set_page_config(page_title="Meme 币监控平台", layout="wide")
-st.title("🚀 Meme 币暴涨机会监控平台")
+f1, f2, f3, f4, f5 = st.columns(5)
+with f1:
+    min_market_cap = st.number_input("市值下限 (USD)", min_value=0.0,
+                                     value=1_000_000.0, step=100_000.0)
+with f2:
+    min_tvl = st.number_input("TVL 下限 (USD)", min_value=0.0,
+                              value=10_000.0, step=5_000.0)
+with f3:
+    min_bin_step = st.number_input("bin_step 下限", min_value=0,
+                                   value=100, step=1)
+with f4:
+    min_fee_ratio = st.number_input("24h 费率下限 (费/TVL %)", min_value=0.0,
+                                    value=2.0, step=0.5)
+with f5:
+    rsi_max = st.number_input("RSI(3, 1h) 上限", min_value=0.0, max_value=100.0,
+                              value=10.0, step=1.0)
 
-# 加载数据库中所有的激活策略
-all_configs = fetch_active_configs()
+with st.expander("高级参数", expanded=False):
+    a1, a2, a3 = st.columns(3)
+    with a1:
+        page_size = st.number_input("每页池数", min_value=10, max_value=1000,
+                                    value=100, step=50)
+    with a2:
+        max_pages = st.number_input("拉取页数", min_value=1, max_value=10,
+                                    value=3, step=1)
+    with a3:
+        rsi_top_n = st.number_input("最多算 RSI 的候选数", min_value=1,
+                                    max_value=200, value=30, step=5)
+    if st.button("🧹 清除缓存并重拉"):
+        st.cache_data.clear()
+        st.rerun()
 
-if not all_configs:
-    st.warning("⚠️ 数据库中没有可用的激活策略配置！")
-else:
-    # 侧边栏/顶部控制区域
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # 下拉选择框：展示“策略中文名 (config_id)”
-        selected_config_id = st.selectbox(
-            "🎯 选择筛选策略：",
-            options=list(all_configs.keys()),
-            format_func=lambda x: f"📌 {all_configs[x]['name']} ({x})"
-        )
-        
-    with col2:
-        st.write(" ") # 垂直对齐调整
-        st.write(" ")
-        if st.button("🔄 刷新数据", use_container_width=True):
-            st.cache_data.clear()
+scan = st.button("🔍 开始扫描", type="primary", use_container_width=True)
+if not scan:
+    st.info("设置好五个阀值后点击「开始扫描」")
+    st.stop()
 
-    # 获得当前选中策略的参数配置
-    current_config = all_configs[selected_config_id]
-    p = current_config['params']
+with st.spinner("正在拉取 Top Performers..."):
+    pools = _cached_pools(int(page_size), int(max_pages))
+if not pools:
+    st.error("未能拉取到 Top Performers 数据，稍后重试")
+    st.stop()
 
-    # 展开栏：展示当前策略的具体过滤条件
-    with st.expander("🛠️ 查看当前策略参数阀值", expanded=False):
-        st.json(p)
+prefiltered = [p for p in pools
+               if mu.pool_passes_prefilter(p, min_market_cap, int(min_bin_step),
+                                           min_fee_ratio, min_tvl)]
+prefiltered.sort(key=mu.fee_ratio_24h, reverse=True)
 
-    # 执行查询
-    tokens = fetch_tokens_by_config(selected_config_id, p)
+m1, m2, m3 = st.columns(3)
+m1.metric("拉取池数", len(pools))
+m2.metric("通过预筛", len(prefiltered))
+m3.metric("待算 RSI", min(len(prefiltered), int(rsi_top_n)))
 
-    if tokens:
-        st.success(f"🎯 查找到 **{len(tokens)}** 个符合【{current_config['name']}】的潜在标的")
-        df = pd.DataFrame(tokens)
-        
-        # 为 CA 地址自动附带 GMGN 盘面跳转链接
-        df["gmgn_link"] = df["address"].apply(lambda ca: f"https://gmgn.ai/sol/token/{ca}")
-        
-        st.dataframe(
-            df,
-            column_config={
-                "symbol": "代币名",
-                "address": "CA 合约地址",
-                "gmgn_link": st.column_config.LinkColumn("GMGN 盘面", display_text="🔗 开盘"),
-                "market_cap": st.column_config.NumberColumn("市值 (USD)", format="$%d"),
-                "liquidity": st.column_config.NumberColumn("流动池 (USD)", format="$%d"),
-                "total_fee_sol": st.column_config.NumberColumn("手续费", format="%.1f SOL"),
-                "age_hours": st.column_config.NumberColumn("开盘时长", format="%.1f 小时"),
-                "created_at": "创建时间 (UTC)"
-            },
-            column_order=["symbol", "gmgn_link", "address", "market_cap", "liquidity", "total_fee_sol", "age_hours", "created_at"],
-            use_container_width=True,
-            hide_index=True
-        )
-    else:
-        st.info(f"💡 策略【{current_config['name']}】下暂无符合条件的标的 "
-                f"(市值≥${p['min_market_cap']:,}, 池子≥${p['min_liquidity']:,}, 费>{p['min_fee_sol']} SOL, Age {p['min_age_hours']}-{p['max_age_hours']}h)")
+if not prefiltered:
+    st.info(f"当前阀值下无预筛标的（市值≥${min_market_cap:,.0f}，"
+            f"TVL≥${min_tvl:,.0f}，bin_step≥{int(min_bin_step)}，"
+            f"费率≥{min_fee_ratio:.1f}%）")
+    st.stop()
+
+with st.spinner(f"正在计算 {min(len(prefiltered), int(rsi_top_n))} 个候选的 RSI(3, 1h)..."):
+    hits = mu.scan_undervalued(
+        pools, min_market_cap=min_market_cap, min_bin_step=int(min_bin_step),
+        min_fee_ratio_24h=min_fee_ratio, min_tvl_usd=min_tvl,
+        rsi_period=mu.DEFAULT_RSI_PERIOD,
+        rsi_max=rsi_max, rsi_top_n=int(rsi_top_n),
+        rsi_fetcher=lambda addr, _tf, _agg, length: _cached_rsi(addr, length),
+    )
+
+if not hits:
+    st.warning("预筛有标的，但 RSI(3, 1h) 无低于上限的超卖标的")
+    st.stop()
+
+st.success(f"🎯 命中 **{len(hits)}** 个低估标的")
+hits.sort(key=lambda h: h["fee_ratio_24h"], reverse=True)
+
+fig = go.Figure()
+fig.add_trace(go.Bar(
+    x=[h["symbol"] for h in hits[:20]],
+    y=[h["fee_ratio_24h"] for h in hits[:20]],
+    text=[f"RSI {h['rsi']:.1f}" for h in hits[:20]],
+    textposition="outside",
+    name="24h 费率 %",
+    marker_color="#26a69a",
+))
+fig.update_layout(title="命中标的 24h 费率 / TVL（%）",
+                  xaxis_title="池子", yaxis_title="费率 %",
+                  template="plotly_dark", height=380)
+st.plotly_chart(fig, use_container_width=True)
+
+df = pd.DataFrame(hits)
+df["gmgn_link"] = df["meme_mint"].apply(
+    lambda ca: f"https://gmgn.ai/sol/token/{ca}" if ca else "")
+df["meteora_link"] = df["pool_address"].apply(
+    lambda pa: f"https://app.meteora.ag/dlmm/{pa}" if pa else "")
+st.dataframe(
+    df,
+    column_config={
+        "symbol": "池子",
+        "gmgn_link": st.column_config.LinkColumn("GMGN 盘面", display_text="🔗 开盘"),
+        "meteora_link": st.column_config.LinkColumn("Meteora 池子", display_text="🌊 进池"),
+        "meme_mint": "Meme 合约",
+        "pool_address": "池地址",
+        "market_cap": st.column_config.NumberColumn("Meme 市值 (USD)", format="$%d"),
+        "tvl": st.column_config.NumberColumn("TVL (USD)", format="$%d"),
+        "fee_ratio_24h": st.column_config.NumberColumn("24h 费率 %", format="%.2f"),
+        "fees_24h_usd": st.column_config.NumberColumn("24h 手续费 (USD)", format="$%d"),
+        "volume_24h_usd": st.column_config.NumberColumn("24h 交易量 (USD)", format="$%d"),
+        "bin_step": "bin_step",
+        "rsi": st.column_config.NumberColumn("RSI(3, 1h)", format="%.1f"),
+        "age_hours": st.column_config.NumberColumn("池龄 (小时)", format="%.1f"),
+    },
+    column_order=["symbol", "gmgn_link", "meteora_link", "market_cap", "tvl",
+                  "fee_ratio_24h", "rsi", "bin_step", "fees_24h_usd",
+                  "volume_24h_usd", "age_hours", "meme_mint", "pool_address"],
+    use_container_width=True,
+    hide_index=True,
+)
