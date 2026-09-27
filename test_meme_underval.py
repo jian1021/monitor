@@ -119,3 +119,19 @@ def test_scheduler_interval_registered():
     from app.infrastructure.db.intervals import DEFAULT_INTERVALS
 
     assert DEFAULT_INTERVALS.get("meme_underval") == 30
+
+
+def test_monitor_settings_labels_expose_meme_module():
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(
+        (REPO_ROOT / "pages" / "monitor_settings.py").read_text(encoding="utf-8")
+    )
+    labels = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "MODULE_LABELS":
+            labels = ast.literal_eval(node.value)
+    assert labels is not None
+    assert "meme_underval" in labels
+    assert "meteora_pump" not in labels

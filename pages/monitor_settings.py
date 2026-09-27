@@ -15,7 +15,7 @@ MODULE_LABELS = {
     "rsi": "📊 RSI 监控",
     "crypto": "🪙 加密货币",
     "onchain_token": "🔗 链上代币",
-    "meteora_pump": "☄️ Meteora pump 策略监控",
+    "meme_underval": "🧲 Meme 低估监控",
     "robinhood_pump": "🎰 RobinHood pump 策略监控",
     "lp_alert": "💧 LP 仓位 / 池子价格告警",
 }
