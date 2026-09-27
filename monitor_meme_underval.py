@@ -147,7 +147,7 @@ def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
                      min_base_fee_pct=DEFAULT_MIN_BASE_FEE_PCT,
                      rsi_period=DEFAULT_RSI_PERIOD, rsi_max=DEFAULT_RSI_MAX,
                      rsi_top_n=DEFAULT_RSI_TOP_N, rsi_fetcher=None,
-                     min_tvl_usd=DEFAULT_MIN_TVL_USD):
+                     min_tvl_usd=DEFAULT_MIN_TVL_USD, on_progress=None):
     unique = dedupe_by_meme_mint(pools)
     prefiltered = [p for p in unique
                    if pool_passes_prefilter(p, min_market_cap, min_bin_step,
@@ -164,7 +164,14 @@ def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
         rsi_fetcher = _default_fetcher
 
     hits = []
-    for pool in candidates:
+    total = len(candidates)
+    for index, pool in enumerate(candidates, start=1):
+        symbol = str(pool.get("name") or pool.get("address") or "")[:20]
+        if on_progress is not None:
+            try:
+                on_progress(index, total, symbol)
+            except Exception:
+                pass
         pool_address = str(pool.get("address") or "")
         if not pool_address:
             continue

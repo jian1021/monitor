@@ -82,13 +82,21 @@ if not prefiltered:
     st.stop()
 
 with st.spinner(f"正在计算 {min(len(prefiltered), int(rsi_top_n))} 个候选的 RSI(3, 1h)..."):
+    progress = st.progress(0, text="准备计算 RSI...")
+
+    def _report(done, total, symbol):
+        progress.progress(min(done / max(total, 1), 1.0),
+                          text=f"RSI {done}/{total}：{symbol}")
+
     hits = mu.scan_undervalued(
         pools, min_market_cap=min_market_cap, min_bin_step=int(min_bin_step),
         min_base_fee_pct=min_base_fee, min_tvl_usd=min_tvl,
         rsi_period=mu.DEFAULT_RSI_PERIOD,
         rsi_max=rsi_max, rsi_top_n=int(rsi_top_n),
         rsi_fetcher=lambda addr, _tf, _agg, length: _cached_rsi(addr, length),
+        on_progress=_report,
     )
+    progress.empty()
 
 if not hits:
     st.warning("预筛有标的，但 RSI(3, 1h) 无低于上限的超卖标的")

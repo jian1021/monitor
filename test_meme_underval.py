@@ -147,6 +147,21 @@ def test_dedupe_empty_safe():
     assert mu.dedupe_by_meme_mint(None) == []
 
 
+def test_scan_reports_progress_per_candidate():
+    calls = []
+    pools = [
+        _pool(addr="a"),
+        _pool(addr="b", mint_x="Other1111111111111111111111111111111111111"),
+    ]
+    mu.scan_undervalued(
+        pools, rsi_top_n=10,
+        rsi_fetcher=lambda a, t, g, length: (5.0, 1.0),
+        on_progress=lambda done, total, symbol: calls.append((done, total, symbol)),
+    )
+    assert [c[0] for c in calls] == [1, 2]
+    assert [c[1] for c in calls] == [2, 2]
+
+
 def test_dead_pump_monitor_fully_removed():
     main_src = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
     assert "meteora_pump" not in main_src
