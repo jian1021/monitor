@@ -12,6 +12,7 @@ import pandas as pd
 
 from config import FEISHU_WEBHOOK
 from db import get_db_client
+from monitor_price import CREATE_INDEX_SQL, CREATE_TABLE_SQL
 from send_feishu_msg import send_feishu_msg
 from dex_client import fetch_token_info
 
@@ -26,22 +27,7 @@ CHAIN_LABELS = {
     "stable": "Stable",
 }
 
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS price_alert (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    address       TEXT NOT NULL,
-    chain         TEXT NOT NULL DEFAULT 'sol',
-    symbol        TEXT,
-    target_price  REAL NOT NULL,
-    direction     TEXT NOT NULL DEFAULT 'gte',
-    enabled       INTEGER NOT NULL DEFAULT 1,
-    last_price    REAL,
-    last_checked_at TEXT,
-    alerted       INTEGER NOT NULL DEFAULT 0,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-"""
-CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);"
+# 建表语句唯一源：monitor_price.CREATE_TABLE_SQL / CREATE_INDEX_SQL，本页直接复用。
 
 # ============================================================
 # 通用工具

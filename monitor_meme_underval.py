@@ -182,10 +182,11 @@ def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
             continue
         try:
             rsi, _price = rsi_fetcher(pool_address, "hour", 1, int(rsi_period))
+            rsi_value = None if rsi is None else float(rsi)
         except Exception as e:
             print(f"RSI 计算失败 [{pool_address[:10]}...]: {e}")
             continue
-        if rsi is None or float(rsi) > float(rsi_max):
+        if rsi_value is None or rsi_value > float(rsi_max):
             continue
         hits.append({
             "symbol": str(pool.get("name") or pool_address[:10]),
@@ -198,15 +199,15 @@ def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
             "fee_ratio_24h": fee_ratio_24h(pool),
             "base_fee_pct": base_fee_pct(pool),
             "bin_step": pool_bin_step(pool),
-            "rsi": round(float(rsi), 2),
+            "rsi": round(rsi_value, 2),
             "age_hours": pool_age_hours(pool),
         })
         time.sleep(0.8)
     return hits
 
 
-def build_push_message(hits):
-    lines = [f"📌 低估命中: {len(hits)} 个 (RSI(3,1h)≤{DEFAULT_RSI_MAX})"]
+def build_push_message(hits, rsi_max=DEFAULT_RSI_MAX):
+    lines = [f"📌 低估命中: {len(hits)} 个 (RSI(3,1h)≤{float(rsi_max)})"]
     for hit in hits[:5]:
         age = f"{hit['age_hours']:.1f}h" if hit.get("age_hours") is not None else "未知"
         lines.append(
@@ -257,7 +258,7 @@ def run_meme_underval_monitor(params=None):
         print("ℹ️ 命中标的均在 24h 内推送过，本轮跳过。")
         return []
 
-    text = "🚀【Meme 低估监控告警】\n========================================\n\n" + build_push_message(hits)
+    text = "🚀【Meme 低估监控告警】\n========================================\n\n" + build_push_message(hits, rsi_max=rsi_max)
     send_feishu_msg(FEISHU_WEBHOOK, text)
     mark_pushed(MODULE_NAME, [h["meme_mint"] for h in hits])
     print(f"🎉 监控完毕，命中 {len(hits)} 个低估标的并推送。")

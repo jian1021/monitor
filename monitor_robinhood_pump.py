@@ -32,10 +32,10 @@ def parse_created_at(value):
     if not value:
         return 0
     try:
-        # 数字（毫秒或秒）
+        # 数字（秒 / 毫秒 / 微秒 / 纳秒逐级归一化到秒）
         if isinstance(value, (int, float)):
             ts = float(value)
-            if ts > 1e12:  # 毫秒
+            while ts > 1e12:
                 ts /= 1000
             return ts
         # 字符串 ISO 格式

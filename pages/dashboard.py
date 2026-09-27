@@ -41,7 +41,7 @@ ASSET_TYPE_MAP = {
 with st.sidebar:
     st.write("👤 **当前登录：管理员**")
     if st.button("🚪 退出登录"):
-        st.session_state["authenticated"] = False
+        st.session_state["logged_in"] = False
         st.rerun()
     st.divider()
 
@@ -68,9 +68,7 @@ with st.sidebar:
 
         submitted = st.form_submit_button("添加标的", type="primary")
         if submitted:
-            if new_type == "token":
-                st.warning("⚠️ 链上代币请在「🔗 链上代币」标签页里添加（需先核对确切合约）")
-            elif not new_code.strip():
+            if not new_code.strip():
                 st.warning("⚠️ 标的代码/池子地址不能为空！")
             else:
                 if add_new_asset(new_type, new_code, new_name):

@@ -209,6 +209,21 @@ def test_monitor_run_loads_saved_params_when_none_given(monkeypatch):
     assert (seen["page_size"], seen["max_pages"]) == (50, 1)
 
 
+def test_push_message_uses_actual_rsi_max():
+    hit = {"symbol": "MEME-SOL", "meme_mint": MEME,
+           "pool_address": "PoolAddr123", "market_cap": 5_000_000.0,
+           "tvl": 250_000.0, "fee_ratio_24h": 3.5, "base_fee_pct": 2.0,
+           "rsi": 6.2}
+    assert "7.5" in mu.build_push_message([hit], rsi_max=7.5)
+
+
+def test_scan_skips_unparseable_rsi_without_raising():
+    pools = [_pool(addr="a")]
+    hits = mu.scan_undervalued(
+        pools, rsi_fetcher=lambda a, t, g, length: ("oops", 1.0))
+    assert hits == []
+
+
 def test_dead_pump_monitor_fully_removed():
     main_src = (REPO_ROOT / "main.py").read_text(encoding="utf-8")
     assert "meteora_pump" not in main_src
