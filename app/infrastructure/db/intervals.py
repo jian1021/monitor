@@ -8,7 +8,7 @@ DEFAULT_INTERVALS = {
     "crypto":             30,   # 加密货币（OKX）RSI 监控：30 分钟
     "onchain_token":      30,   # 链上代币 RSI 监控：30 分钟
     "meteora_pump":        5,   # Meteora pump 策略监控：5 分钟
-    "meme_underval":       5,   # Meme 低估监控（Top Performers）：5 分钟
+    "meme_underval":      30,   # Meme 低估监控（Top Performers）：30 分钟
     "robinhood_pump":      5,   # RobinHood pump 策略监控：5 分钟
     "lp_alert":            5,   # LP 仓位 / 池子价格告警：5 分钟
 }

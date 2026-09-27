@@ -110,4 +110,4 @@ def test_push_message_contains_links():
 def test_scheduler_interval_registered():
     from app.infrastructure.db.intervals import DEFAULT_INTERVALS
 
-    assert DEFAULT_INTERVALS.get("meme_underval") == 5
+    assert DEFAULT_INTERVALS.get("meme_underval") == 30
