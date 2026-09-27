@@ -41,10 +41,10 @@ with st.expander("高级参数", expanded=False):
     a1, a2, a3 = st.columns(3)
     with a1:
         page_size = st.number_input("每页池数", min_value=10, max_value=1000,
-                                    value=100, step=50)
+                                    value=int(mu.DEFAULT_PAGE_SIZE), step=50)
     with a2:
         max_pages = st.number_input("拉取页数", min_value=1, max_value=10,
-                                    value=3, step=1)
+                                    value=int(mu.DEFAULT_MAX_PAGES), step=1)
     with a3:
         rsi_top_n = st.number_input("最多算 RSI 的候选数", min_value=1,
                                     max_value=200, value=30, step=5)
@@ -63,15 +63,17 @@ if not pools:
     st.error("未能拉取到 Top Performers 数据，稍后重试")
     st.stop()
 
-prefiltered = [p for p in pools
+unique = mu.dedupe_by_meme_mint(pools)
+prefiltered = [p for p in unique
                if mu.pool_passes_prefilter(p, min_market_cap, int(min_bin_step),
                                            min_base_fee, min_tvl)]
 prefiltered.sort(key=mu.fee_ratio_24h, reverse=True)
 
-m1, m2, m3 = st.columns(3)
+m1, m2, m3, m4 = st.columns(4)
 m1.metric("拉取池数", len(pools))
-m2.metric("通过预筛", len(prefiltered))
-m3.metric("待算 RSI", min(len(prefiltered), int(rsi_top_n)))
+m2.metric("按币去重", len(unique))
+m3.metric("通过预筛", len(prefiltered))
+m4.metric("待算 RSI", min(len(prefiltered), int(rsi_top_n)))
 
 if not prefiltered:
     st.info(f"当前阀值下无预筛标的（市值≥${min_market_cap:,.0f}，"

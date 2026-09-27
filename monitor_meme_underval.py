@@ -20,8 +20,8 @@ DEFAULT_MIN_BIN_STEP = 100
 DEFAULT_MIN_BASE_FEE_PCT = 2.0
 DEFAULT_RSI_PERIOD = 3
 DEFAULT_RSI_MAX = 10.0
-DEFAULT_MAX_PAGES = 3
-DEFAULT_PAGE_SIZE = 100
+DEFAULT_MAX_PAGES = 2
+DEFAULT_PAGE_SIZE = 500
 DEFAULT_RSI_TOP_N = 30
 
 MODULE_NAME = "meme_underval"
@@ -62,6 +62,19 @@ def meme_mint(pool):
 
 def fee_ratio_24h(pool):
     return _to_float((pool.get("fee_tvl_ratio") or {}).get("24h"))
+
+
+def dedupe_by_meme_mint(pools):
+    best = {}
+    for pool in (pools or []):
+        if not isinstance(pool, dict):
+            continue
+        key = meme_mint(pool)
+        if not key:
+            continue
+        if key not in best or _to_float(pool.get("tvl")) > _to_float(best[key].get("tvl")):
+            best[key] = pool
+    return list(best.values())
 
 
 def pool_bin_step(pool):
@@ -135,7 +148,8 @@ def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
                      rsi_period=DEFAULT_RSI_PERIOD, rsi_max=DEFAULT_RSI_MAX,
                      rsi_top_n=DEFAULT_RSI_TOP_N, rsi_fetcher=None,
                      min_tvl_usd=DEFAULT_MIN_TVL_USD):
-    prefiltered = [p for p in (pools or [])
+    unique = dedupe_by_meme_mint(pools)
+    prefiltered = [p for p in unique
                    if pool_passes_prefilter(p, min_market_cap, min_bin_step,
                                             min_base_fee_pct, min_tvl_usd)]
     prefiltered.sort(key=fee_ratio_24h, reverse=True)

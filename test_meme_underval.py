@@ -125,8 +125,26 @@ def test_page_inputs_default_to_module_constants():
     page_src = (REPO_ROOT / "pages" / "discover_lp.py").read_text(encoding="utf-8")
     for const in ("DEFAULT_MIN_MARKET_CAP", "DEFAULT_MIN_TVL_USD",
                   "DEFAULT_MIN_BIN_STEP", "DEFAULT_MIN_BASE_FEE_PCT",
-                  "DEFAULT_RSI_MAX"):
+                  "DEFAULT_RSI_MAX", "DEFAULT_PAGE_SIZE", "DEFAULT_MAX_PAGES"):
         assert f"mu.{const}" in page_src
+
+
+def test_dedupe_keeps_max_tvl_pool_per_mint():
+    pools = [
+        _pool(addr="dead", bin_step=20, base_fee_pct=0.2, fee_ratio_24h=1e9),
+        _pool(addr="hero", bin_step=100, base_fee_pct=2.0, fee_ratio_24h=3.5),
+    ]
+    pools[0]["tvl"] = 0.0
+    pools[1]["tvl"] = 150_000.0
+    other = _pool(addr="other", mint_x="Other1111111111111111111111111111111111111")
+    other["tvl"] = 50_000.0
+    result = mu.dedupe_by_meme_mint(pools + [other])
+    assert {p["address"] for p in result} == {"hero", "other"}
+
+
+def test_dedupe_empty_safe():
+    assert mu.dedupe_by_meme_mint([]) == []
+    assert mu.dedupe_by_meme_mint(None) == []
 
 
 def test_dead_pump_monitor_fully_removed():
