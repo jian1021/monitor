@@ -13,14 +13,14 @@ MEME = "Meme111111111111111111111111111111111111111"
 
 
 def _pool(mc_x=5_000_000.0, mc_y=80_000_000.0, bin_step=100,
-          fee_ratio_24h=3.5, blacklisted=False, addr="PoolAddr123",
+          base_fee_pct=2.0, fee_ratio_24h=3.5, blacklisted=False, addr="PoolAddr123",
           mint_x=MEME, mint_y=SOL, symbol_x="MEME", symbol_y="SOL"):
     return {
         "address": addr,
         "name": f"{symbol_x}-{symbol_y}",
         "is_blacklisted": blacklisted,
         "tvl": 250_000.0,
-        "pool_config": {"bin_step": bin_step, "base_fee_pct": 2.0},
+        "pool_config": {"bin_step": bin_step, "base_fee_pct": base_fee_pct},
         "fee_tvl_ratio": {"24h": fee_ratio_24h},
         "fees": {"24h": 8750.0},
         "volume": {"24h": 1_200_000.0},
@@ -42,37 +42,42 @@ def test_meme_market_cap_missing_fields_is_zero():
     assert mu.meme_market_cap({}) == 0.0
 
 
+def test_base_fee_pct_reads_pool_config():
+    assert mu.base_fee_pct(_pool()) == 2.0
+    assert mu.base_fee_pct({}) == 0.0
+
+
 def test_prefilter_passes_default_thresholds():
     assert mu.pool_passes_prefilter(
-        _pool(), min_market_cap=1_000_000.0, min_bin_step=100, min_fee_ratio_24h=2.0
+        _pool(), min_market_cap=1_000_000.0, min_bin_step=100, min_base_fee_pct=2.0
     ) is True
 
 
 def test_prefilter_rejects_small_cap():
     p = _pool(mc_x=500_000.0)
     assert mu.pool_passes_prefilter(
-        p, min_market_cap=1_000_000.0, min_bin_step=100, min_fee_ratio_24h=2.0
+        p, min_market_cap=1_000_000.0, min_bin_step=100, min_base_fee_pct=2.0
     ) is False
 
 
 def test_prefilter_rejects_small_bin_step():
     p = _pool(bin_step=25)
     assert mu.pool_passes_prefilter(
-        p, min_market_cap=1_000_000.0, min_bin_step=100, min_fee_ratio_24h=2.0
+        p, min_market_cap=1_000_000.0, min_bin_step=100, min_base_fee_pct=2.0
     ) is False
 
 
-def test_prefilter_rejects_low_fee_ratio():
-    p = _pool(fee_ratio_24h=0.4)
+def test_prefilter_rejects_low_base_fee():
+    p = _pool(base_fee_pct=0.5)
     assert mu.pool_passes_prefilter(
-        p, min_market_cap=1_000_000.0, min_bin_step=100, min_fee_ratio_24h=2.0
+        p, min_market_cap=1_000_000.0, min_bin_step=100, min_base_fee_pct=2.0
     ) is False
 
 
 def test_prefilter_rejects_blacklisted():
     p = _pool(blacklisted=True)
     assert mu.pool_passes_prefilter(
-        p, min_market_cap=1_000_000.0, min_bin_step=100, min_fee_ratio_24h=2.0
+        p, min_market_cap=1_000_000.0, min_bin_step=100, min_base_fee_pct=2.0
     ) is False
 
 
@@ -80,7 +85,7 @@ def test_prefilter_rejects_zero_tvl():
     p = _pool()
     p["tvl"] = 0.0
     assert mu.pool_passes_prefilter(
-        p, min_market_cap=1_000_000.0, min_bin_step=100, min_fee_ratio_24h=2.0
+        p, min_market_cap=1_000_000.0, min_bin_step=100, min_base_fee_pct=2.0
     ) is False
 
 
@@ -89,19 +94,22 @@ def test_prefilter_respects_custom_tvl_floor():
     p["tvl"] = 5_000.0
     assert mu.pool_passes_prefilter(
         p, min_market_cap=1_000_000.0, min_bin_step=100,
-        min_fee_ratio_24h=2.0, min_tvl_usd=10_000.0
+        min_base_fee_pct=2.0, min_tvl_usd=10_000.0
     ) is False
     assert mu.pool_passes_prefilter(
         p, min_market_cap=1_000_000.0, min_bin_step=100,
-        min_fee_ratio_24h=2.0, min_tvl_usd=1_000.0
+        min_base_fee_pct=2.0, min_tvl_usd=1_000.0
     ) is True
 
 
 def test_push_message_contains_links():
     hit = {"symbol": "MEME-SOL", "meme_mint": MEME,
            "pool_address": "PoolAddr123", "market_cap": 5_000_000.0,
-           "tvl": 250_000.0, "fee_ratio_24h": 3.5, "rsi": 6.2}
+           "tvl": 250_000.0, "fee_ratio_24h": 3.5, "base_fee_pct": 2.0,
+           "rsi": 6.2}
     msg = mu.build_push_message([hit])
+    assert "MEME-SOL" in msg
+    assert "2.00%" in msg
     assert "MEME-SOL" in msg
     assert f"https://gmgn.ai/sol/token/{MEME}" in msg
     assert "https://app.meteora.ag/dlmm/PoolAddr123" in msg

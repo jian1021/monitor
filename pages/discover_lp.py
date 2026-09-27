@@ -7,7 +7,7 @@ from monitor_rsi import get_meteora_rsi
 
 st.set_page_config(page_title="Meme 低估监控", layout="wide")
 st.title("🧲 Meme 低估监控")
-st.caption("直连 Meteora Top Performers（按 24h 费率 / TVL 排序），经市值 / TVL / bin_step / 费率预筛后，对头部候选计算 RSI(3, 1h)，只保留超卖钝化标的。")
+st.caption("直连 Meteora Top Performers（按 24h 费 / TVL 排序），经市值 / TVL / bin_step / 基础费率预筛后，对头部候选计算 RSI(3, 1h)，只保留超卖钝化标的。")
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -31,8 +31,8 @@ with f3:
     min_bin_step = st.number_input("bin_step 下限", min_value=0,
                                    value=100, step=1)
 with f4:
-    min_fee_ratio = st.number_input("24h 费率下限 (费/TVL %)", min_value=0.0,
-                                    value=2.0, step=0.5)
+    min_base_fee = st.number_input("基础费率下限 (Fee %)", min_value=0.0,
+                                   value=2.0, step=0.5)
 with f5:
     rsi_max = st.number_input("RSI(3, 1h) 上限", min_value=0.0, max_value=100.0,
                               value=10.0, step=1.0)
@@ -65,7 +65,7 @@ if not pools:
 
 prefiltered = [p for p in pools
                if mu.pool_passes_prefilter(p, min_market_cap, int(min_bin_step),
-                                           min_fee_ratio, min_tvl)]
+                                           min_base_fee, min_tvl)]
 prefiltered.sort(key=mu.fee_ratio_24h, reverse=True)
 
 m1, m2, m3 = st.columns(3)
@@ -76,13 +76,13 @@ m3.metric("待算 RSI", min(len(prefiltered), int(rsi_top_n)))
 if not prefiltered:
     st.info(f"当前阀值下无预筛标的（市值≥${min_market_cap:,.0f}，"
             f"TVL≥${min_tvl:,.0f}，bin_step≥{int(min_bin_step)}，"
-            f"费率≥{min_fee_ratio:.1f}%）")
+            f"基础费率≥{min_base_fee:.1f}%）")
     st.stop()
 
 with st.spinner(f"正在计算 {min(len(prefiltered), int(rsi_top_n))} 个候选的 RSI(3, 1h)..."):
     hits = mu.scan_undervalued(
         pools, min_market_cap=min_market_cap, min_bin_step=int(min_bin_step),
-        min_fee_ratio_24h=min_fee_ratio, min_tvl_usd=min_tvl,
+        min_base_fee_pct=min_base_fee, min_tvl_usd=min_tvl,
         rsi_period=mu.DEFAULT_RSI_PERIOD,
         rsi_max=rsi_max, rsi_top_n=int(rsi_top_n),
         rsi_fetcher=lambda addr, _tf, _agg, length: _cached_rsi(addr, length),
@@ -104,8 +104,8 @@ fig.add_trace(go.Bar(
     name="24h 费率 %",
     marker_color="#26a69a",
 ))
-fig.update_layout(title="命中标的 24h 费率 / TVL（%）",
-                  xaxis_title="池子", yaxis_title="费率 %",
+fig.update_layout(title="命中标的 24h 费 / TVL 比率（%）",
+                  xaxis_title="池子", yaxis_title="费/TVL %",
                   template="plotly_dark", height=380)
 st.plotly_chart(fig, use_container_width=True)
 
@@ -124,7 +124,8 @@ st.dataframe(
         "pool_address": "池地址",
         "market_cap": st.column_config.NumberColumn("Meme 市值 (USD)", format="$%d"),
         "tvl": st.column_config.NumberColumn("TVL (USD)", format="$%d"),
-        "fee_ratio_24h": st.column_config.NumberColumn("24h 费率 %", format="%.2f"),
+        "base_fee_pct": st.column_config.NumberColumn("基础费率 (Fee %)", format="%.2f"),
+        "fee_ratio_24h": st.column_config.NumberColumn("24h 费/TVL %", format="%.2f"),
         "fees_24h_usd": st.column_config.NumberColumn("24h 手续费 (USD)", format="$%d"),
         "volume_24h_usd": st.column_config.NumberColumn("24h 交易量 (USD)", format="$%d"),
         "bin_step": "bin_step",
@@ -132,7 +133,7 @@ st.dataframe(
         "age_hours": st.column_config.NumberColumn("池龄 (小时)", format="%.1f"),
     },
     column_order=["symbol", "gmgn_link", "meteora_link", "market_cap", "tvl",
-                  "fee_ratio_24h", "rsi", "bin_step", "fees_24h_usd",
+                  "base_fee_pct", "fee_ratio_24h", "rsi", "bin_step", "fees_24h_usd",
                   "volume_24h_usd", "age_hours", "meme_mint", "pool_address"],
     use_container_width=True,
     hide_index=True,

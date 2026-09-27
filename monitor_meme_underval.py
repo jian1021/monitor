@@ -17,7 +17,7 @@ QUOTE_MINTS = frozenset({SOL_MINT, USDC_MINT, USDT_MINT})
 DEFAULT_MIN_MARKET_CAP = 1_000_000.0
 DEFAULT_MIN_TVL_USD = 10_000.0
 DEFAULT_MIN_BIN_STEP = 100
-DEFAULT_MIN_FEE_RATIO_24H = 2.0
+DEFAULT_MIN_BASE_FEE_PCT = 2.0
 DEFAULT_RSI_PERIOD = 3
 DEFAULT_RSI_MAX = 10.0
 DEFAULT_MAX_PAGES = 3
@@ -68,6 +68,10 @@ def pool_bin_step(pool):
     return int(_to_float((pool.get("pool_config") or {}).get("bin_step")))
 
 
+def base_fee_pct(pool):
+    return _to_float((pool.get("pool_config") or {}).get("base_fee_pct"))
+
+
 def pool_age_hours(pool, now=None):
     created_ms = _to_float(pool.get("created_at"))
     if created_ms <= 0:
@@ -78,14 +82,14 @@ def pool_age_hours(pool, now=None):
 
 def pool_passes_prefilter(pool, min_market_cap=DEFAULT_MIN_MARKET_CAP,
                            min_bin_step=DEFAULT_MIN_BIN_STEP,
-                           min_fee_ratio_24h=DEFAULT_MIN_FEE_RATIO_24H,
+                           min_base_fee_pct=DEFAULT_MIN_BASE_FEE_PCT,
                            min_tvl_usd=DEFAULT_MIN_TVL_USD):
     if not isinstance(pool, dict) or pool.get("is_blacklisted"):
         return False
     return (meme_market_cap(pool) >= min_market_cap
-            and _to_float(pool.get("tvl")) >= min_tvl_usd
             and pool_bin_step(pool) >= min_bin_step
-            and fee_ratio_24h(pool) >= min_fee_ratio_24h)
+            and base_fee_pct(pool) >= min_base_fee_pct
+            and _to_float(pool.get("tvl")) >= min_tvl_usd)
 
 
 def fetch_top_performers(page_size=DEFAULT_PAGE_SIZE, max_pages=DEFAULT_MAX_PAGES,
@@ -127,13 +131,13 @@ def fetch_top_performers(page_size=DEFAULT_PAGE_SIZE, max_pages=DEFAULT_MAX_PAGE
 
 def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
                      min_bin_step=DEFAULT_MIN_BIN_STEP,
-                     min_fee_ratio_24h=DEFAULT_MIN_FEE_RATIO_24H,
+                     min_base_fee_pct=DEFAULT_MIN_BASE_FEE_PCT,
                      rsi_period=DEFAULT_RSI_PERIOD, rsi_max=DEFAULT_RSI_MAX,
                      rsi_top_n=DEFAULT_RSI_TOP_N, rsi_fetcher=None,
                      min_tvl_usd=DEFAULT_MIN_TVL_USD):
     prefiltered = [p for p in (pools or [])
                    if pool_passes_prefilter(p, min_market_cap, min_bin_step,
-                                            min_fee_ratio_24h, min_tvl_usd)]
+                                            min_base_fee_pct, min_tvl_usd)]
     prefiltered.sort(key=fee_ratio_24h, reverse=True)
     candidates = prefiltered[:max(0, int(rsi_top_n))]
 
@@ -166,6 +170,7 @@ def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
             "fees_24h_usd": _to_float((pool.get("fees") or {}).get("24h")),
             "volume_24h_usd": _to_float((pool.get("volume") or {}).get("24h")),
             "fee_ratio_24h": fee_ratio_24h(pool),
+            "base_fee_pct": base_fee_pct(pool),
             "bin_step": pool_bin_step(pool),
             "rsi": round(float(rsi), 2),
             "age_hours": pool_age_hours(pool),
@@ -180,7 +185,8 @@ def build_push_message(hits):
         age = f"{hit['age_hours']:.1f}h" if hit.get("age_hours") is not None else "未知"
         lines.append(
             f"• {hit['symbol']} | 市值:${hit['market_cap']:,.0f} | "
-            f"TVL:${hit['tvl']:,.0f} | 费率:{hit['fee_ratio_24h']:.2f}% | "
+            f"TVL:${hit['tvl']:,.0f} | 基础费:{hit['base_fee_pct']:.2f}% | "
+            f"24h费/TVL:{hit['fee_ratio_24h']:.2f}% | "
             f"RSI:{hit['rsi']:.1f} | 池龄:{age}\n"
             f"  🔗 GMGN: https://gmgn.ai/sol/token/{hit['meme_mint']}\n"
             f"  🌊 Meteora: https://app.meteora.ag/dlmm/{hit['pool_address']}"
@@ -195,7 +201,7 @@ def run_meme_underval_monitor(params=None):
     min_market_cap = float(cfg.get("min_market_cap", DEFAULT_MIN_MARKET_CAP))
     min_tvl_usd = float(cfg.get("min_tvl_usd", DEFAULT_MIN_TVL_USD))
     min_bin_step = int(cfg.get("min_bin_step", DEFAULT_MIN_BIN_STEP))
-    min_fee_ratio = float(cfg.get("min_fee_ratio_24h", DEFAULT_MIN_FEE_RATIO_24H))
+    min_base_fee = float(cfg.get("min_base_fee_pct", DEFAULT_MIN_BASE_FEE_PCT))
     rsi_period = int(cfg.get("rsi_period", DEFAULT_RSI_PERIOD))
     rsi_max = float(cfg.get("rsi_max", DEFAULT_RSI_MAX))
 
@@ -210,8 +216,8 @@ def run_meme_underval_monitor(params=None):
 
     hits = scan_undervalued(
         pools, min_market_cap=min_market_cap, min_tvl_usd=min_tvl_usd,
-        min_bin_step=min_bin_step,
-        min_fee_ratio_24h=min_fee_ratio, rsi_period=rsi_period, rsi_max=rsi_max,
+        min_bin_step=min_bin_step, min_base_fee_pct=min_base_fee,
+        rsi_period=rsi_period, rsi_max=rsi_max,
         rsi_top_n=int(cfg.get("rsi_top_n", DEFAULT_RSI_TOP_N)),
     )
     if not hits:
