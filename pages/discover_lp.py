@@ -4,7 +4,7 @@ import streamlit as st
 
 import monitor_meme_underval as mu
 from db import get_meme_underval_params, update_meme_underval_params
-from monitor_rsi import get_meteora_native_rsi
+from monitor_rsi import get_meteora_48h_price_position, get_meteora_native_rsi
 
 st.set_page_config(page_title="Meme 低估监控", layout="wide")
 st.title("🧲 Meme 低估监控")
@@ -23,6 +23,24 @@ def _cached_rsi(pool_address, period):
     return get_meteora_native_rsi(pool_address, "hour", 1, int(period))
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_price_position(pool_address):
+    return get_meteora_48h_price_position(pool_address, "1h")
+
+
+SCAN_MODE_RSI = "RSI 超卖"
+SCAN_MODE_48H = "现价 ≥ 48h高点80%"
+scan_mode = st.segmented_control(
+    "扫描模式",
+    [SCAN_MODE_RSI, SCAN_MODE_48H],
+    default=SCAN_MODE_RSI,
+) or SCAN_MODE_RSI
+st.caption(
+    "只保留「现价 ÷ 48 小时最高价 ≥ 阈值」的价格强度标的。"
+    if scan_mode == SCAN_MODE_48H
+    else "只保留「RSI(3, 1h) ≤ 上限」的超卖钝化标的。"
+)
+
 f1, f2, f3, f4, f5 = st.columns(5)
 with f1:
     min_market_cap = st.number_input("市值下限 (USD)", min_value=0.0,
@@ -37,8 +55,15 @@ with f4:
     min_base_fee = st.number_input("基础费率下限 (Fee %)", min_value=0.0,
                                    value=float(saved["min_base_fee_pct"]), step=0.5)
 with f5:
-    rsi_max = st.number_input("RSI(3, 1h) 上限", min_value=0.0, max_value=100.0,
-                              value=float(saved["rsi_max"]), step=1.0)
+    if scan_mode == SCAN_MODE_48H:
+        price_position_min = st.number_input("现价/48h最高 下限", min_value=0.0,
+                                             max_value=1.0, step=0.05, format="%.2f",
+                                             value=float(saved["price_position_min"]))
+        rsi_max = float(saved["rsi_max"])
+    else:
+        rsi_max = st.number_input("RSI(3, 1h) 上限", min_value=0.0, max_value=100.0,
+                                  value=float(saved["rsi_max"]), step=1.0)
+        price_position_min = float(saved["price_position_min"])
 
 with st.expander("高级参数", expanded=False):
     a1, a2, a3 = st.columns(3)
@@ -67,6 +92,7 @@ if save:
         "min_bin_step": int(min_bin_step),
         "min_base_fee_pct": float(min_base_fee),
         "rsi_max": float(rsi_max),
+        "price_position_min": float(price_position_min),
     })
     if ok:
         st.success("✅ 参数已保存，手动与自动运行同步生效")
@@ -94,12 +120,86 @@ m1, m2, m3, m4 = st.columns(4)
 m1.metric("拉取池数", len(pools))
 m2.metric("按币去重", len(unique))
 m3.metric("通过预筛", len(prefiltered))
-m4.metric("待算 RSI", min(len(prefiltered), int(rsi_top_n)))
+m4.metric("待算 RSI" if scan_mode == SCAN_MODE_RSI else "待算 48h 位置",
+          min(len(prefiltered), int(rsi_top_n)))
 
 if not prefiltered:
     st.info(f"当前阀值下无预筛标的（市值≥${min_market_cap:,.0f}，"
             f"TVL≥${min_tvl:,.0f}，bin_step≥{int(min_bin_step)}，"
             f"基础费率≥{min_base_fee:.1f}%）")
+    st.stop()
+
+if scan_mode == SCAN_MODE_48H:
+    with st.spinner(f"正在计算 {min(len(prefiltered), int(rsi_top_n))} 个候选的 48h 价格位置..."):
+        progress = st.progress(0, text="准备计算 48h 价格位置...")
+
+        def _report_48h(done, total, symbol):
+            progress.progress(min(done / max(total, 1), 1.0),
+                              text=f"48h {done}/{total}：{symbol}")
+
+        hits = mu.scan_price_position(
+            pools, min_market_cap=min_market_cap, min_bin_step=int(min_bin_step),
+            min_base_fee_pct=min_base_fee, min_tvl_usd=min_tvl,
+            top_n=int(rsi_top_n), price_position_min=float(price_position_min),
+            price_fetcher=lambda addr: _cached_price_position(addr),
+            on_progress=_report_48h,
+        )
+        progress.empty()
+
+    if not hits:
+        st.warning(f"预筛有标的，但无「现价 ÷ 48h最高 ≥ {price_position_min:.0%}」的标的")
+        st.stop()
+
+    st.success(f"🎯 命中 **{len(hits)}** 个价格强度标的")
+    hits.sort(key=lambda h: h["price_ratio_48h"], reverse=True)
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=[h["symbol"] for h in hits[:20]],
+        y=[h["price_ratio_48h"] * 100 for h in hits[:20]],
+        text=[f"{h['price_ratio_48h']:.0%}" for h in hits[:20]],
+        textposition="outside",
+        name="现价/48h最高 %",
+        marker_color="#ef5350",
+    ))
+    fig.update_layout(title="命中标的 现价 / 48h最高（%）",
+                      xaxis_title="池子", yaxis_title="现价/48h最高 %",
+                      template="plotly_dark", height=380)
+    st.plotly_chart(fig, use_container_width=True)
+
+    df = pd.DataFrame(hits)
+    df["price_ratio_pct"] = df["price_ratio_48h"] * 100
+    df["gmgn_link"] = df["meme_mint"].apply(
+        lambda ca: f"https://gmgn.ai/sol/token/{ca}" if ca else "")
+    df["meteora_link"] = df["pool_address"].apply(
+        lambda pa: f"https://app.meteora.ag/dlmm/{pa}" if pa else "")
+    st.dataframe(
+        df,
+        column_config={
+            "symbol": "池子",
+            "gmgn_link": st.column_config.LinkColumn("GMGN 盘面", display_text="🔗 开盘"),
+            "meteora_link": st.column_config.LinkColumn("Meteora 池子", display_text="🌊 进池"),
+            "meme_mint": "Meme 合约",
+            "pool_address": "池地址",
+            "market_cap": st.column_config.NumberColumn("Meme 市值 (USD)", format="$%d"),
+            "tvl": st.column_config.NumberColumn("TVL (USD)", format="$%d"),
+            "base_fee_pct": st.column_config.NumberColumn("基础费率 (Fee %)", format="%.2f"),
+            "fee_ratio_24h": st.column_config.NumberColumn("24h 费/TVL %", format="%.2f"),
+            "fees_24h_usd": st.column_config.NumberColumn("24h 手续费 (USD)", format="$%d"),
+            "volume_24h_usd": st.column_config.NumberColumn("24h 交易量 (USD)", format="$%d"),
+            "bin_step": "bin_step",
+            "price_ratio_pct": st.column_config.NumberColumn("现价/48h最高 (%)", format="%.1f"),
+            "current_price": st.column_config.NumberColumn("现价 (USD)", format="$%.8f"),
+            "high_48h": st.column_config.NumberColumn("48h最高 (USD)", format="$%.8f"),
+            "age_hours": st.column_config.NumberColumn("池龄 (小时)", format="%.1f"),
+        },
+        column_order=["symbol", "gmgn_link", "meteora_link", "market_cap", "tvl",
+                      "price_ratio_pct", "current_price", "high_48h", "base_fee_pct",
+                      "fee_ratio_24h", "bin_step", "fees_24h_usd", "volume_24h_usd",
+                      "age_hours", "meme_mint", "pool_address"],
+        use_container_width=True,
+        hide_index=True,
+    )
     st.stop()
 
 with st.spinner(f"正在计算 {min(len(prefiltered), int(rsi_top_n))} 个候选的 RSI(3, 1h)..."):

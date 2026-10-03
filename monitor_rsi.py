@@ -215,6 +215,38 @@ def get_meteora_native_rsi(pool_address, timeframe="hour", aggregate=1, length=1
     return None, None
 
 
+def get_meteora_48h_price_position(pool_address, timeframe="1h", hours=48):
+    """Meteora 池 48 小时价格位置：返回 (current_price, high_48h, ratio)。
+
+    ratio = 当前收盘价 ÷ 48h 窗口最高价，用于判断「现价是否回到 48h 高点的
+    X% 以上」（价格强度口径）。价格取自原生 DLMM datapi 的 OHLCV 序列，与
+    原生 RSI 同源同口径；比率对计价单位不敏感。失败返回 (None, None, None)。
+    """
+    try:
+        tf = _METEORA_TF_ALIAS.get(str(timeframe).strip(), "1h")
+        tf_seconds = _METEORA_TF_SECONDS[tf]
+        end_ts = int(time.time())
+        start_ts = end_ts - int(hours) * tf_seconds
+        url = (f"{METEORA_DATAPI_BASE}/pools/{pool_address}/ohlcv"
+               f"?timeframe={tf}&start_time={start_ts}&end_time={end_ts}")
+        res = requests.get(url, headers=headers, timeout=10).json()
+        data_list = res.get("data", []) if isinstance(res, dict) else []
+        if not data_list or len(data_list) < 2:
+            print(f"⚠️ Meteora [{str(pool_address)[:10]}...] 48h K线不足 ({len(data_list)} 根)")
+            return None, None, None
+        data_list = sorted(data_list, key=lambda c: c.get("timestamp", 0))
+        high_48h = max(float(c["high"]) for c in data_list)
+        current_price = float(data_list[-1]["close"])
+        if high_48h <= 0:
+            return None, None, None
+        return current_price, high_48h, current_price / high_48h
+    except Exception as e:
+        import traceback
+        print(f"❌ Meteora [{str(pool_address)[:10]}...] 48h价格位置获取失败: {e}")
+        traceback.print_exc()
+    return None, None, None
+
+
 def _to_bs_code(code):
     c = str(code).strip().lower()
     if c.startswith(("sh.", "sz.")):

@@ -25,6 +25,7 @@ DEFAULT_MIN_BIN_STEP = int(MEME_PARAM_DEFAULTS["min_bin_step"])
 DEFAULT_MIN_BASE_FEE_PCT = float(MEME_PARAM_DEFAULTS["min_base_fee_pct"])
 DEFAULT_RSI_PERIOD = 3
 DEFAULT_RSI_MAX = float(MEME_PARAM_DEFAULTS["rsi_max"])
+DEFAULT_PRICE_POSITION_MIN = float(MEME_PARAM_DEFAULTS["price_position_min"])
 DEFAULT_MAX_PAGES = 2
 DEFAULT_PAGE_SIZE = 500
 DEFAULT_RSI_TOP_N = 30
@@ -147,18 +148,24 @@ def fetch_top_performers(page_size=DEFAULT_PAGE_SIZE, max_pages=DEFAULT_MAX_PAGE
     return pools
 
 
+def _build_candidates(pools, min_market_cap, min_bin_step, min_base_fee_pct,
+                      min_tvl_usd, top_n):
+    unique = dedupe_by_meme_mint(pools)
+    prefiltered = [p for p in unique
+                   if pool_passes_prefilter(p, min_market_cap, min_bin_step,
+                                            min_base_fee_pct, min_tvl_usd)]
+    prefiltered.sort(key=fee_ratio_24h, reverse=True)
+    return prefiltered[:max(0, int(top_n))]
+
+
 def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
                      min_bin_step=DEFAULT_MIN_BIN_STEP,
                      min_base_fee_pct=DEFAULT_MIN_BASE_FEE_PCT,
                      rsi_period=DEFAULT_RSI_PERIOD, rsi_max=DEFAULT_RSI_MAX,
                      rsi_top_n=DEFAULT_RSI_TOP_N, rsi_fetcher=None,
                      min_tvl_usd=DEFAULT_MIN_TVL_USD, on_progress=None):
-    unique = dedupe_by_meme_mint(pools)
-    prefiltered = [p for p in unique
-                   if pool_passes_prefilter(p, min_market_cap, min_bin_step,
-                                            min_base_fee_pct, min_tvl_usd)]
-    prefiltered.sort(key=fee_ratio_24h, reverse=True)
-    candidates = prefiltered[:max(0, int(rsi_top_n))]
+    candidates = _build_candidates(pools, min_market_cap, min_bin_step,
+                                   min_base_fee_pct, min_tvl_usd, rsi_top_n)
 
     if rsi_fetcher is None:
         from monitor_rsi import get_meteora_native_rsi
@@ -200,6 +207,63 @@ def scan_undervalued(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
             "base_fee_pct": base_fee_pct(pool),
             "bin_step": pool_bin_step(pool),
             "rsi": round(rsi_value, 2),
+            "age_hours": pool_age_hours(pool),
+        })
+        time.sleep(0.8)
+    return hits
+
+
+def scan_price_position(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
+                        min_bin_step=DEFAULT_MIN_BIN_STEP,
+                        min_base_fee_pct=DEFAULT_MIN_BASE_FEE_PCT,
+                        top_n=DEFAULT_RSI_TOP_N,
+                        price_position_min=DEFAULT_PRICE_POSITION_MIN,
+                        min_tvl_usd=DEFAULT_MIN_TVL_USD, price_fetcher=None,
+                        on_progress=None):
+    candidates = _build_candidates(pools, min_market_cap, min_bin_step,
+                                   min_base_fee_pct, min_tvl_usd, top_n)
+
+    if price_fetcher is None:
+        from monitor_rsi import get_meteora_48h_price_position
+
+        def _default_fetcher(pool_address, timeframe="1h"):
+            return get_meteora_48h_price_position(pool_address, timeframe)
+
+        price_fetcher = _default_fetcher
+
+    hits = []
+    total = len(candidates)
+    for index, pool in enumerate(candidates, start=1):
+        symbol = str(pool.get("name") or pool.get("address") or "")[:20]
+        if on_progress is not None:
+            try:
+                on_progress(index, total, symbol)
+            except Exception:
+                pass
+        pool_address = str(pool.get("address") or "")
+        if not pool_address:
+            continue
+        try:
+            current_price, high_48h, ratio = price_fetcher(pool_address, "1h")
+        except Exception as e:
+            print(f"48h 价格位置计算失败 [{pool_address[:10]}...]: {e}")
+            continue
+        if ratio is None or float(ratio) < float(price_position_min):
+            continue
+        hits.append({
+            "symbol": str(pool.get("name") or pool_address[:10]),
+            "meme_mint": meme_mint(pool),
+            "pool_address": pool_address,
+            "market_cap": meme_market_cap(pool),
+            "tvl": _to_float(pool.get("tvl")),
+            "fees_24h_usd": _to_float((pool.get("fees") or {}).get("24h")),
+            "volume_24h_usd": _to_float((pool.get("volume") or {}).get("24h")),
+            "fee_ratio_24h": fee_ratio_24h(pool),
+            "base_fee_pct": base_fee_pct(pool),
+            "bin_step": pool_bin_step(pool),
+            "current_price": current_price,
+            "high_48h": high_48h,
+            "price_ratio_48h": round(float(ratio), 4),
             "age_hours": pool_age_hours(pool),
         })
         time.sleep(0.8)

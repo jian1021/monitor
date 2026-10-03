@@ -6,6 +6,7 @@ MEME_PARAM_DEFAULTS = {
     "min_bin_step": 100,
     "min_base_fee_pct": 2.0,
     "rsi_max": 10.0,
+    "price_position_min": 0.8,
 }
 
 
