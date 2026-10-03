@@ -4,7 +4,7 @@ import streamlit as st
 
 import monitor_meme_underval as mu
 from db import get_meme_underval_params, update_meme_underval_params
-from monitor_rsi import get_meteora_48h_price_position, get_meteora_native_rsi
+from monitor_rsi import get_meteora_native_rsi
 
 st.set_page_config(page_title="Meme 低估监控", layout="wide")
 st.title("🧲 Meme 低估监控")
@@ -25,7 +25,7 @@ def _cached_rsi(pool_address, period):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _cached_price_position(pool_address):
-    return get_meteora_48h_price_position(pool_address, "1h")
+    return mu.fetch_48h_price_position(pool_address, "1h")
 
 
 SCAN_MODE_RSI = "RSI 超卖"

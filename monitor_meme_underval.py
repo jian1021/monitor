@@ -148,6 +148,34 @@ def fetch_top_performers(page_size=DEFAULT_PAGE_SIZE, max_pages=DEFAULT_MAX_PAGE
     return pools
 
 
+METEORA_TF_SECONDS = {"5m": 300, "30m": 1800, "1h": 3600, "2h": 7200,
+                      "4h": 14400, "12h": 43200, "24h": 86400}
+
+
+def fetch_48h_price_position(pool_address, timeframe="1h", hours=48):
+    """Meteora 池 48 小时窗口的 (现价, 48h最高, 现价/48h最高)；失败返回 (None, None, None)。"""
+    try:
+        tf = str(timeframe) if str(timeframe) in METEORA_TF_SECONDS else "1h"
+        end_ts = int(time.time())
+        start_ts = end_ts - int(hours) * METEORA_TF_SECONDS[tf]
+        url = (f"{DATAPI_BASE}/pools/{pool_address}/ohlcv"
+               f"?timeframe={tf}&start_time={start_ts}&end_time={end_ts}")
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
+        data_list = res.get("data", []) if isinstance(res, dict) else []
+        if not data_list or len(data_list) < 2:
+            print(f"⚠️ Meteora [{str(pool_address)[:10]}...] 48h K线不足 ({len(data_list)} 根)")
+            return None, None, None
+        data_list = sorted(data_list, key=lambda c: c.get("timestamp", 0))
+        high_48h = max(float(c["high"]) for c in data_list)
+        current_price = float(data_list[-1]["close"])
+        if high_48h <= 0:
+            return None, None, None
+        return current_price, high_48h, current_price / high_48h
+    except Exception as e:
+        print(f"❌ Meteora [{str(pool_address)[:10]}...] 48h价格位置获取失败: {e}")
+    return None, None, None
+
+
 def _build_candidates(pools, min_market_cap, min_bin_step, min_base_fee_pct,
                       min_tvl_usd, top_n):
     unique = dedupe_by_meme_mint(pools)
@@ -224,12 +252,7 @@ def scan_price_position(pools, min_market_cap=DEFAULT_MIN_MARKET_CAP,
                                    min_base_fee_pct, min_tvl_usd, top_n)
 
     if price_fetcher is None:
-        from monitor_rsi import get_meteora_48h_price_position
-
-        def _default_fetcher(pool_address, timeframe="1h"):
-            return get_meteora_48h_price_position(pool_address, timeframe)
-
-        price_fetcher = _default_fetcher
+        price_fetcher = fetch_48h_price_position
 
     hits = []
     total = len(candidates)
