@@ -27,17 +27,18 @@ def get_module_settings() -> dict:
     """返回所有模块的启停状态，格式: {模块名: True/False}"""
     ensure_module_settings()
     client = get_db_client()
+    defaults = {"rsi": True, "crypto": True, "onchain_token": True, "meme_underval": True,
+                "meme_rsi_batch": True, "robinhood_pump": True, "lp_alert": True}
     if not client:
-        return {"rsi": True, "crypto": True, "onchain_token": True, "robinhood_pump": True, "lp_alert": True}
+        return defaults
     try:
         rs = client.execute("SELECT module_name, enabled FROM module_settings")
-        result = {row[0]: bool(row[1]) for row in rs.rows}
-        defaults = {"rsi": True, "crypto": True, "onchain_token": True, "robinhood_pump": True, "lp_alert": True}
+        result = {str(row[0]): bool(row[1]) for row in rs.rows}
         defaults.update(result)
         return defaults
     except Exception as e:
         print(f"❌ 读取模块设置失败: {e}")
-        return {"rsi": True, "crypto": True, "onchain_token": True, "robinhood_pump": True, "lp_alert": True}
+        return defaults
     finally:
         client.close()
 

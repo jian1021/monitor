@@ -48,6 +48,7 @@ dashboard = st.Page("pages/dashboard.py", title="超卖监控", icon=":material/
 mainstream_crypto = st.Page("pages/st_mainstream_crypto.py", title="主流加密货币", icon=":material/monetization_on:")
 onchain_token = st.Page("pages/st_onchain_token.py", title="链上代币", icon=":material/link:")
 discover_lp = st.Page("pages/discover_lp.py", title="Meme 低估监控", icon=":material/trending_down:")
+meme_rsi_batch = st.Page("pages/meme_rsi_batch.py", title="批量Meme超卖超买", icon=":material/radar:")
 lp_bands = st.Page("pages/lp_bands.py", title="LP 区间可视化", icon=":material/ssid_chart:")
 price_monitor = st.Page("pages/st_monitor_price.py", title="价格监控", icon=":material/track_changes:")
 pool_simulator = st.Page("pages/st_pool_simulator.py", title="池子价格模拟", icon=":material/science:")
@@ -61,7 +62,7 @@ if st.session_state.logged_in:
     # 登录成功：挂载所有监控业务模块与退出页面
     pg = st.navigation(
         {
-            "策略与数据": [dashboard, mainstream_crypto, onchain_token, discover_lp, lp_bands, price_monitor, pool_simulator, token_distribution, lp_position_alert_page],
+            "策略与数据": [dashboard, mainstream_crypto, onchain_token, discover_lp, meme_rsi_batch, lp_bands, price_monitor, pool_simulator, token_distribution, lp_position_alert_page],
             "系统管理": [monitor_settings, logout_page],
         }
     )

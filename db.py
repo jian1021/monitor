@@ -19,6 +19,17 @@ from app.infrastructure.db.meme_config import (
     get_meme_underval_params,
     update_meme_underval_params,
 )
+from app.infrastructure.db.meme_watchlist import (
+    MEME_RSI_PARAM_DEFAULTS,
+    add_meme_pools,
+    ensure_meme_watchlist_schema,
+    get_meme_rsi_params,
+    list_meme_watchlist_pools,
+    remove_meme_pool,
+    set_meme_pool_enabled,
+    update_meme_pool_rsi,
+    update_meme_rsi_params,
+)
 from app.infrastructure.db.module_settings import (
     ensure_module_settings,
     get_module_settings,
@@ -48,6 +59,15 @@ __all__ = [
     "ensure_meme_config_schema",
     "get_meme_underval_params",
     "update_meme_underval_params",
+    "MEME_RSI_PARAM_DEFAULTS",
+    "ensure_meme_watchlist_schema",
+    "add_meme_pools",
+    "list_meme_watchlist_pools",
+    "remove_meme_pool",
+    "set_meme_pool_enabled",
+    "update_meme_pool_rsi",
+    "get_meme_rsi_params",
+    "update_meme_rsi_params",
     "PUMP_ALERT_TTL_HOURS",
     "ensure_pump_alert_schema",
     "filter_unpushed",

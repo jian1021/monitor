@@ -16,6 +16,7 @@ from config import FEISHU_WEBHOOK
 from db import DEFAULT_INTERVALS, get_module_intervals, get_module_settings
 from db import load_instruments, update_asset_alert_state
 from monitor_meme_underval import run_meme_underval_monitor
+from monitor_meme_rsi_batch import run_batch_meme_rsi_monitor
 from monitor_robinhood_pump import run_monitor
 from send_feishu_msg import send_feishu_msg
 
@@ -253,6 +254,16 @@ def _run_meme_underval():
         traceback.print_exc()
 
 
+def _run_meme_rsi_batch():
+    print(f"\n{'='*50}")
+    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 批量 Meme 超卖超买监控")
+    try:
+        run_batch_meme_rsi_monitor()
+    except Exception as e:
+        print(f"❌ run_batch_meme_rsi_monitor() 发生异常：{e}")
+        traceback.print_exc()
+
+
 def _run_robinhood_pump():
     print(f"\n{'='*50}")
     print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 RobinHood pump 策略监控")
@@ -280,6 +291,7 @@ def build_scheduler() -> MonitoringScheduler:
     registry.register(MonitorSpec("crypto", "crypto", _run_crypto))
     registry.register(MonitorSpec("onchain_token", "onchain_token", _run_onchain_token))
     registry.register(MonitorSpec("meme_underval", "meme_underval", _run_meme_underval))
+    registry.register(MonitorSpec("meme_rsi_batch", "meme_rsi_batch", _run_meme_rsi_batch))
     registry.register(MonitorSpec("robinhood_pump", "robinhood_pump", _run_robinhood_pump))
     registry.register(MonitorSpec("lp_alert", "lp_alert", _run_lp_alert))
     return MonitoringScheduler(registry, poll_interval=POLL_INTERVAL)
