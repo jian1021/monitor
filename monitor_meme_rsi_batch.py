@@ -1,4 +1,4 @@
-"""批量 meme 池子超卖超买监控：RSI(3,1h) 越界(>90 或 <10) 推送飞书。"""
+"""批量 meme 池子超卖超买监控：RSI(3,5m) 越界(>90 或 <10) 推送飞书。"""
 
 import re
 import time
@@ -51,7 +51,7 @@ def fetch_pool_name(address) -> str:
 def _default_rsi_fetcher(address, length):
     from monitor_rsi import get_meteora_native_rsi
 
-    return get_meteora_native_rsi(address, "hour", 1, length)
+    return get_meteora_native_rsi(address, "5m", 1, length)
 
 
 def scan_watchlist(pools=None, rsi_low=10.0, rsi_high=90.0, period=RSI_PERIOD,
@@ -100,7 +100,7 @@ def scan_watchlist(pools=None, rsi_low=10.0, rsi_high=90.0, period=RSI_PERIOD,
 def build_alert_message(hits, rsi_low=10.0, rsi_high=90.0, period=RSI_PERIOD):
     lines = [
         f"📡【批量 Meme 超卖超买告警】命中 {len(hits)} 个 "
-        f"(RSI({int(period)},1h) >{float(rsi_high):g} 或 <{float(rsi_low):g})"
+        f"(RSI({int(period)},5m) >{float(rsi_high):g} 或 <{float(rsi_low):g})"
     ]
     for hit in hits:
         price = "未知" if hit.get("price") is None else f"${hit['price']:.6g}"

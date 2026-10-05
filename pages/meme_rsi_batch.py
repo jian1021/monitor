@@ -16,7 +16,7 @@ from monitor_rsi import get_meteora_native_rsi
 
 st.set_page_config(page_title="批量 Meme 超卖超买监控", layout="wide")
 st.title("📡 批量 Meme 超卖超买监控")
-st.caption("粘贴 Solana(Meteora) 池子地址生成监控列表；常驻进程按 RSI(3,1h) 越界(>90 或 <10) 合并推送飞书。")
+st.caption("粘贴 Solana(Meteora) 池子地址生成监控列表；常驻进程按 RSI(3,5m) 越界(>90 或 <10) 合并推送飞书。")
 
 running = bool(get_module_settings().get("meme_rsi_batch", True))
 
@@ -124,7 +124,7 @@ if st.button("🔍 立即扫描一次", type="primary", use_container_width=True
         hits = mrb.scan_watchlist(
             pools, rsi_low=float(rsi_low), rsi_high=float(rsi_high),
             period=mrb.RSI_PERIOD,
-            fetcher=lambda addr, length: get_meteora_native_rsi(addr, "hour", 1, length),
+            fetcher=lambda addr, length: get_meteora_native_rsi(addr, "5m", 1, length),
             on_progress=_report,
         )
         progress.empty()
