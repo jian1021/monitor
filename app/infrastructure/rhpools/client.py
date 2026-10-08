@@ -35,6 +35,29 @@ _START_TIMEOUT_S = 60.0
 _HEALTH_TIMEOUT_S = 2.5
 _CLONE_TIMEOUT_S = 300.0
 
+_last_error: str | None = None
+
+
+def last_error() -> str | None:
+    """最近一次启动/拉取失败的原因（页面用它把红字显示给用户）."""
+    return _last_error
+
+
+def _set_error(msg: str | None) -> None:
+    global _last_error
+    _last_error = msg
+    if msg:
+        print(f"❌ {msg}")
+
+
+def _log_tail(lines: int = 12) -> str:
+    try:
+        if LOG_FILE.exists():
+            return "\n".join(LOG_FILE.read_text(errors="replace").splitlines()[-lines:])
+    except Exception:
+        pass
+    return "（日志不可读）"
+
 
 def base_url() -> str:
     host = os.getenv("RHP_HOST", "127.0.0.1")
@@ -53,10 +76,10 @@ def ensure_repo() -> bool:
         return True
     git = shutil.which("git")
     if not git:
-        print("❌ 找不到 git，无法拉取 robinhoodpools 子模块")
+        _set_error("找不到 git，无法拉取 robinhoodpools 子模块（云端镜像异常）")
         return False
     if MODULE_DIR.exists() and any(MODULE_DIR.iterdir()):
-        print(f"❌ {MODULE_DIR} 非空但缺少源文件，请检查子模块状态")
+        _set_error(f"{MODULE_DIR} 非空但缺少源文件，请检查子模块状态")
         return False
     print(f"📦 正在拉取 {REPO_URL} ...")
     MODULE_DIR.parent.mkdir(parents=True, exist_ok=True)
@@ -66,10 +89,10 @@ def ensure_repo() -> bool:
             timeout=_CLONE_TIMEOUT_S, capture_output=True, text=True,
         )
     except Exception as e:
-        print(f"❌ git clone 失败: {e}")
+        _set_error(f"git clone 超时/异常: {e}")
         return False
     if proc.returncode != 0:
-        print(f"❌ git clone 失败: {(proc.stderr or '').strip()[:300]}")
+        _set_error(f"git clone 失败: {(proc.stderr or '').strip()[:300]}")
         return False
     return available()
 
@@ -105,7 +128,7 @@ def get(path: str, params: dict | None = None, timeout: float = 15.0) -> dict | 
 def _spawn() -> bool:
     """后台拉起 rhpools 服务；成功返回 True（不代表已就绪，需继续探活）."""
     if not available():
-        print("❌ 拉取子模块后仍找不到 src/rhpools/lp_server.py")
+        _set_error("拉取子模块后仍找不到 src/rhpools/lp_server.py")
         return False
     host = os.getenv("RHP_HOST", "127.0.0.1")
     port = os.getenv("RHP_PORT", "8196")
@@ -128,17 +151,20 @@ def _spawn() -> bool:
         print(f"🚀 已拉起 rhpools 服务（{host}:{port}，日志 {LOG_FILE}）")
         return True
     except Exception as e:
-        print(f"❌ 拉起 rhpools 服务失败: {e}")
+        _set_error(f"拉起服务进程失败: {e}")
         return False
 
 
 def ensure_running(wait_s: float = _START_TIMEOUT_S) -> dict | None:
     """确保服务可用，返回 status；不可用（禁止自启 / 拉取或启动失败）返回 None."""
+    global _last_error
     status = health()
     if status is not None:
+        _last_error = None
         return status
     if not auto_start_enabled():
-        return None       # CI 等环境显式关闭自启：静默跳过，不拉子模块
+        _last_error = "RHP_AUTO_START 已关闭，不自动拉起服务"
+        return None       # CI 等环境显式关闭自启：不拉子模块（此行不打印，保持 CI 日志安静）
     if not ensure_repo():
         return None       # 子模块缺失（如 Streamlit Cloud）：运行时 clone 后再启动
     if not _spawn():
@@ -147,7 +173,11 @@ def ensure_running(wait_s: float = _START_TIMEOUT_S) -> dict | None:
     while time.time() < deadline:
         status = health()
         if status is not None:
+            _last_error = None
             return status
         time.sleep(1.0)
-    print(f"❌ rhpools 服务 {wait_s:.0f}s 内未就绪，详见 {LOG_FILE}")
+    _set_error(
+        f"服务 {wait_s:.0f}s 内未就绪（可能仍在预热，稍后再点探活）。"
+        f"日志尾部（logs/rhpools.log）：\n{_log_tail()}"
+    )
     return None

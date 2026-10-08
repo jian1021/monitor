@@ -26,10 +26,11 @@ with st.sidebar:
     st.code(client.base_url(), language=None)
     c1, c2 = st.columns(2)
     if c1.button("🔄 探活", use_container_width=True):
-        st.session_state.pop("rhp_status", None)
+        st.session_state.pop("rhp_last_error", None)
     if c2.button("▶️ 启动服务", use_container_width=True):
         with st.spinner("等待服务就绪（首次启动会初始化索引）..."):
-            st.session_state["rhp_status"] = client.ensure_running(wait_s=90)
+            got = client.ensure_running(wait_s=90)
+        st.session_state["rhp_last_error"] = None if got else client.last_error()
         st.rerun()
     if client.available():
         st.caption("子模块：modules/robinhoodpools ✅")
@@ -55,9 +56,17 @@ with st.sidebar:
 status = client.health()
 if status is None:
     st.warning(
-        "服务未运行。点左侧「▶️ 启动服务」即可——子模块缺失会**自动拉取**，"
+        "服务未运行。点下面的按钮即可——子模块缺失会**自动拉取**，"
         "首次启动要初始化索引，等状态变成 live 后再看下面的表。"
     )
+    if st.session_state.get("rhp_last_error"):
+        st.error("⛔ 上次启动失败：\n\n```\n"
+                 + st.session_state["rhp_last_error"] + "\n```")
+    if st.button("▶️ 启动服务（缺代码会自动拉取）", type="primary"):
+        with st.spinner("拉取代码 → 启动 → 等待就绪（最长约 2 分钟，看终端/云端 Logs 有进度）..."):
+            got = client.ensure_running(wait_s=90)
+        st.session_state["rhp_last_error"] = None if got else client.last_error()
+        st.rerun()
     with st.expander("手动启动（本机终端）"):
         st.code(
             "git submodule update --init\n"
