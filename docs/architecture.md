@@ -17,15 +17,23 @@ app/
   core/            contracts.py（MonitorSpec/MonitorResult）、settings.py（稳定配置入口）
   domain/          monitoring/registry.py、lp_alert/{models,evaluator}.py（纯逻辑，无 IO）
   application/     monitoring/scheduler.py、lp_alert/service.py、assets/service.py
-  infrastructure/  db/{client,assets,module_settings,intervals,pump_alerts,lp_alert}.py
+                   rhpools/monitor.py（观测站健康 + 池间价差告警）
+                   lp_tools/monitor.py（区间 APR 阈值告警）
+  infrastructure/  db/{client,assets,module_settings,intervals,pump_alerts,lp_alert,apr_watchlist}.py
                    market_data/{http,chains,dexscreener,okx,geckoterminal,meteora,evm_rpc}.py
+                   rhpools/client.py（rhpools 子进程管理 + HTTP 客户端）
+                   lp_tools/runner.py（Node CLI 运行 + 输出文本解析）
                    notifications/feishu.py
+modules/           git 子模块（外部代码，勿直接改）
+  robinhoodpools/          rhpools 观测站服务（Python，链 4663 LP 索引）
+  robinhood-chain-lp-tools/ Uniswap 区间 APR 估算/回放工具（TypeScript/Node）
 ```
 
 ## 兼容入口（保留，勿在未迁移前删除）
 
 - `main.py` — CLI 主循环：注册监控到 `MonitorRegistry`，由 `MonitoringScheduler` 计算到期与睡眠。
 - `lp_position_alert.py` — LP 告警 CLI + 转发层。
+- `monitor_rhpools.py` / `monitor_lp_apr.py` — 新模块的薄入口（实现在 `app/application/`）。
 - `db.py` / `dex_client.py` / `asset_config.py` — 转发层，导出旧名字。
 - `pages/` — Streamlit 页面，仅渲染；业务调 application service。
 
@@ -42,3 +50,5 @@ app/
 3. ✅ LP 告警 → `domain/lp_alert` + `infrastructure/db/lp_alert` + `market_data/{meteora,evm_rpc}` + `application/lp_alert/service`，顶层为 CLI。
 4. ✅ `main.py` 轮询 → scheduler + monitor registry，删除重复的 `compute_sleep_seconds`。
 5. ✅ Streamlit 页面收敛为 UI 层：`pages/app.py` 的内联 `asset_config` 副本已删除，资产逻辑移入 `app/application/assets/service.py`。
+6. ✅ rhpools 观测站接入：`modules/robinhoodpools` 子模块 + `infrastructure/rhpools/client`（进程管理）+ `application/rhpools/monitor`（健康/价差告警），主循环模块名 `rhpools`，页面 `pages/robinhood_pools.py`。
+7. ✅ robinhood-chain-lp-tools 接入：`modules/robinhood-chain-lp-tools` 子模块 + `infrastructure/lp_tools/runner`（Node CLI 运行与解析）+ `application/lp_tools/monitor`（APR 阈值告警）+ `infrastructure/db/apr_watchlist`，主循环模块名 `lp_apr`，页面 `pages/lp_apr.py`。详见 `docs/robinhood_lp_modules.md`。

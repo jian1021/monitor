@@ -1,0 +1,6 @@
+[submodule "modules/robinhoodpools"]
+	path = modules/robinhoodpools
+	url = https://github.com/wock9000/robinhoodpools.git
+[submodule "modules/robinhood-chain-lp-tools"]
+	path = modules/robinhood-chain-lp-tools
+	url = https://github.com/callumholt/robinhood-chain-lp-tools.git

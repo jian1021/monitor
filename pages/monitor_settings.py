@@ -19,6 +19,8 @@ MODULE_LABELS = {
     "meme_rsi_batch": "📡 批量 Meme 超买超卖",
     "robinhood_pump": "🎰 RobinHood pump 策略监控",
     "lp_alert": "💧 LP 仓位 / 池子价格告警",
+    "rhpools": "🛰️ Robinhood Pools 观测站",
+    "lp_apr": "📐 LP 区间 APR",
 }
 
 st.set_page_config(page_title="监控模块设置", page_icon="🎛️", layout="wide")

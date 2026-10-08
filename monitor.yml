@@ -29,4 +29,6 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           LIBSQL_URL: ${{ secrets.LIBSQL_URL }}
           LIBSQL_TOKEN: ${{ secrets.LIBSQL_TOKEN }} 
+          # CI 不拉取子模块也不跑 Node 工具链，rhpools / lp_apr 模块静默跳过
+          RHP_AUTO_START: '0'
         run: python main.py

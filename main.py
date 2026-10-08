@@ -18,6 +18,8 @@ from db import load_instruments, update_asset_alert_state
 from monitor_meme_underval import run_meme_underval_monitor
 from monitor_meme_rsi_batch import run_batch_meme_rsi_monitor
 from monitor_robinhood_pump import run_monitor
+from monitor_rhpools import run_monitor as run_rhpools_monitor
+from monitor_lp_apr import run_monitor as run_lp_apr_monitor
 from send_feishu_msg import send_feishu_msg
 
 from app.application.monitoring.scheduler import MonitoringScheduler
@@ -285,6 +287,26 @@ def _run_lp_alert():
         traceback.print_exc()
 
 
+def _run_rhpools():
+    print(f"\n{'='*50}")
+    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 Robinhood Pools 观测站监控")
+    try:
+        run_rhpools_monitor()
+    except Exception as e:
+        print(f"❌ run_rhpools_monitor 发生异常：{e}")
+        traceback.print_exc()
+
+
+def _run_lp_apr():
+    print(f"\n{'='*50}")
+    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 LP 区间 APR 监控")
+    try:
+        run_lp_apr_monitor()
+    except Exception as e:
+        print(f"❌ run_lp_apr_monitor 发生异常：{e}")
+        traceback.print_exc()
+
+
 def build_scheduler() -> MonitoringScheduler:
     registry = MonitorRegistry()
     registry.register(MonitorSpec("rsi", "rsi", _run_rsi))
@@ -294,6 +316,8 @@ def build_scheduler() -> MonitoringScheduler:
     registry.register(MonitorSpec("meme_rsi_batch", "meme_rsi_batch", _run_meme_rsi_batch))
     registry.register(MonitorSpec("robinhood_pump", "robinhood_pump", _run_robinhood_pump))
     registry.register(MonitorSpec("lp_alert", "lp_alert", _run_lp_alert))
+    registry.register(MonitorSpec("rhpools", "rhpools", _run_rhpools))
+    registry.register(MonitorSpec("lp_apr", "lp_apr", _run_lp_apr))
     return MonitoringScheduler(registry, poll_interval=POLL_INTERVAL)
 
 

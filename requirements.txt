@@ -10,3 +10,9 @@ pycryptodome
 
 plotly
 streamlit-aggrid
+
+# robinhoodpools 子模块（modules/robinhoodpools）运行依赖
+eth-abi>=5,<6
+eth-hash[pycryptodome]>=0.7,<1
+eth-utils>=5,<6
+websockets>=12,<16
