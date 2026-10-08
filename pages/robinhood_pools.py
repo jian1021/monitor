@@ -32,10 +32,18 @@ with st.sidebar:
             st.session_state["rhp_status"] = client.ensure_running(wait_s=90)
         st.rerun()
     if client.available():
-        st.caption(f"子模块：modules/robinhoodpools ✅")
-        st.caption(f"日志：logs/rhpools.log")
+        st.caption("子模块：modules/robinhoodpools ✅")
+        st.caption("日志：logs/rhpools.log")
     else:
-        st.error("子模块未拉取：`git submodule update --init`")
+        st.error("子模块未拉取（Streamlit Cloud 不支持 submodule）")
+        if st.button("📦 一键拉取子模块", use_container_width=True):
+            with st.spinner("git clone 中（约 10~30 秒）..."):
+                ok = client.ensure_repo()
+            if ok:
+                st.success("✅ 已拉取，点「启动服务」")
+            else:
+                st.error("❌ 拉取失败，看终端日志")
+            st.rerun()
     st.markdown(
         f"[打开观测站终端 UI]({client.base_url()}/)（服务已启动时可用）"
     )
@@ -46,10 +54,16 @@ with st.sidebar:
 
 status = client.health()
 if status is None:
-    st.warning("服务未运行。点左侧「▶️ 启动服务」，或手动执行：\n\n"
-               "```bash\n"
-               "PYTHONPATH=modules/robinhoodpools/src python -m rhpools.lp_server\n"
-               "```")
+    st.warning(
+        "服务未运行。点左侧「▶️ 启动服务」即可——子模块缺失会**自动拉取**，"
+        "首次启动要初始化索引，等状态变成 live 后再看下面的表。"
+    )
+    with st.expander("手动启动（本机终端）"):
+        st.code(
+            "git submodule update --init\n"
+            "PYTHONPATH=modules/robinhoodpools/src python -m rhpools.lp_server",
+            language="bash",
+        )
     st.stop()
 
 # ------------------------- 索引状态 -------------------------

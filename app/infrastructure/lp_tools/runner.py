@@ -5,16 +5,25 @@
   uni-range-replay.ts 精确回放窗口内每笔 Swap（分钟级，实测）
 输出为人类可读文本，这里用正则提取关键指标，解析函数保持纯函数便于测试。
 
+Streamlit Cloud 不拉取 git 子模块、镜像里的 apt nodejs 也太旧，所以这里提供
+运行时自举：ensure_repo()（git clone 子模块）+ ensure_node()（下载官方 Node
+二进制到 ~/.local/share/monitor-node，免 root）。本机有 node / 已 init 子模块时
+全部直接跳过。
+
 环境变量：
   ROBINHOOD_RPC   非空时透传为 ROBINHOOD_RPC_URL（默认走公共 RPC）
 """
 
 import os
+import platform
 import re
 import shutil
 import subprocess
-import time
+import tarfile
+import tempfile
 from pathlib import Path
+
+import requests
 
 from app.core.settings import ROBINHOOD_RPC
 
@@ -24,9 +33,16 @@ APR_SCRIPT = TOOLS_DIR / "src" / "uni-range-apr.ts"
 REPLAY_SCRIPT = TOOLS_DIR / "src" / "uni-range-replay.ts"
 TSX_BIN = TOOLS_DIR / "node_modules" / ".bin" / "tsx"
 
+TOOLS_URL = "https://github.com/callumholt/robinhood-chain-lp-tools.git"
+NODE_DIST_INDEX = "https://nodejs.org/dist/index.json"
+# 管理的 Node 安装位置（云端容器重启后会丢，重新自举即可）
+MANAGED_NODE_HOME = Path.home() / ".local" / "share" / "monitor-node"
+
 APR_TIMEOUT_S = 300.0      # 估算：秒级（含 RPC/Gecko 请求）
 REPLAY_TIMEOUT_S = 900.0   # 回放：README 说 1~4 分钟，繁忙池给足余量
 INSTALL_TIMEOUT_S = 600.0
+CLONE_TIMEOUT_S = 300.0
+NODE_DOWNLOAD_TIMEOUT_S = 180.0
 
 _PCT = r"([-+]?\d+(?:\.\d+)?)%"
 
@@ -36,29 +52,141 @@ def tools_available() -> bool:
     return APR_SCRIPT.exists() and REPLAY_SCRIPT.exists()
 
 
+def managed_node_bin() -> Path | None:
+    node = MANAGED_NODE_HOME / "bin" / "node"
+    return node.parent if node.exists() else None
+
+
 def node_available() -> bool:
-    return shutil.which("node") is not None
+    return shutil.which("node") is not None or managed_node_bin() is not None
 
 
 def deps_installed() -> bool:
     return TSX_BIN.exists()
 
 
+def _child_env() -> dict:
+    """子进程环境：把受管 Node 前置到 PATH（本机有 node 时无影响）."""
+    env = dict(os.environ)
+    bin_dir = managed_node_bin()
+    if bin_dir is not None:
+        env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+    if ROBINHOOD_RPC:
+        env["ROBINHOOD_RPC_URL"] = ROBINHOOD_RPC
+    return env
+
+
+def ensure_repo() -> bool:
+    """子模块缺失时运行时 git clone（Streamlit Cloud 不拉子模块）."""
+    if tools_available():
+        return True
+    git = shutil.which("git")
+    if not git:
+        print("❌ 找不到 git，无法拉取 robinhood-chain-lp-tools 子模块")
+        return False
+    if TOOLS_DIR.exists():
+        if any(TOOLS_DIR.iterdir()):
+            print(f"❌ {TOOLS_DIR} 非空但缺少源文件，请检查子模块状态")
+            return False
+        # 空目录（子模块占位）：git clone 允许目标为空目录
+    print(f"📦 正在拉取 {TOOLS_URL} ...")
+    TOOLS_DIR.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(
+            [git, "clone", "--depth", "1", TOOLS_URL, str(TOOLS_DIR)],
+            timeout=CLONE_TIMEOUT_S, capture_output=True, text=True,
+        )
+    except Exception as e:
+        print(f"❌ git clone 失败: {e}")
+        return False
+    if proc.returncode != 0:
+        print(f"❌ git clone 失败: {(proc.stderr or '').strip()[:300]}")
+        return False
+    return tools_available()
+
+
+def _latest_node_asset() -> tuple[str, str] | None:
+    """查 nodejs.org 拿最新 LTS 版本的下载地址；平台不支持返回 None."""
+    sysname = platform.system().lower()          # darwin / linux
+    arch = {
+        "x86_64": "x64", "amd64": "x64", "arm64": "arm64", "aarch64": "arm64",
+    }.get(platform.machine().lower())
+    if sysname not in {"darwin", "linux"} or arch is None:
+        return None
+    try:
+        resp = requests.get(NODE_DIST_INDEX, timeout=30)
+        resp.raise_for_status()
+        entries = resp.json()
+    except Exception as e:
+        print(f"❌ 查询 Node 版本失败: {e}")
+        return None
+    version = next((e["version"] for e in entries if e.get("lts")), None)
+    if not version:
+        return None
+    asset = f"node-{version}-{sysname}-{arch}"
+    return f"https://nodejs.org/dist/{version}/{asset}.tar.xz", asset
+
+
+def ensure_node() -> bool:
+    """系统没有 node 时，下载官方二进制到 MANAGED_NODE_HOME（免 root）."""
+    if node_available():
+        return True
+    asset = _latest_node_asset()
+    if asset is None:
+        print("❌ 无法确定 Node 下载地址（平台不受支持或网络不可用）")
+        return False
+    url, name = asset
+    print(f"📦 正在下载 Node（{url}）...")
+    MANAGED_NODE_HOME.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            tar_path = Path(tmp) / f"{name}.tar.xz"
+            with requests.get(url, stream=True, timeout=NODE_DOWNLOAD_TIMEOUT_S) as r:
+                r.raise_for_status()
+                with open(tar_path, "wb") as f:
+                    for chunk in r.iter_content(1 << 16):
+                        f.write(chunk)
+            with tarfile.open(tar_path, "r:xz") as tf:
+                tf.extractall(tmp, filter="data")
+            extracted = Path(tmp) / name
+            if not (extracted / "bin" / "node").exists():
+                print("❌ Node 包结构异常（缺 bin/node）")
+                return False
+            if MANAGED_NODE_HOME.exists():
+                shutil.rmtree(MANAGED_NODE_HOME)
+            shutil.move(str(extracted), str(MANAGED_NODE_HOME))
+    except Exception as e:
+        print(f"❌ 安装 Node 失败: {e}")
+        return False
+    return node_available()
+
+
+def _npm_cmd() -> str | None:
+    bin_dir = managed_node_bin()
+    if bin_dir is not None:
+        npm = bin_dir / "npm"
+        if npm.exists():
+            return str(npm)
+    return shutil.which("npm")
+
+
 def ensure_installed() -> bool:
-    """首次使用时执行 npm install；成功或已安装返回 True."""
-    if not tools_available() or not node_available():
+    """完整自举：子模块 → Node → npm install；已就绪直接 True."""
+    if not ensure_repo():
+        return False
+    if not ensure_node():
         return False
     if deps_installed():
         return True
-    npm = shutil.which("npm")
+    npm = _npm_cmd()
     if not npm:
         print("❌ 找不到 npm，请先安装 Node.js")
         return False
-    print("📦 首次运行，正在安装 robinhood-chain-lp-tools 依赖（npm install）...")
+    print("📦 正在安装 robinhood-chain-lp-tools 依赖（npm install）...")
     try:
         subprocess.run(
             [npm, "install", "--no-audit", "--no-fund"],
-            cwd=str(TOOLS_DIR), timeout=INSTALL_TIMEOUT_S,
+            cwd=str(TOOLS_DIR), env=_child_env(), timeout=INSTALL_TIMEOUT_S,
             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
         )
     except Exception as e:
@@ -70,6 +198,18 @@ def ensure_installed() -> bool:
     return True
 
 
+def missing_parts() -> list[str]:
+    """缺什么（中文名），用于页面提示."""
+    parts = []
+    if not tools_available():
+        parts.append("子模块代码")
+    if not node_available():
+        parts.append("Node 运行时")
+    elif not deps_installed():
+        parts.append("npm 依赖")
+    return parts
+
+
 def ready() -> bool:
     return tools_available() and node_available() and deps_installed()
 
@@ -78,13 +218,10 @@ def _run(script: Path, args: list[str], timeout: float) -> tuple[bool, str]:
     """执行脚本，返回 (ok, stdout+stderr 文本)."""
     if not ensure_installed():
         return False, ""
-    env = dict(os.environ)
-    if ROBINHOOD_RPC:
-        env["ROBINHOOD_RPC_URL"] = ROBINHOOD_RPC
     try:
         proc = subprocess.run(
             [str(TSX_BIN), str(script), *args],
-            cwd=str(TOOLS_DIR), env=env, timeout=timeout,
+            cwd=str(TOOLS_DIR), env=_child_env(), timeout=timeout,
             capture_output=True, text=True,
         )
     except subprocess.TimeoutExpired:

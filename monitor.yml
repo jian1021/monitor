@@ -13,6 +13,9 @@ jobs:
     steps:
       - name: 1. 拉取仓库代码
         uses: actions/checkout@v4
+        with:
+          # lp_apr 模块需要 robinhood-chain-lp-tools 子模块（GitHub runner 自带 node）
+          submodules: true
 
       - name: 2. 安装 Python 环境
         uses: actions/setup-python@v5
@@ -29,6 +32,6 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           LIBSQL_URL: ${{ secrets.LIBSQL_URL }}
           LIBSQL_TOKEN: ${{ secrets.LIBSQL_TOKEN }} 
-          # CI 不拉取子模块也不跑 Node 工具链，rhpools / lp_apr 模块静默跳过
+          # CI 是一次性进程，不起常驻 rhpools 服务（lp_apr 照常：子模块 + runner 自举 npm）
           RHP_AUTO_START: '0'
         run: python main.py

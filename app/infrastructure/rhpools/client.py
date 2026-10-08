@@ -14,6 +14,7 @@
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -28,8 +29,11 @@ MODULE_DIR = REPO_ROOT / "modules" / "robinhoodpools"
 SRC_DIR = MODULE_DIR / "src"
 LOG_FILE = REPO_ROOT / "logs" / "rhpools.log"
 
+REPO_URL = "https://github.com/wock9000/robinhoodpools.git"
+
 _START_TIMEOUT_S = 60.0
 _HEALTH_TIMEOUT_S = 2.5
+_CLONE_TIMEOUT_S = 300.0
 
 
 def base_url() -> str:
@@ -41,6 +45,33 @@ def base_url() -> str:
 def available() -> bool:
     """子模块代码是否就位（git submodule 已拉取）."""
     return (SRC_DIR / "rhpools" / "lp_server.py").exists()
+
+
+def ensure_repo() -> bool:
+    """子模块缺失时运行时 git clone（Streamlit Cloud 不拉子模块）."""
+    if available():
+        return True
+    git = shutil.which("git")
+    if not git:
+        print("❌ 找不到 git，无法拉取 robinhoodpools 子模块")
+        return False
+    if MODULE_DIR.exists() and any(MODULE_DIR.iterdir()):
+        print(f"❌ {MODULE_DIR} 非空但缺少源文件，请检查子模块状态")
+        return False
+    print(f"📦 正在拉取 {REPO_URL} ...")
+    MODULE_DIR.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(
+            [git, "clone", "--depth", "1", REPO_URL, str(MODULE_DIR)],
+            timeout=_CLONE_TIMEOUT_S, capture_output=True, text=True,
+        )
+    except Exception as e:
+        print(f"❌ git clone 失败: {e}")
+        return False
+    if proc.returncode != 0:
+        print(f"❌ git clone 失败: {(proc.stderr or '').strip()[:300]}")
+        return False
+    return available()
 
 
 def auto_start_enabled() -> bool:
@@ -74,7 +105,7 @@ def get(path: str, params: dict | None = None, timeout: float = 15.0) -> dict | 
 def _spawn() -> bool:
     """后台拉起 rhpools 服务；成功返回 True（不代表已就绪，需继续探活）."""
     if not available():
-        print("⏭️ modules/robinhoodpools 子模块不存在，请先 git submodule update --init")
+        print("❌ 拉取子模块后仍找不到 src/rhpools/lp_server.py")
         return False
     host = os.getenv("RHP_HOST", "127.0.0.1")
     port = os.getenv("RHP_PORT", "8196")
@@ -102,12 +133,14 @@ def _spawn() -> bool:
 
 
 def ensure_running(wait_s: float = _START_TIMEOUT_S) -> dict | None:
-    """确保服务可用，返回 status；不可用（未装 / 禁止自启 / 启动失败）返回 None."""
+    """确保服务可用，返回 status；不可用（禁止自启 / 拉取或启动失败）返回 None."""
     status = health()
     if status is not None:
         return status
-    if not available() or not auto_start_enabled():
-        return None
+    if not auto_start_enabled():
+        return None       # CI 等环境显式关闭自启：静默跳过，不拉子模块
+    if not ensure_repo():
+        return None       # 子模块缺失（如 Streamlit Cloud）：运行时 clone 后再启动
     if not _spawn():
         return None
     deadline = time.time() + wait_s

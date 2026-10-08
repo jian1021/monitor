@@ -13,6 +13,7 @@ if __package__ in (None, ""):
 import pandas as pd
 import streamlit as st
 
+from app.core.settings import LIBSQL_TOKEN, LIBSQL_URL
 from app.infrastructure.db.apr_watchlist import (
     add_apr_pool,
     list_apr_watchlist,
@@ -28,38 +29,63 @@ st.caption("池均 APR 是把所有流动性混在一起的数字，没人真的
            "**你自己选定区间**的 APR。估算秒级但近似，回放分钟级但实测。"
            "只计手续费收益，不含无常损失与 gas。")
 
+# ------------------------- 数据库可用性（观察列表/启停依赖它） -------------------------
+DB_OK = bool(LIBSQL_URL and LIBSQL_TOKEN)
+if not DB_OK:
+    st.warning(
+        "**未配置数据库**：观察列表、模块启停开关都存不了。"
+        "请在项目根目录 `.env`（或 Streamlit secrets）里配置后重启：\n\n"
+        "```bash\nLIBSQL_URL=https://xxx.turso.io\nLIBSQL_TOKEN=eyJ...\n```"
+    )
+
 # ------------------------- 模块启停 -------------------------
 running = bool(get_module_settings().get("lp_apr", True))
 c1, c2 = st.columns([1, 4])
 with c1:
     if running:
         if st.button("⏹️ 结束监控", type="primary", use_container_width=True):
-            update_module_setting("lp_apr", False)
-            st.rerun()
+            if update_module_setting("lp_apr", False):
+                st.rerun()
+            else:
+                st.error("保存失败：数据库不可用，开关状态没有生效")
     else:
         if st.button("▶️ 开始监控", type="primary", use_container_width=True):
-            update_module_setting("lp_apr", True)
-            st.rerun()
+            if update_module_setting("lp_apr", True):
+                st.rerun()
+            else:
+                st.error("保存失败：数据库不可用，开关状态没有生效")
 with c2:
-    if running:
+    if not DB_OK:
+        st.info("当前状态显示为默认值（监控中）——数据库不可用时无法持久化启停。")
+    elif running:
         st.success("主循环 lp_apr 模块：监控中（按观察列表定时估算并推飞书）")
     else:
         st.warning("主循环 lp_apr 模块：已停止（常驻进程会跳过）")
 
 # ------------------------- 工具链就绪检查 -------------------------
 if not runner.ready():
-    st.warning("工具链未就绪：需要子模块 + Node + npm 依赖。")
-    st.code(
-        "git submodule update --init\n"
-        "brew install node\n"
-        "cd modules/robinhood-chain-lp-tools && npm install",
-        language="bash",
+    missing = "、".join(runner.missing_parts())
+    st.warning(
+        f"**工具链未就绪**（缺：{missing}）。点下面按钮一键补齐：\n\n"
+        "拉取子模块 → 下载 Node 官方二进制（免 root，装到 `~/.local/share/monitor-node`）"
+        "→ `npm install`，全程约 1~2 分钟。**Streamlit Cloud 不拉子模块也没有 Node，"
+        "必须走这里**；容器每次重启后需要重装一次（按钮会自动检测）。"
     )
-    if st.button("📦 现在安装依赖"):
-        with st.spinner("npm install 中（仅首次）..."):
+    if st.button("📦 一键安装（约 1~2 分钟）", type="primary"):
+        with st.spinner("拉取代码 / 下载 Node / 安装依赖 ...（看终端日志有进度）"):
             ok = runner.ensure_installed()
-        st.success("✅ 依赖已就绪") if ok else st.error("❌ 安装失败，检查 node/npm 是否可用")
+        if ok:
+            st.success("✅ 工具链已就绪")
+        else:
+            st.error("❌ 安装失败——展开下面看终端日志里的报错")
         st.rerun()
+    with st.expander("本机手动安装（不想点按钮的话）"):
+        st.code(
+            "git submodule update --init\n"
+            "brew install node\n"
+            "cd modules/robinhood-chain-lp-tools && npm install",
+            language="bash",
+        )
     st.stop()
 
 st.divider()
@@ -174,12 +200,21 @@ with st.form("add_apr_pool", clear_on_submit=True):
                               help="0 = 不设上限")
     submitted = t3.form_submit_button("➕ 加入列表", use_container_width=True)
     if submitted:
-        ok = add_apr_pool(
-            new_pool, new_name, width=new_width, capital=new_capital,
-            min_apr=new_min if new_min > 0 else None,
-            max_apr=new_max if new_max > 0 else None,
-        )
-        st.success("✅ 已加入") if ok else st.error("❌ 加入失败（数据库不可用或地址为空）")
+        if not new_pool.strip():
+            st.error("❌ 池子地址不能为空")
+        elif not DB_OK:
+            st.error("❌ 数据库不可用：先按上方提示配置 LIBSQL_URL / LIBSQL_TOKEN")
+        else:
+            ok = add_apr_pool(
+                new_pool, new_name, width=new_width, capital=new_capital,
+                min_apr=new_min if new_min > 0 else None,
+                max_apr=new_max if new_max > 0 else None,
+            )
+            if ok:
+                st.success("✅ 已加入观察列表")
+                st.rerun()
+            else:
+                st.error("❌ 加入失败（写库异常，看终端日志）")
 
 rows = list_apr_watchlist()
 if not rows:
