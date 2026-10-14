@@ -907,30 +907,11 @@ PAGE_DESCRIPTIONS = {
 
 def main() -> None:
     render_status_bar()
-    choice = st.session_state.get("meteora_scanner_choice", next(iter(PAGES)))
-    if choice not in PAGES:
-        choice = next(iter(PAGES))
-    st.markdown("#### 🧭 功能导航")
-    page_items = list(PAGES.items())
-    for row_start in range(0, len(page_items), 3):
-        cols = st.columns(3)
-        for col, (label, _) in zip(cols, page_items[row_start:row_start + 3]):
-            with col:
-                with st.container(border=True):
-                    st.caption(label[:2])
-                    st.markdown(f"**{label[3:]}**")
-                    st.caption(PAGE_DESCRIPTIONS[label])
-                    button_label = "当前页面" if label == choice else "切换到此模块"
-                    if st.button(
-                        button_label,
-                        key=f"meteora_nav_{label}",
-                        type="primary" if label == choice else "secondary",
-                        use_container_width=True,
-                    ):
-                        st.session_state["meteora_scanner_choice"] = label
-                        st.rerun()
-    st.divider()
-    PAGES[choice]()
+    tabs = st.tabs(list(PAGES))
+    for (label, render_page), tab in zip(PAGES.items(), tabs):
+        with tab:
+            st.caption(PAGE_DESCRIPTIONS[label])
+            render_page()
 
 
 if __name__ == "__main__":
