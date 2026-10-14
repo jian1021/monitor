@@ -7,6 +7,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
+from app.interfaces.monitor_controls import render_monitor_controls
 
 from app.interfaces.asset_config import ASSET_TYPE_MAP
 from app.interfaces.asset_config import (
@@ -31,6 +32,7 @@ FOCUS_TYPES = ["crypto"]
 
 st.title("⚙️ 监控标的配置管理")
 st.caption("🔎 当前页面专注 **主流加密货币** 的增删改查与启用/禁用控制；其他资产类别请前往对应页面配置。")
+render_monitor_controls("crypto", "主流加密货币")
 
 
 def render_crypto_adder():

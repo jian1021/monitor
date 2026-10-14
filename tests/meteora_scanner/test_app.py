@@ -26,13 +26,13 @@ class TestAppRendering(unittest.TestCase):
         at = AppTest.from_file(APP_PATH, default_timeout=90)
         at.run()
         self.assertFalse(at.exception, f"首页异常: {at.exception}")
-        navigation = [button.key for button in at.button
-                      if str(button.key).startswith("meteora_nav_")]
-        self.assertEqual(len(navigation), 9)
-        for key in navigation:
-            label = key.removeprefix("meteora_nav_")
-            at.button(key=key).click().run()
-            self.assertFalse(at.exception, f"页面 {label} 异常: {at.exception}")
+        labels = [tab.label for tab in at.tabs]
+        self.assertEqual(len(labels), 9)
+        self.assertEqual(labels, [
+            "① 全池扫描", "② 筛选条件", "③ 筛选结果", "④ 重点池监控",
+            "⑤ 历史数据", "⑥ 飞书报警设置", "⑦ API 状态与错误日志",
+            "⑧ 使用说明", "⑨ 价格区间计算",
+        ])
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ from app.application.meteora_scanner.scanner import Scanner
 from app.application.meteora_scanner.scoring import (COMPONENT_LABELS, DEFAULT_WEIGHTS, compute_score,
                          formula_text, stability_score, volatility_score_fallback)
 from app.application.meteora_scanner.feishu import FeishuAlerter
+from app.interfaces.monitor_controls import render_monitor_controls
 
 if __name__ == "__main__":
     st.set_page_config(page_title=config.APP_TITLE, page_icon="📊", layout="wide")
@@ -207,7 +208,9 @@ def page_scan() -> None:
     with col3:
         resume = st.checkbox("断点续扫", value=True, help="从上次中断的页继续")
     with col4:
-        auto_interval = st.number_input("定时扫描间隔（分钟，0=关闭）", min_value=0, value=0, step=5)
+        st.caption("后台扫描需保持 `python main.py` 运行。")
+
+    render_monitor_controls("meteora_scan", "Meteora DLMM 全池扫描")
 
     b1, b2, b3 = st.columns(3)
     with b1:
@@ -232,24 +235,10 @@ def page_scan() -> None:
 
         def _run():
             scanner.scan(types, resume=resume, max_pages=(max_pages or None))
-            st.session_state.refresh_counter = st.session_state.get("refresh_counter", 0) + 1
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
         st.session_state.scan_thread = t
-
-    # 定时扫描
-    if auto_interval and not scanner.is_running():
-        last = st.session_state.get("last_auto", 0)
-        if time.time() - last >= auto_interval * 60:
-            st.session_state.last_auto = time.time()
-            scanner.reset_stop()
-
-            def _run_auto():
-                scanner.scan(types, resume=True, max_pages=(max_pages or None))
-
-            threading.Thread(target=_run_auto, daemon=True).start()
-            st.session_state.scan_running = True
 
     # 实时进度
     if st.session_state.get("scan_running"):

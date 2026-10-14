@@ -4,6 +4,7 @@
 """
 
 import streamlit as st
+from app.interfaces.monitor_controls import render_monitor_controls
 
 from app.interfaces.asset_config import (
     add_new_asset,
@@ -20,6 +21,7 @@ from app.interfaces.asset_config import (
 # =============================================================================
 st.title("⚙️ 监控标的配置管理")
 st.caption("集中管理 Meteora 池、可转债和 ETF 监控标的。修改启用状态后保存，即同步到后台监控。")
+render_monitor_controls("rsi", "RSI 监控")
 
 _missing = stale_module_names()
 if _missing:

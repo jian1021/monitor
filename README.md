@@ -50,6 +50,8 @@ streamlit run index.py
 python main.py
 ```
 
+主循环会按各模块页面中的后台监控设置执行任务，Meteora DLMM 全池扫描默认每 60 分钟运行一次。后台进程与网页必须使用相同的 `DB_PATH` 和持久化数据目录，扫描状态及结果才会在页面中显示。`python main.py --once` 会等待本轮 Meteora 扫描完成后退出。
+
 运行测试：
 
 ```bash

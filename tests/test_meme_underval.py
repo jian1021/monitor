@@ -239,17 +239,16 @@ def test_dead_pump_monitor_fully_removed():
     assert "meteora_pump" not in DEFAULT_INTERVALS
 
 
-def test_monitor_settings_labels_expose_meme_module():
+def test_meme_module_controls_live_on_the_meme_page():
     import ast
     from pathlib import Path
 
-    tree = ast.parse(
+    tree = ast.parse((REPO_ROOT / "pages" / "discover_lp.py").read_text(encoding="utf-8"))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and getattr(node.func, "id", "") == "render_monitor_controls"]
+    assert any(len(node.args) >= 1 and ast.literal_eval(node.args[0]) == "meme_underval"
+               for node in calls)
+    settings_tree = ast.parse(
         (REPO_ROOT / "pages" / "monitor_settings.py").read_text(encoding="utf-8")
     )
-    labels = None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "MODULE_LABELS":
-            labels = ast.literal_eval(node.value)
-    assert labels is not None
-    assert "meme_underval" in labels
-    assert "meteora_pump" not in labels
+    assert "监控模块启停" not in ast.unparse(settings_tree)

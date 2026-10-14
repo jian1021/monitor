@@ -2,6 +2,7 @@
 
 import pandas as pd
 import streamlit as st
+from app.interfaces.monitor_controls import render_monitor_controls
 
 from app.application.meteora_scanner import config as scanner_config
 from app.application.meteora_scanner.db import Database
@@ -11,6 +12,7 @@ from app.infrastructure.db.exit_strategy import load_exit_strategy, save_exit_st
 st.set_page_config(page_title="退出策略", page_icon="🚨", layout="wide")
 st.title("🚨 退出策略")
 st.caption("从扫描候选中人工勾选池子，或手动录入 Robinhood Chain 池地址。任一告警条件命中时由主监控循环推送飞书。")
+render_monitor_controls("exit_strategy", "退出策略")
 
 @st.cache_resource(show_spinner=False)
 def scanner_db():

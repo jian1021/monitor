@@ -7,12 +7,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 import streamlit as st
+from app.interfaces.monitor_controls import render_monitor_controls
 
 from app.core.settings import FEISHU_WEBHOOK
 from scripts import lp_position_alert as lpa
 
 st.set_page_config(page_title="LP 仓位告警", page_icon="📌", layout="wide")
 st.title("📌 LP 仓位 / 池子价格告警")
+render_monitor_controls("lp_alert", "LP 仓位 / 池子价格告警")
 
 if FEISHU_WEBHOOK:
     st.success("✅ 飞书告警通道已配置")

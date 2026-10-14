@@ -6,6 +6,7 @@
 
 import argparse
 import random
+import threading
 import time
 import traceback
 
@@ -23,6 +24,9 @@ from app.application.rhpools.monitor import run_rhpools_monitor
 from app.application.lp_tools.monitor import run_lp_apr_monitor
 from app.application.fee_screen.monitor import run_fee_screen_monitor
 from app.application.exit_strategy.monitor import run_monitor as run_exit_strategy_monitor
+from app.application.meteora_scanner import config as meteora_config
+from app.application.meteora_scanner.db import Database as MeteoraDatabase
+from app.application.meteora_scanner.scanner import Scanner as MeteoraScanner
 from app.application.lp_alert.service import run_once as run_lp_alert_once
 from app.infrastructure.db.lp_alert import ensure_table as ensure_lp_alert_table
 from app.infrastructure.notifications.sender import send_feishu_msg
@@ -41,6 +45,52 @@ POLL_INTERVAL = 30
 # 间隔缓存（已换算为秒）：读取失败时沿用，避免每次轮询都打一次 DB
 _intervals_cache: dict[str, int] = {k: v * 60 for k, v in DEFAULT_INTERVALS.items()}
 _intervals_cache_ts: float = 0.0
+_meteora_scan_lock = threading.Lock()
+_meteora_scanner: MeteoraScanner | None = None
+_meteora_scan_thread: threading.Thread | None = None
+
+
+def _run_meteora_scan():
+    """在后台线程运行一次可断点续扫的 Meteora DLMM 全池扫描。"""
+    global _meteora_scanner, _meteora_scan_thread
+    if not _meteora_scan_lock.acquire(blocking=False):
+        print("⏭️ Meteora 全池扫描仍在运行，跳过本轮调度")
+        return
+
+    try:
+        if _meteora_scanner is None:
+            _meteora_scanner = MeteoraScanner(MeteoraDatabase(meteora_config.DB_PATH))
+        scanner = _meteora_scanner
+        if scanner.is_running():
+            print("⏭️ Meteora 扫描器报告仍在运行，跳过本轮调度")
+            _meteora_scan_lock.release()
+            return
+        scanner.reset_stop()
+    except Exception:
+        _meteora_scan_lock.release()
+        raise
+
+    def _scan_worker():
+        try:
+            print(f"\n[{time.strftime('%H:%M:%S')}] ▶ 开始执行 Meteora DLMM 全池扫描")
+            result = scanner.scan(
+                list(meteora_config.SUPPORTED_POOL_TYPES), resume=True
+            )
+            print(f"✅ Meteora 全池扫描完成：{result}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"❌ Meteora 全池扫描异常：{exc}")
+            traceback.print_exc()
+        finally:
+            _meteora_scan_lock.release()
+
+    _meteora_scan_thread = threading.Thread(
+        target=_scan_worker, name="meteora-full-pool-scan", daemon=True
+    )
+    try:
+        _meteora_scan_thread.start()
+    except Exception:
+        _meteora_scan_lock.release()
+        raise
 
 
 def refresh_intervals(force: bool = False) -> dict[str, int]:
@@ -344,6 +394,7 @@ def build_scheduler() -> MonitoringScheduler:
     registry.register(MonitorSpec("rhpools", "rhpools", _run_rhpools))
     registry.register(MonitorSpec("lp_apr", "lp_apr", _run_lp_apr))
     registry.register(MonitorSpec("fee_screen", "fee_screen", _run_fee_screen))
+    registry.register(MonitorSpec("meteora_scan", "meteora_scan", _run_meteora_scan))
     registry.register(MonitorSpec("exit_strategy", "exit_strategy", _run_exit_strategy))
     return MonitoringScheduler(registry, poll_interval=POLL_INTERVAL)
 
@@ -397,6 +448,9 @@ if __name__ == "__main__":
             last_run[spec.interval_key] = time.time()
 
         if args.once:
+            # 单轮模式也必须等全池扫描完成，避免 daemon 线程随进程退出被中断。
+            if _meteora_scan_thread is not None:
+                _meteora_scan_thread.join()
             print("✅ 单轮监控完成，退出。")
             break
 

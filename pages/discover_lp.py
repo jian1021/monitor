@@ -1,6 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from app.interfaces.monitor_controls import render_monitor_controls
 
 from app.application.monitors import meme_underval as mu
 from app.infrastructure.db.meme_config import (
@@ -10,6 +11,7 @@ from app.application.monitors.rsi import get_meteora_native_rsi
 st.set_page_config(page_title="Meme 低估监控", layout="wide")
 st.title("🧲 Meme 低估监控")
 st.caption("直连 Meteora Top Performers（按 24h 费 / TVL 排序），经市值 / TVL / bin_step / 基础费率预筛后，对头部候选计算 RSI(3, 1h)，只保留超卖钝化标的。")
+render_monitor_controls("meme_underval", "Meme 低估监控")
 
 saved = get_meme_underval_params()
 

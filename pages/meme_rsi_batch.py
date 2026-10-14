@@ -10,33 +10,12 @@ from app.infrastructure.db.meme_watchlist import (
     set_meme_pool_enabled,
     update_meme_rsi_params,
 )
-from app.infrastructure.db.module_settings import (
-    get_module_settings,
-    update_module_setting,
-)
+from app.interfaces.monitor_controls import render_monitor_controls
 def render_page() -> None:
     st.title("📡 批量 Meme 超卖超买监控")
     st.caption("粘贴 Solana(Meteora) 池子地址生成监控列表；常驻进程按所选周期的 RSI(3) 越界合并推送飞书。")
 
-    running = bool(get_module_settings().get("meme_rsi_batch", True))
-
-    c1, c2 = st.columns([1, 4])
-    with c1:
-        if running:
-            if st.button("⏹️ 结束监控", type="primary", use_container_width=True):
-                update_module_setting("meme_rsi_batch", False)
-                st.rerun()
-        else:
-            if st.button("▶️ 开始监控", type="primary", use_container_width=True):
-                update_module_setting("meme_rsi_batch", True)
-                st.rerun()
-    with c2:
-        if running:
-            st.success("当前状态：监控中（常驻进程每轮读取监控列表并告警）")
-        else:
-            st.warning("当前状态：已停止（常驻进程会跳过本模块）")
-
-    st.divider()
+    render_monitor_controls("meme_rsi_batch", "批量 Meme 超买超卖")
 
     params = get_meme_rsi_params()
     st.caption(f"RSI 周期固定为 {mrb.RSI_PERIOD}（不可改）；可选 15 分钟或 1 小时 K 线周期。")

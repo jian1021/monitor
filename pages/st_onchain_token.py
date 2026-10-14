@@ -7,6 +7,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
+from app.interfaces.monitor_controls import render_monitor_controls
 
 from app.interfaces.asset_config import ASSET_TYPE_MAP
 from app.interfaces.asset_config import (
@@ -28,6 +29,7 @@ def render_page() -> None:
 
     st.title("⚙️ 监控标的配置管理")
     st.caption("🔎 当前页面专注 **链上代币** 的添加与管理（按公链搜索或直接粘合约地址）；其他资产类别请前往对应页面配置。")
+    render_monitor_controls("onchain_token", "链上代币")
 
     _missing = stale_module_names()
     if _missing:

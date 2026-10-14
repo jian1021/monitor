@@ -167,7 +167,7 @@ class Database:
     def __init__(self, path: Path | str):
         self.path = str(path)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL;")

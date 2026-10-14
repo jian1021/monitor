@@ -36,15 +36,7 @@ from app.infrastructure.db.fee_screen_store import (
     set_screening_config_json,
 )
 from app.infrastructure.market_data import rh_fee_sources as src
-from app.infrastructure.db.intervals import (
-    DEFAULT_INTERVALS,
-    get_module_intervals,
-    update_module_interval,
-)
-from app.infrastructure.db.module_settings import (
-    get_module_settings,
-    update_module_setting,
-)
+from app.interfaces.monitor_controls import render_monitor_controls
 
 def render_page() -> None:
     st.title("🦅 Robinhood Chain 全池扫描")
@@ -558,26 +550,8 @@ def render_page() -> None:
             st.caption("模块名 fee_screen；实际轮询由主循环（main.py）按 "
                        "module_intervals 执行，此处修改实时生效。")
 
-            st.markdown("##### 🎛️ 监控启停与轮询间隔")
-            settings = get_module_settings()
-            intervals = get_module_intervals(DEFAULT_INTERVALS)
-            enabled = settings.get("fee_screen", True)
-            col1, col2 = st.columns(2)
-            with col1:
-                new_enabled = st.toggle("监控开关", value=enabled,
-                                        help="开启后主循环每轮按间隔执行 fee_screen 模块")
-                if new_enabled != enabled:
-                    update_module_setting("fee_screen", new_enabled)
-                    st.rerun()
-                st.success("🟢 监控运行中" if new_enabled else "⛔ 监控已停止")
-            with col2:
-                current_min = int(intervals.get("fee_screen",
-                                                DEFAULT_INTERVALS.get("fee_screen", 30)))
-                new_min = st.number_input("轮询间隔（分钟）", min_value=1, max_value=1440,
-                                          value=current_min, step=5)
-                if new_min != current_min:
-                    update_module_interval("fee_screen", int(new_min))
-                    st.rerun()
+            render_monitor_controls("fee_screen", "Robinhood 全池扫描")
+            render_monitor_controls("robinhood_pump", "Robinhood 新池策略")
 
             st.markdown("##### ⚙️ 报警参数")
             mon = load_monitor_config()

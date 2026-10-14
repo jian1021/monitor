@@ -12,6 +12,7 @@ if __package__ in (None, ""):
 
 import pandas as pd
 import streamlit as st
+from app.interfaces.monitor_controls import render_monitor_controls
 
 from app.infrastructure.rhpools import client
 
@@ -19,6 +20,7 @@ st.set_page_config(page_title="Robinhood Pools", page_icon="🛰️", layout="wi
 st.title("🛰️ Robinhood Pools 观测站")
 st.caption("Robinhood Chain（4663）LP 池索引服务的只读面板。所有数值为服务的已索引证据，"
            "缺失字段不补零；请先看索引状态再解读下面的表。")
+render_monitor_controls("rhpools", "Robinhood Pools 观测")
 
 # ------------------------- 侧边栏：服务与参数 -------------------------
 with st.sidebar:

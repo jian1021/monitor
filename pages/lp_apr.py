@@ -21,8 +21,7 @@ from app.infrastructure.db.apr_watchlist import (
     set_apr_pool_enabled,
 )
 from app.infrastructure.lp_tools import runner
-from app.infrastructure.db.module_settings import (
-    get_module_settings, update_module_setting)
+from app.interfaces.monitor_controls import render_monitor_controls
 
 st.set_page_config(page_title="LP 区间 APR", page_icon="📐", layout="wide")
 st.title("📐 LP 区间 APR（Uniswap v3/v4 · Robinhood Chain）")
@@ -39,29 +38,7 @@ if not DB_OK:
         "```bash\nLIBSQL_URL=https://xxx.turso.io\nLIBSQL_TOKEN=eyJ...\n```"
     )
 
-# ------------------------- 模块启停 -------------------------
-running = bool(get_module_settings().get("lp_apr", True))
-c1, c2 = st.columns([1, 4])
-with c1:
-    if running:
-        if st.button("⏹️ 结束监控", type="primary", use_container_width=True):
-            if update_module_setting("lp_apr", False):
-                st.rerun()
-            else:
-                st.error("保存失败：数据库不可用，开关状态没有生效")
-    else:
-        if st.button("▶️ 开始监控", type="primary", use_container_width=True):
-            if update_module_setting("lp_apr", True):
-                st.rerun()
-            else:
-                st.error("保存失败：数据库不可用，开关状态没有生效")
-with c2:
-    if not DB_OK:
-        st.info("当前状态显示为默认值（监控中）——数据库不可用时无法持久化启停。")
-    elif running:
-        st.success("主循环 lp_apr 模块：监控中（按观察列表定时估算并推飞书）")
-    else:
-        st.warning("主循环 lp_apr 模块：已停止（常驻进程会跳过）")
+render_monitor_controls("lp_apr", "LP 区间 APR")
 
 # ------------------------- 工具链就绪检查 -------------------------
 if not runner.ready():
