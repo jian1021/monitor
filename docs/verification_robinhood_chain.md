@@ -43,11 +43,22 @@
 - **无 OHLCV 图表 API**（`/io/dex/charts/...` 路由不存在，实测 404）→ 5 分钟 K 线无法直接从 DexScreener 获取
 - **无 4h 涨跌幅**（只有 m5/h1/h6/h24）→ 4h 指标用 6h 代替并明确标注
 
-### 3. GeckoTerminal — **不支持 Robinhood Chain**
+### 3. DexPaprika（Robinhood Uniswap 候选池扫描）
 
-- `GET /api/v2/networks` 返回的 100 个网络中无 robinhood（实测）→ 不用作 Robinhood 数据源
+- 页面：`pages/robinhood_pools.py` 的「DexPaprika Robinhood Uniswap 池扫描」区。
+- 接口：`GET https://api.dexpaprika.com/networks/robinhood/pools/search`，按 `uniswap_v2`、`uniswap_v3`、`uniswap_v4` 分别查询，并支持 24h 成交量、流动性、24h 交易数筛选与游标分页。
+- 可选配置：仓库根目录 `.env` 中的 `DEXPAPRIKA_BASE_URL`、`DEXPAPRIKA_API_KEY`；公开 API 可不带 Key 调用。
+- 该扫描用于发现符合门槛的候选池，不需要本机 RPC 扫描或等待本地索引追块；rhpools 仍提供本地链上事件、手续费估算和索引诊断等详细数据。
+- 官方文档：[`Robinhood Chain pools`](https://dexpaprika.com/robinhood)、[DexPaprika network pool search API](https://docs.dexpaprika.com/api-reference/pools/advanced-pool-filtering-on-a-specific-network)。
+- 风险筛查：DexPaprika 的 24h 买卖笔数只作为活动异常提示；开启 GMGN 检测后，页面对唯一代币合约地址调用 GMGN `/v1/token/security`（`chain=robinhood`），按 `is_honeypot` 字段排除明确标记的代币。
+- GMGN 未返回结论、接口报错或超过本次查询上限的代币显示为“未知 / 人工复核”，不会标记为安全；扫描使用根目录 `.env` 或部署环境变量 / Streamlit Secret 中的 `GMGN_API_KEY`。云端仅需 Python `requests`，不需要安装 `gmgn-cli`。
 
-### 4. robinhood-chain-lp-tools（区间 APR 工具，Node/TS 子模块）
+### 4. GeckoTerminal
+
+- GeckoTerminal 页面提供 Robinhood Chain 池列表，可用于人工查看；当前扫描器采用 DexPaprika 做池发现，GMGN 做安全标记。
+- Robinhood 网络页面：[GeckoTerminal Robinhood pools](https://www.geckoterminal.com/robinhood/pools)
+
+### 5. robinhood-chain-lp-tools（区间 APR 工具，Node/TS 子模块）
 
 - `uni-range-apr`：基于当前流动性 + 24h 成交量 feed 估算指定区间 APR（秒级，近似）
 - `uni-range-replay`：逐笔回放 Swap 事件实测区间收益（1–4 分钟，精确），`--validate` 可对账 feeGrowthGlobal

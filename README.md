@@ -26,6 +26,8 @@ docs/                              架构、功能与 API 说明
 
 页面、应用逻辑、基础设施和外部适配各有明确位置。`pages/onchain_hub.py` 将链上代币管理、Meme RSI、Meteora DLMM 扫描和 Robinhood Uniswap 扫描整合为标签页；各页面的扫描逻辑保留在对应应用模块中。
 
+Robinhood Pools 观测站提供 DexPaprika Uniswap V2/V3/V4 池发现，可按 24h 成交量、流动性和交易数筛选；候选池搜索不依赖本地 RPC 索引进度。rhpools 本地服务继续用于链上事件、手续费和索引状态等详细数据。
+
 所有项目源码均纳入本仓库的 `modules/` 目录：Meteora 雷达、代币反转监控、Robinhood 池服务和 LP 工具作为独立模块维护，共用仓库级版本管理。各模块可单独启动，但密钥、数据库、运行状态和 `node_modules` 均不提交。
 
 ## 本地运行
@@ -70,9 +72,12 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 LIBSQL_URL=
 LIBSQL_TOKEN=
 ROBINHOOD_RPC=
+GMGN_API_KEY=
 ```
 
 Meteora 扫描器仅支持 DLMM。飞书 Webhook 与其他模块统一配置在仓库根目录 `.env` 或部署环境变量 `FEISHU_WEBHOOK`；Meteora 签名密钥可选配置在其模块 `.env`。本地 `.env` 和数据库文件不会提交到仓库。
+
+Robinhood 池扫描的 GMGN 貔貅检测使用只读安全接口；本地可在根目录 `.env` 配置 `GMGN_API_KEY`，云端可将其设为环境变量或 Streamlit Secret。只需 Python 依赖中的 `requests`，不要求安装 `gmgn-cli`。GMGN 明确标记为貔貅的池会排除；接口未覆盖、无结论或查询数超过上限时会标为“未知 / 人工复核”，不会显示为安全通过。
 
 ## 功能说明
 

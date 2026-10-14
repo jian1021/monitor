@@ -48,6 +48,9 @@ LIBSQL_TOKEN = _setting("LIBSQL_TOKEN")
 # ========== 飞书告警推送 ==========
 FEISHU_WEBHOOK = _setting("FEISHU_WEBHOOK")
 
+# ========== GMGN 只读安全检测 ==========
+GMGN_API_KEY = _setting("GMGN_API_KEY")
+
 # ========== Streamlit 后台管理员账号 ==========
 ADMIN_USER = _setting("ADMIN_USER", "admin")
 ADMIN_PASS = _setting("ADMIN_PASS", "123456")
