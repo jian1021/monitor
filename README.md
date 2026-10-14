@@ -11,7 +11,7 @@ app/
   core/                           配置与模块契约
   domain/                         纯业务规则
   application/                    业务模块与用例编排
-    meteora_scanner/               Meteora API、扫描、筛选、评分与数据
+    meteora_scanner/               Meteora DLMM API、扫描、筛选、评分与数据
     fee_screen/                    Robinhood Chain 全池筛选
     exit_strategy/                 人工选池与退出告警
     monitors/                      RSI、Meme、价格等监控
@@ -19,21 +19,20 @@ app/
   interfaces/                      页面共用组件
 pages/                             Streamlit 页面
 scripts/                           CLI 与兼容入口
-modules/                           robinhoodpools 与 LP 工具 Git 子模块
+modules/                           Meteora 雷达、反转监控及 Robinhood 模块
 tests/                             主项目及 Meteora 扫描器测试
 docs/                              架构、功能与 API 说明
 ```
 
 页面、应用逻辑、基础设施和外部适配各有明确位置。Meteora 页面入口是 `pages/meteora_scanner.py`，扫描器实现位于 `app/application/meteora_scanner/`；Robinhood 全池扫描页面是 `pages/fee_screen.py`。
 
-仓库根目录下的 `meteora-lp/` 与 `token-reversal-monitor/` 是被 `.gitignore` 排除的本地独立项目，不属于此统一看板。`modules/` 中的两个目录是 Git 子模块，更新时按各自上游仓库维护。
+所有项目源码均纳入本仓库的 `modules/` 目录：Meteora 雷达、代币反转监控、Robinhood 池服务和 LP 工具作为独立模块维护，共用仓库级版本管理。各模块可单独启动，但密钥、数据库、运行状态和 `node_modules` 均不提交。
 
 ## 本地运行
 
-需要 Python 3.12。克隆后初始化子模块并安装项目依赖：
+需要 Python 3.12。克隆后安装项目依赖：
 
 ```bash
-git submodule update --init --recursive
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt

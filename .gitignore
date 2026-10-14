@@ -32,11 +32,7 @@ skills-lock.json
 .playwright-mcp/
 .sisyphus/
 
-# 本机独立小项目（未纳入本仓库，防止误提交）
-token-reversal-monitor/
-meteora-lp/
-
-# Node（lp-tools 子模块的依赖在部署镜像内安装）
+# Node 依赖目录
 node_modules/
 
 # Local SQLite data
@@ -44,3 +40,10 @@ node_modules/
 *.db-*
 *.sqlite
 *.sqlite-*
+
+# Runtime state for vendored tools
+modules/meteora-lp/meteora-radar/data/*
+!modules/meteora-lp/meteora-radar/data/.gitkeep
+modules/meteora-lp/meteora-radar/logs/*
+!modules/meteora-lp/meteora-radar/logs/.gitkeep
+modules/token-reversal-monitor/monitor_state.json

@@ -22,7 +22,7 @@
 ### 1. rhpools 索引服务（主数据源，Robinhood Chain 链上事件索引）
 
 - 公开服务：`https://rhpools.lol`（OpenAPI 3.1：`/api/v1/openapi.json`）
-- 本地服务：`modules/robinhoodpools` 子模块，`python -m rhpools.lp_server`，默认 `127.0.0.1:8196`（本仓库 `app/infrastructure/rhpools/client.py` 已封装进程管理）
+- 本地服务：`modules/robinhoodpools` 模块，`python -m rhpools.lp_server`，默认 `127.0.0.1:8196`（本仓库 `app/infrastructure/rhpools/client.py` 已封装进程管理）
 - 数据来源：直接读 Robinhood Chain 官方 RPC，索引 Swap/Mint/Burn/Collect 等链上事件到 SQLite
 - 实测路由（已验证返回真实数据）：
   - `GET /api/lp/status` — 索引状态（head、lag、coverage）
@@ -51,7 +51,7 @@
 
 ### 4. Meteora 官方 API — 仅 Solana
 
-- `https://dlmm.datapi.meteora.ag`（本仓库 `meteora-lp/meteora-radar` 已在用）只返回 Solana 池子（mint 为 Solana pubkey）→ 与 Robinhood Chain 无关
+- `https://dlmm.datapi.meteora.ag`（本仓库 `modules/meteora-lp/meteora-radar` 已在用）只返回 Solana 池子（mint 为 Solana pubkey）→ 与 Robinhood Chain 无关
 
 ### 5. robinhood-chain-lp-tools（区间 APR 工具，Node/TS 子模块）
 

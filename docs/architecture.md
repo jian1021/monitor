@@ -65,8 +65,8 @@ docs/                  # 架构、功能模块与数据源说明
 3. ✅ LP 告警 → `domain/lp_alert` + `infrastructure/db/lp_alert` + `market_data/{meteora,evm_rpc}` + `application/lp_alert/service`，顶层为 CLI。
 4. ✅ `main.py` 轮询 → scheduler + monitor registry，删除重复的 `compute_sleep_seconds`。
 5. ✅ Streamlit 页面收敛为 UI 层：`pages/app.py` 的内联 `asset_config` 副本已删除，资产逻辑移入 `app/application/assets/service.py`。
-6. ✅ rhpools 观测站接入：`modules/robinhoodpools` 子模块 + `infrastructure/rhpools/client`（进程管理）+ `application/rhpools/monitor`（健康/价差告警），主循环模块名 `rhpools`，页面 `pages/robinhood_pools.py`。
-7. ✅ robinhood-chain-lp-tools 接入：`modules/robinhood-chain-lp-tools` 子模块 + `infrastructure/lp_tools/runner`（Node CLI 运行与解析）+ `application/lp_tools/monitor`（APR 阈值告警）+ `infrastructure/db/apr_watchlist`，主循环模块名 `lp_apr`，页面 `pages/lp_apr.py`。详见 `docs/robinhood_lp_modules.md`。
+6. ✅ rhpools 观测站接入：`modules/robinhoodpools` 模块 + `infrastructure/rhpools/client`（进程管理）+ `application/rhpools/monitor`（健康/价差告警），主循环模块名 `rhpools`，页面 `pages/robinhood_pools.py`。
+7. ✅ robinhood-chain-lp-tools 接入：`modules/robinhood-chain-lp-tools` 模块 + `infrastructure/lp_tools/runner`（Node CLI 运行与解析）+ `application/lp_tools/monitor`（APR 阈值告警）+ `infrastructure/db/apr_watchlist`，主循环模块名 `lp_apr`，页面 `pages/lp_apr.py`。详见 `docs/robinhood_lp_modules.md`。
 8. ✅ fee-screen 接入：`domain/fee_screen`（纯筛选逻辑）+ `market_data/rh_fee_sources`（链验证/Meteora 拦截/rhpools+DexScreener 取数）+ `application/fee_screen/{service,monitor,ui_data}` + `db/fee_screen_store`，主循环模块名 `fee_screen`，单页面 `pages/fee_screen.py`（四 Tab：参数/列表/详情/监控）。详见 `docs/fee_screen.md` 与 `docs/verification_robinhood_chain_meteora.md`。
 9. ✅ 监控实现迁入 `application/monitors/`；兼容/CLI 入口集中到 `scripts/`，页面与主循环直接调用应用层实现；命令行入口通过 `python -m scripts.*` 启动。其他实现迁移：`keccak_pure` → `infrastructure/market_data/`、飞书发送 → `infrastructure/notifications/sender.py`、LP bands → `application/lp_bands/`。
 10. ✅ 根契约层退役：`config.py` → `core/config.py`（`settings.py` 为统一出口）；`db.py`/`dex_client.py` 转发壳删除（调用方直连 `infrastructure/db/*`、`market_data/dexscreener`）；`asset_config.py`/`asset_grid.py` → 新增 `interfaces/` 层；顺带修复 `fetch_all_assets()` 空结果无列结构导致的无数据库页面 KeyError（HEAD 上即存在的老 bug）。
