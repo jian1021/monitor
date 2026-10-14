@@ -82,8 +82,14 @@ f1, f2 = st.columns([3, 1])
 search_text = f1.text_input("搜索标的", placeholder="输入名称、代码或地址片段", label_visibility="collapsed")
 status_filter = f2.selectbox("状态", ["全部状态", "运行中", "已暂停"], label_visibility="collapsed")
 
-tabs = st.tabs([ASSET_TYPE_MAP[key] for key in ASSET_TYPE_MAP])
+tabs = st.tabs(
+    [ASSET_TYPE_MAP[key] for key in ASSET_TYPE_MAP],
+    on_change="rerun",
+    key="dashboard_asset_tabs",
+)
 for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
+    if not tab.open:
+        continue
     with tab:
         category_df = df[df["asset_type"] == type_key].copy() if total_count else df.copy()
         filtered = category_df

@@ -59,8 +59,13 @@ def get_dexpaprika():
                                  requests_per_second=config.DEXPAPRIKA_RPS)
 
 
-@st.cache_data(ttl=20, show_spinner="加载池数据…")
 def load_pools(_signature: str) -> list[dict]:
+    """Load pools only when the session evaluation cache is stale.
+
+    Avoid st.cache_data here: serializing a full scan result into Streamlit's
+    process-wide cache duplicates a potentially very large pool list. The
+    filtered evaluation is already cached per session by get_evaluated().
+    """
     return get_db().load_pools(config.SUPPORTED_POOL_TYPES)
 
 
@@ -96,10 +101,11 @@ def get_evaluated() -> list[dict]:
     避免每次交互重复对全量池（可能数十万条）执行筛选。
     """
     filters = get_filters()
-    key = f"{data_signature()}|{json.dumps(filters, sort_keys=True, ensure_ascii=False)}"
+    signature = data_signature()
+    key = f"{signature}|{json.dumps(filters, sort_keys=True, ensure_ascii=False)}"
     cache = st.session_state.get("_eval_cache")
     if not cache or cache.get("key") != key:
-        cache = {"key": key, "rows": apply_filters(load_pools(data_signature()), filters)}
+        cache = {"key": key, "rows": apply_filters(load_pools(signature), filters)}
         st.session_state["_eval_cache"] = cache
     return cache["rows"]
 

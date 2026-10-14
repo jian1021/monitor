@@ -103,7 +103,10 @@ if st.button("💾 保存退出策略", type="primary"):
 st.divider()
 st.subheader("已发现池子")
 if eligible:
-    st.dataframe(pd.DataFrame(eligible)[["pool_type", "pool_address", "token_x_symbol", "token_y_symbol", "price", "tvl"]],
-                 use_container_width=True, hide_index=True)
+    st.caption(f"当前有 {len(eligible):,} 个通过筛选的候选池；为控制页面内存，仅展示前 100 个。完整列表可在上方选择。")
+    preview = pd.DataFrame.from_records(eligible[:100], columns=[
+        "pool_type", "pool_address", "token_x_symbol", "token_y_symbol", "price", "tvl",
+    ])
+    st.dataframe(preview, use_container_width=True, hide_index=True)
 else:
     st.info("扫描器数据库暂无池子。先运行 Meteora 扫描，或手动录入池地址，再回到这里人工勾选。")
