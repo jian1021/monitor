@@ -26,11 +26,12 @@ class TestAppRendering(unittest.TestCase):
         at = AppTest.from_file(APP_PATH, default_timeout=90)
         at.run()
         self.assertFalse(at.exception, f"首页异常: {at.exception}")
-        options = at.sidebar.radio[0].options
-        self.assertEqual(len(options), 9)
-        for label in options:
-            at.sidebar.radio[0].set_value(label)
-            at.run()
+        navigation = [button.key for button in at.button
+                      if str(button.key).startswith("meteora_nav_")]
+        self.assertEqual(len(navigation), 9)
+        for key in navigation:
+            label = key.removeprefix("meteora_nav_")
+            at.button(key=key).click().run()
             self.assertFalse(at.exception, f"页面 {label} 异常: {at.exception}")
 
 

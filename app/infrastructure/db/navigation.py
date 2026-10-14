@@ -26,7 +26,10 @@ def normalize_navigation_order(value: object) -> dict[str, list[str]]:
     for group, defaults in NAVIGATION_GROUPS.items():
         requested = candidate.get(group, [])
         requested = requested if isinstance(requested, list) else []
-        valid = [page for page in requested if page in defaults]
+        valid = []
+        for page in requested:
+            if page in defaults and page not in valid:
+                valid.append(page)
         normalized[group] = valid + [page for page in defaults if page not in valid]
     return normalized
 
