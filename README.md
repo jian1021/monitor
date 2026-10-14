@@ -61,7 +61,7 @@ python -m pytest -q
 
 ## 配置
 
-主应用配置由 `app/core/config.py` 加载，可将 `.env` 放在 `app/core/.env`。例如：
+主应用配置由 `app/core/config.py` 加载仓库根目录的 `.env`。例如：
 
 ```dotenv
 ADMIN_USER=admin
@@ -72,7 +72,7 @@ LIBSQL_TOKEN=
 ROBINHOOD_RPC=
 ```
 
-Meteora 扫描器仅支持 DLMM。飞书 Webhook 与其他模块统一配置在 `app/core/.env` 或部署环境变量 `FEISHU_WEBHOOK`；Meteora 签名密钥可选配置在其模块 `.env`。本地 `.env` 和数据库文件不会提交到仓库。
+Meteora 扫描器仅支持 DLMM。飞书 Webhook 与其他模块统一配置在仓库根目录 `.env` 或部署环境变量 `FEISHU_WEBHOOK`；Meteora 签名密钥可选配置在其模块 `.env`。本地 `.env` 和数据库文件不会提交到仓库。
 
 ## 功能说明
 

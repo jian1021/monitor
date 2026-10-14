@@ -21,7 +21,7 @@ python -m pip install -r requirements.txt
 streamlit run index.py
 ```
 
-入口页面为 `pages/meteora_scanner.py`，业务实现位于 `app/application/meteora_scanner/`。数据库默认位于 `app/application/meteora_scanner/data/meteora.db`，可通过 `DB_PATH` 修改。全项目飞书 Webhook 统一配置在 `app/core/.env`；CoinGecko 与 DEX Paprika 的可选 API Key 可配置在模块 `.env`。
+入口页面为 `pages/meteora_scanner.py`，业务实现位于 `app/application/meteora_scanner/`。数据库默认位于 `app/application/meteora_scanner/data/meteora.db`，可通过 `DB_PATH` 修改。全项目环境变量统一从仓库根目录 `.env` 读取；CoinGecko 与 DEX Paprika 的可选 API Key 也可配置在该文件。
 
 ## 数据源
 

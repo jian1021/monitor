@@ -3,10 +3,9 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# ========== 仅本地开发加载 .env，云端忽略此文件 ==========
-# 用相对 __file__ 的绝对路径：否则 .env 是否被读取取决于启动时的 CWD，
-# 从仓库外启动 streamlit（如 streamlit run /path/to/index.py）会读不到配置。
-_ENV_PATH = Path(__file__).resolve().parent / ".env"
+# ========== 从仓库根目录加载 .env ==========
+# 用相对 __file__ 的绝对路径，确保从任意工作目录启动后台或 Streamlit 都能读取。
+_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 if _ENV_PATH.exists():
     load_dotenv(_ENV_PATH)
 
