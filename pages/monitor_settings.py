@@ -38,8 +38,8 @@ NAVIGATION_LABELS = {
     "price_monitor": "价格监控", "pool_simulator": "池子价格模拟",
     "token_distribution": "代币分布图", "lp_position_alert": "LP 仓位告警",
     "robinhood_pools": "Robinhood Pools 观测站", "lp_apr": "LP 区间 APR",
-    "exit_strategy": "退出策略", "onchain_token": "链上代币",
-    "meme_rsi_batch": "批量 Meme 超买超卖", "monitor_settings": "监控模块设置",
+    "exit_strategy": "退出策略", "onchain_hub": "链上代币",
+    "monitor_settings": "监控模块设置",
     "logout": "退出登录",
 }
 

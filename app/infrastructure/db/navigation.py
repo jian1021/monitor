@@ -11,8 +11,8 @@ NAVIGATION_GROUPS = {
         "dashboard", "mainstream_crypto", "discover_lp", "lp_bands",
         "price_monitor", "pool_simulator", "token_distribution",
         "lp_position_alert", "robinhood_pools", "lp_apr", "exit_strategy",
+        "onchain_hub",
     ],
-    "链上代币": ["onchain_token", "meme_rsi_batch"],
     "系统管理": ["monitor_settings", "logout"],
 }
 

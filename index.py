@@ -58,9 +58,9 @@ logout_page = st.Page(logout, title="退出登录", icon=":material/logout:")
 # 业务页面（指向 pages/ 目录下的独立文件）
 dashboard = st.Page("pages/dashboard.py", title="超卖监控", icon=":material/dashboard:", default=True)
 mainstream_crypto = st.Page("pages/st_mainstream_crypto.py", title="主流加密货币", icon=":material/monetization_on:")
-onchain_token = st.Page("pages/st_onchain_token.py", title="链上代币", icon=":material/link:")
+onchain_token = st.Page("pages/st_onchain_token.py", title="链上代币管理", icon=":material/link:", visibility="hidden")
 discover_lp = st.Page("pages/discover_lp.py", title="Meme 低估监控", icon=":material/trending_down:")
-meme_rsi_batch = st.Page("pages/meme_rsi_batch.py", title="批量Meme超卖超买", icon=":material/radar:")
+meme_rsi_batch = st.Page("pages/meme_rsi_batch.py", title="批量 Meme 超卖超买", icon=":material/radar:", visibility="hidden")
 lp_bands = st.Page("pages/lp_bands.py", title="LP 区间可视化", icon=":material/ssid_chart:")
 price_monitor = st.Page("pages/st_monitor_price.py", title="价格监控", icon=":material/track_changes:")
 pool_simulator = st.Page("pages/st_pool_simulator.py", title="池子价格模拟", icon=":material/science:")
@@ -72,6 +72,25 @@ fee_screen = st.Page("pages/fee_screen.py", title="Robinhood 全池扫描", icon
 meteora_scanner = st.Page("pages/meteora_scanner.py", title="Meteora 全池扫描", icon=":material/radar:")
 exit_strategy = st.Page("pages/exit_strategy.py", title="退出策略", icon=":material/notifications_active:")
 monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设置", icon=":material/tune:")
+
+
+def onchain_hub():
+    st.title("🔗 链上代币")
+    st.caption("选择要使用的链上代币工具。")
+    token_col, meme_col = st.columns(2)
+    with token_col:
+        with st.container(border=True):
+            st.markdown("### 🪙 链上代币管理")
+            st.caption("按公链添加、搜索和管理需要监控的代币地址。")
+            st.page_link(onchain_token, label="打开代币管理", icon=":material/arrow_forward:", width="stretch")
+    with meme_col:
+        with st.container(border=True):
+            st.markdown("### 📡 批量 Meme 超买超卖")
+            st.caption("批量监控 Meme 代币 RSI，支持 15 分钟和 1 小时周期。")
+            st.page_link(meme_rsi_batch, label="打开 Meme 监控", icon=":material/arrow_forward:", width="stretch")
+
+
+onchain_hub_page = st.Page(onchain_hub, title="链上代币", icon=":material/link:")
 
 
 # ================= 4. 路由守卫与导航挂载 =================
@@ -90,6 +109,7 @@ if st.session_state.logged_in:
         "robinhood_pools": robinhood_pools,
         "lp_apr": lp_apr,
         "exit_strategy": exit_strategy,
+        "onchain_hub": onchain_hub_page,
         "onchain_token": onchain_token,
         "meme_rsi_batch": meme_rsi_batch,
         "monitor_settings": monitor_settings,
@@ -100,6 +120,9 @@ if st.session_state.logged_in:
         group: [page_by_id[key] for key in saved_order.get(group, NAVIGATION_GROUPS[group])]
         for group in NAVIGATION_GROUPS
     }
+    # Hidden child pages stay routable from the on-chain hub cards without
+    # taking up separate entries in the sidebar.
+    navigation["策略与数据"].extend([onchain_token, meme_rsi_batch])
     pg = st.navigation(navigation)
 else:
     # 未登录：隐藏所有业务页面，仅挂载登录页
