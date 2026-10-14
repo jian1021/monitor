@@ -26,10 +26,10 @@ def render_dexpaprika_scan() -> None:
             f1, f2, f3, f4 = st.columns([1.4, 1.2, 1.2, 1])
             selected_dex = f1.selectbox("协议", list(dex_labels))
             scan_min_volume = f2.number_input("最低 24h 成交量 ($)", min_value=0.0,
-                                              value=100_000.0, step=25_000.0)
+                                              value=1_000_000.0, step=100_000.0)
             scan_min_liquidity = f3.number_input("最低流动性 ($)", min_value=0.0,
-                                                 value=25_000.0, step=10_000.0)
-            scan_min_txns = f4.number_input("最低 24h 交易数", min_value=0, value=20, step=10)
+                                                 value=100_000.0, step=50_000.0)
+            scan_min_txns = f4.number_input("最低 24h 交易数", min_value=0, value=30, step=10)
             risk_col1, risk_col2, risk_col3 = st.columns([1.2, 1, 1.5])
             enable_risk_filter = risk_col1.checkbox("启用基础貔貅风险过滤", value=True)
             min_token_sells = risk_col2.number_input("每个代币最低 24h 卖出数", min_value=0,
