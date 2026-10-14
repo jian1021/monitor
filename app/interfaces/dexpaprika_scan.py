@@ -1,4 +1,4 @@
-"""Robinhood index observer and DexPaprika discovery widgets for fee_screen."""
+"""DexPaprika Robinhood Uniswap pool discovery widget."""
 
 from __future__ import annotations
 
@@ -6,62 +6,15 @@ import pandas as pd
 import streamlit as st
 
 from app.infrastructure.market_data import dexpaprika_robinhood
-from app.infrastructure.rhpools import client
 
 
-def render_robinhood_observer() -> None:
-    """Render the former Robinhood Pools observer inside the unified scanner page."""
-    status = client.health()
-    with st.container(border=True):
-        st.subheader("🖥️ 后台运行与开始扫描")
-        st.caption(
-            "运行中的 `python main.py` 会在执行「Robinhood 全池扫描」监控时按需检查并自动拉起索引服务。"
-            "点击下方按钮可立即启动服务；索引器启动后会在后台持续扫描，关闭网页不会中断。"
-        )
-        address_col, state_col, action_col = st.columns([2, 1, 2])
-        with address_col:
-            st.code(client.base_url(), language=None)
-            st.caption("子模块：modules/robinhoodpools " + ("✅" if client.available() else "❌ 未拉取"))
-            st.caption("日志：logs/rhpools.log")
-        with state_col:
-            st.metric("服务状态", "运行中" if status is not None else "未连接")
-        with action_col:
-            probe_col, start_col = st.columns(2)
-            if probe_col.button("🔄 探活", width="stretch"):
-                st.session_state.pop("rhp_last_error", None)
-            if start_col.button(
-                                "▶️ 拉取并开始扫描" if status is None and not client.available()
-                                else "▶️ 启动后台扫描" if status is None
-                                else "🔄 刷新扫描状态",
-                                type="primary", width="stretch"):
-                with st.spinner("准备服务并检查索引状态（首次启动可能需要一些时间）..."):
-                    got = client.ensure_running(wait_s=90)
-                st.session_state["rhp_last_error"] = None if got else client.last_error()
-                st.rerun()
-        if status is not None:
-            state = str(status.get("state") or "unknown")
-            lag_s = status.get("lag_s")
-            if state == "degraded":
-                st.error("索引服务已运行，但数据源异常；开始扫描按钮无法修复 RPC / 数据源故障，请检查下方来源错误及服务日志。")
-            elif isinstance(lag_s, (int, float)) and lag_s > 600:
-                st.warning(f"索引正在运行但明显落后（约 {lag_s / 60:.1f} 分钟）；扫描会在后台继续追赶。")
-            elif state in {"live", "catching_up", "warming"}:
-                st.success(f"后台索引服务运行中（{state}）；扫描持续进行中。")
-            else:
-                st.info(f"索引服务状态：{state}。可刷新状态或查看下方数据源诊断。")
-        st.markdown(f"[打开 rhpools 服务界面]({client.base_url()}/)（服务运行时可用）")
-
-    with st.container(border=True):
-        st.subheader("⚙️ 观测参数")
-        c1, c2 = st.columns(2)
-        min_bps = c1.number_input("价差阈值 (bps)", 0.0, 10000.0, 50.0, 10.0)
-        min_depth = c2.number_input("浅边深度下限 ($)", 0.0, 1e6, 300.0, 100.0)
-
+def render_dexpaprika_scan() -> None:
+    """Render the DexPaprika Robinhood Uniswap pool scanner."""
     with st.container(border=True):
         st.subheader("🔎 DexPaprika Robinhood Uniswap 池扫描")
         st.caption(
             "直接从 DexPaprika 的 Robinhood Chain 池搜索 API 获取 Uniswap V2/V3/V4 候选池，"
-            "按成交量、流动性和交易数筛选；此扫描不依赖本地 rhpools 区块索引进度。"
+            "按成交量、流动性和交易数筛选。"
         )
         with st.form("dexpaprika_robinhood_scan_form"):
             dex_labels = {
@@ -281,100 +234,3 @@ def render_robinhood_observer() -> None:
                 )
             elif scan_result.get("ok"):
                 st.info("没有池子满足当前筛选条件。可降低成交量或流动性门槛后重新扫描。")
-    if status is None:
-        st.warning("rhpools 索引服务尚未连接。DexPaprika 候选池扫描仍可使用；启动索引服务后可查看链上池列表与价差。")
-        if st.session_state.get("rhp_last_error"):
-            st.error("⛔ 上次启动失败：\n\n```\n"
-                     + st.session_state["rhp_last_error"] + "\n```")
-        with st.expander("手动启动（本机终端）"):
-            st.code(
-                "git submodule update --init\n"
-                "PYTHONPATH=modules/robinhoodpools/src python -m rhpools.lp_server",
-                language="bash",
-            )
-    else:
-
-        # ------------------------- 索引状态 -------------------------
-        lag_s = status.get("lag_s")
-        st.markdown("##### 📡 索引状态")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("state", str(status.get("state") or "?"))
-        c2.metric("head 块", f"{status.get('head') or '?':,}" if isinstance(status.get("head"), int) else "?")
-        c3.metric("已索引块",
-                  f"{status.get('indexed_head') or '?':,}" if isinstance(status.get("indexed_head"), int) else "?")
-        c4.metric("落后", f"{lag_s:.0f}s" if isinstance(lag_s, (int, float)) else "?")
-        c5.metric("落后块数", str(status.get("lag_blocks")) if status.get("lag_blocks") is not None else "?")
-
-        hist_from, hist_to = status.get("history_from"), status.get("history_to")
-        if isinstance(hist_from, (int, float)) and isinstance(hist_to, (int, float)):
-            from datetime import datetime
-            st.caption(f"历史覆盖：{datetime.fromtimestamp(hist_from):%Y-%m-%d %H:%M}"
-                       f" → {datetime.fromtimestamp(hist_to):%Y-%m-%d %H:%M}"
-                       f"（coverage 未完成时窗口数据不完整）")
-
-        providers = status.get("providers") or {}
-        problems = []
-        for name, p in providers.items():
-            if isinstance(p, dict) and p.get("error"):
-                problems.append(f"{name}: {p['error']}")
-        if problems:
-            st.error("数据源异常：\n" + "\n".join(problems))
-
-        st.divider()
-
-        # ------------------------- 池子列表 -------------------------
-        st.markdown("##### 🏊 池子")
-        f1, f2, f3, f4 = st.columns([1, 1, 1, 2])
-        window = f1.selectbox("窗口", ["1h", "24h", "7d", "30d", "all"], index=1)
-        sort = f2.selectbox("排序", ["fees", "volume", "tvl", "flow", "activity", "swaps",
-                                     "lps", "price", "change", "created"], index=1)
-        protocol = f3.selectbox("协议", ["", "v2", "v3", "v4"], index=0,
-                                format_func=lambda x: {"": "全部", "v2": "V2", "v3": "V3", "v4": "V4"}[x])
-        query = f4.text_input("搜索（池子/代币）", placeholder="WETH")
-
-        params = {"window": window, "sort": sort, "limit": 100}
-        if protocol:
-            params["protocol"] = protocol
-        if query.strip():
-            params["q"] = query.strip()
-
-        data = client.get("/api/lp/pools", params, timeout=30)
-        rows = (data or {}).get("rows") or []
-        if not rows:
-            st.info("该窗口下没有已索引的池子（可能正在预热 / 回填）。")
-        else:
-            df = pd.DataFrame(rows)
-            show_cols = [c for c in ["pair", "protocol", "price", "price_change_pct", "tvl_usd",
-                                     "volume_usd", "fees_usd", "swaps", "adds", "removes",
-                                     "net_deposits_usd", "lp_count", "fee_ppm", "created_at"]
-                         if c in df.columns]
-            st.dataframe(df[show_cols], width="stretch", hide_index=True)
-            cov = (data or {}).get("coverage") or {}
-            st.caption(f"共 {(data or {}).get('total')} 个池；窗口 {cov.get('window', window)}"
-                       f"，coverage.complete={cov.get('complete')}"
-                       f"（false 表示历史回填未覆盖整个窗口）")
-
-        st.divider()
-
-        # ------------------------- 池间价差 -------------------------
-        st.markdown("##### ⚡ 池间价差（dislocations）")
-        st.caption("同一交易对在不同池的定价偏离；net_bps 已扣两边手续费，未计 gas 与滑点，"
-                   "价格为索引 mid price 而非可执行报价。")
-        dis = client.get("/api/lp/dislocations", {
-            "min_bps": min_bps, "min_depth_usd": min_depth, "max_age_s": 3600, "limit": 50,
-        }, timeout=30)
-        drows = (dis or {}).get("rows") or []
-        if not drows:
-            st.info(f"最近 1 小时内没有 ≥ {min_bps:.0f} bps 的价差（或数据尚未索引）。")
-        else:
-            ddf = pd.DataFrame([{
-                "pair": r.get("pair"), "pools": r.get("pool_count"),
-                "spread_bps": round(r.get("spread_bps") or 0, 1),
-                "net_bps": round(r["net_bps"], 1) if isinstance(r.get("net_bps"), (int, float)) else None,
-                "depth_usd": r.get("depth_usd"),
-                "buy_pool": (r.get("buy") or {}).get("protocol"),
-                "buy_price": (r.get("buy") or {}).get("price"),
-                "sell_pool": (r.get("sell") or {}).get("protocol"),
-                "sell_price": (r.get("sell") or {}).get("price"),
-            } for r in drows])
-            st.dataframe(ddf, width="stretch", hide_index=True)

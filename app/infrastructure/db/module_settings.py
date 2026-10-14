@@ -29,7 +29,7 @@ def get_module_settings() -> dict:
     client = get_db_client()
     defaults = {"rsi": True, "crypto": True, "onchain_token": True, "meme_underval": True,
                 "meme_rsi_batch": True, "lp_alert": True,
-                "lp_apr": True, "fee_screen": True,
+                "lp_apr": True,
                 "meteora_scan": True, "exit_strategy": True}
     if not client:
         return defaults

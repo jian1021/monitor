@@ -12,7 +12,6 @@ app/
   domain/                         纯业务规则
   application/                    业务模块与用例编排
     meteora_scanner/               Meteora DLMM API、扫描、筛选、评分与数据
-    fee_screen/                    Robinhood Chain Uniswap 全池扫描与筛选
     exit_strategy/                 人工选池与退出告警
     monitors/                      RSI、Meme、价格等监控
   infrastructure/                 数据库、行情 API 与飞书通知适配
@@ -26,7 +25,7 @@ docs/                              架构、功能与 API 说明
 
 页面、应用逻辑、基础设施和外部适配各有明确位置。`pages/onchain_hub.py` 将链上代币管理、Meme RSI、Meteora DLMM 扫描和 Robinhood Uniswap 扫描整合为标签页；各页面的扫描逻辑保留在对应应用模块中。
 
-Robinhood 全池扫描（`pages/fee_screen.py`）内含 DexPaprika Uniswap V2/V3/V4 池发现，可按 24h 成交量、流动性和交易数筛选；候选池搜索不依赖本地 RPC 索引进度。原先独立的「Robinhood Pools 观测站」已并入该页面的「📡 池发现与索引观测」Tab，rhpools 本地服务继续用于链上事件、手续费和索引状态等详细数据。
+Robinhood 全池扫描（`pages/fee_screen.py`）只保留 DexPaprika Uniswap V2/V3/V4 池发现，可按 24h 成交量、流动性和交易数筛选，可选基础貔貅风险过滤与 GMGN 合约检测。原先基于本地 rhpools 索引的筛选参数、流动池列表、单池详情、监控报警，以及「Robinhood Pools 观测站」和主循环 `fee_screen` 监控均已移除；`rhpools` 服务仍由退出策略的数据源复用。
 
 所有项目源码均纳入本仓库的 `modules/` 目录：Meteora 雷达、代币反转监控、Robinhood 池服务和 LP 工具作为独立模块维护，共用仓库级版本管理。各模块可单独启动，但密钥、数据库、运行状态和 `node_modules` 均不提交。
 

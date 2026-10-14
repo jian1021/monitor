@@ -4,7 +4,7 @@ Robinhood 池服务与区间 APR 工具已纳入本仓库 `modules/`，与主看
 
 | 目录 | 技术 | 用途 | 主看板入口 |
 |---|---|---|---|
-| `modules/robinhoodpools` | Python | Robinhood Chain LP 池索引服务与 API | `app/interfaces/robinhood_observer.py`（渲染于 `pages/fee_screen.py` 的「📡 池发现与索引观测」Tab）、`app/infrastructure/rhpools/client.py` |
+| `modules/robinhoodpools` | Python | Robinhood Chain LP 池索引服务与 API | `app/infrastructure/rhpools/client.py`（服务进程管理，由 `app/infrastructure/market_data/rh_fee_sources.py` 复用，供退出策略取数） |
 | `modules/robinhood-chain-lp-tools` | TypeScript/Node | Uniswap v3/v4 区间 APR 估算与回放 | `pages/lp_apr.py`、`app/infrastructure/lp_tools/runner.py` |
 
 ## 安装与运行
