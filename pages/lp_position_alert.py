@@ -66,7 +66,7 @@ with tab_lp:
                 "仓位数": p["open_positions"],
                 "池子价": p["pool_price"],
                 "盈亏%": p["pnl_pct"],
-            } for p in wp["pools"]]), use_container_width=True)
+            } for p in wp["pools"]]), width="stretch")
 
             labels = {p["pool_address"]: f"{p['pool_name']} · {p['pool_address'][:8]}…"
                       for p in wp["pools"]}
@@ -105,7 +105,7 @@ with tab_lp:
                 "当前 PnL%": pos["pnl_pct"],
                 "已超区间": pos["is_out_of_range"],
             } for pos in preview["positions"]]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch")
 
             with st.form("lp_add_form"):
                 picked = st.selectbox("选择仓位 *", options=list(opts.keys()))
@@ -174,7 +174,7 @@ with tab_price:
                 "区间上界": p["upper_price"],
                 "当前价": p["current_price"],
                 "状态": "区间内" if p["in_range"] else "已超区间",
-            } for p in ev["positions"]]), use_container_width=True)
+            } for p in ev["positions"]]), width="stretch")
 
             ev_labels = {str(p["token_id"]): f"{p['pool_name']} · #{p['token_id']}"
                          for p in ev["positions"]}
@@ -305,7 +305,7 @@ with tab_price:
 st.divider()
 head_left, head_right = st.columns([3, 1])
 head_left.subheader("现有规则")
-if head_right.button("🔄 立即检查一次", key="run_now", use_container_width=True):
+if head_right.button("🔄 立即检查一次", key="run_now", width="stretch"):
     with st.spinner("正在检查全部启用规则（触发的规则会发飞书）..."):
         lpa.run_once()
     st.success("检查完成，已刷新下方「当前值 / 盈亏% / 状态」")
@@ -354,7 +354,7 @@ view = pd.DataFrame([{
         "跌穿" if r["floor_alerted"] else "",
     ]) or "-",
 } for r in rules])
-st.dataframe(view, use_container_width=True)
+st.dataframe(view, width="stretch")
  
 st.caption("操作")
 for r in rules:

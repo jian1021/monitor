@@ -85,7 +85,7 @@ with st.expander("高级参数", expanded=False):
 
 s1, s2 = st.columns([1, 4])
 with s1:
-    save = st.button("💾 保存参数", use_container_width=True)
+    save = st.button("💾 保存参数", width="stretch")
 with s2:
     st.caption("保存后同时作为手动扫描默认值与后台定时任务的参数。")
 if save:
@@ -102,7 +102,7 @@ if save:
     else:
         st.error("❌ 参数保存失败（数据库不可用），本次扫描仍用页面值")
 
-scan = st.button("🔍 开始扫描", type="primary", use_container_width=True)
+scan = st.button("🔍 开始扫描", type="primary", width="stretch")
 if not scan:
     st.info("设置好五个阀值后点击「开始扫描」")
     st.stop()
@@ -168,7 +168,7 @@ if scan_mode == SCAN_MODE_48H:
     fig.update_layout(title="命中标的 现价 / 48h最高（%）",
                       xaxis_title="池子", yaxis_title="现价/48h最高 %",
                       template="plotly_dark", height=380)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     df = pd.DataFrame(hits)
     df["price_ratio_pct"] = df["price_ratio_48h"] * 100
@@ -200,7 +200,7 @@ if scan_mode == SCAN_MODE_48H:
                       "price_ratio_pct", "current_price", "high_48h", "base_fee_pct",
                       "fee_ratio_24h", "bin_step", "fees_24h_usd", "volume_24h_usd",
                       "age_hours", "meme_mint", "pool_address"],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.stop()
@@ -241,7 +241,7 @@ fig.add_trace(go.Bar(
 fig.update_layout(title="命中标的 24h 费 / TVL 比率（%）",
                   xaxis_title="池子", yaxis_title="费/TVL %",
                   template="plotly_dark", height=380)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 df = pd.DataFrame(hits)
 df["gmgn_link"] = df["meme_mint"].apply(
@@ -269,6 +269,6 @@ st.dataframe(
     column_order=["symbol", "gmgn_link", "meteora_link", "market_cap", "tvl",
                   "base_fee_pct", "fee_ratio_24h", "rsi", "bin_step", "fees_24h_usd",
                   "volume_24h_usd", "age_hours", "meme_mint", "pool_address"],
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
 )

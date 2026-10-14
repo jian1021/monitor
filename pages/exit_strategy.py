@@ -107,6 +107,6 @@ if eligible:
     preview = pd.DataFrame.from_records(eligible[:100], columns=[
         "pool_type", "pool_address", "token_x_symbol", "token_y_symbol", "price", "tvl",
     ])
-    st.dataframe(preview, use_container_width=True, hide_index=True)
+    st.dataframe(preview, width="stretch", hide_index=True)
 else:
     st.info("扫描器数据库暂无池子。先运行 Meteora 扫描，或手动录入池地址，再回到这里人工勾选。")

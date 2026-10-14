@@ -30,7 +30,7 @@ with st.container(border=True):
     days = c4.number_input('天数 (0=按周期自动取满100根)', min_value=0.0, value=0.0, step=1.0)
     lam = c5.number_input('lam · 期望段长', min_value=10.0, value=120.0, step=10.0)
     width = c6.number_input('宽度系数 C', min_value=0.1, value=2.0, step=0.1)
-    run = c7.button('生成区间', type='primary', use_container_width=True)
+    run = c7.button('生成区间', type='primary', width="stretch")
 
 if not run:
     st.info('请在上方输入 Token 地址并点击「生成区间」')
@@ -87,7 +87,7 @@ fig.update_yaxes(type='log', title='价格 (log)')
 fig.update_xaxes(title='时间')
 fig.update_layout(height=520, margin=dict(l=10, r=10, t=30, b=10),
                   hovermode='x unified', template='plotly_dark')
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 rows = []
 for k in sorted(int(x) for x in df['seg'].unique()):
@@ -101,4 +101,4 @@ for k in sorted(int(x) for x in df['seg'].unique()):
                  '上界': round(float(r['upper']), 6),
                  '下界': round(float(r['lower']), 6),
                  'in_range 占比': f"{s['in_range'].mean():.0%}"})
-st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)

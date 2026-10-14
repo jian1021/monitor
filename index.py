@@ -27,7 +27,7 @@ def login():
     with st.form("login_form"):
         username = st.text_input("账号", placeholder="请输入管理员账号")
         password = st.text_input("密码", type="password", placeholder="请输入密码")
-        submit_btn = st.form_submit_button("登录系统", use_container_width=True)
+        submit_btn = st.form_submit_button("登录系统", width="stretch")
 
     if submit_btn:
         user_input = username.strip() if username else ""
@@ -66,7 +66,6 @@ price_monitor = st.Page("pages/st_monitor_price.py", title="价格监控", icon=
 pool_simulator = st.Page("pages/st_pool_simulator.py", title="池子价格模拟", icon=":material/science:")
 token_distribution = st.Page("pages/distribution.py", title="代币分布图", icon=":material/bar_chart:")
 lp_position_alert_page = st.Page("pages/lp_position_alert.py", title="LP 仓位告警", icon=":material/notifications_active:")
-robinhood_pools = st.Page("pages/robinhood_pools.py", title="Robinhood Pools 观测站", icon=":material/satellite_alt:")
 lp_apr = st.Page("pages/lp_apr.py", title="LP 区间 APR", icon=":material/function:")
 exit_strategy = st.Page("pages/exit_strategy.py", title="退出策略", icon=":material/notifications_active:")
 monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设置", icon=":material/tune:")
@@ -86,7 +85,6 @@ if st.session_state.logged_in:
         "pool_simulator": pool_simulator,
         "token_distribution": token_distribution,
         "lp_position_alert": lp_position_alert_page,
-        "robinhood_pools": robinhood_pools,
         "lp_apr": lp_apr,
         "exit_strategy": exit_strategy,
         "onchain_hub": onchain_hub_page,

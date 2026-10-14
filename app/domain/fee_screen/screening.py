@@ -306,7 +306,6 @@ def rank_pools(evaluations: list[PoolEvaluation], cfg: ScreenConfig) -> list[Poo
     fees_vals = [e.pool.fees_usd or 0.0 for e in passed]
     fat_vals = [e.fees_active_tvl or 0.0 for e in passed]
     vol_vals = [e.pool.volume_usd or 0.0 for e in passed]
-    per_vals = [e.persistence_ratio or 0.0 for e in passed]
 
     multi = len(passed) >= 2
     if multi:

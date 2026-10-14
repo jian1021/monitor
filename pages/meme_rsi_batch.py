@@ -32,7 +32,7 @@ def render_page() -> None:
                                    value=float(params["rsi_high"]), step=1.0)
     with p3:
         st.write("")
-        if st.button("💾 保存周期和阈值", use_container_width=True):
+        if st.button("💾 保存周期和阈值", width="stretch"):
             ok = update_meme_rsi_params({"timeframe": timeframe,
                                          "rsi_low": float(rsi_low),
                                          "rsi_high": float(rsi_high)})
@@ -82,7 +82,7 @@ def render_page() -> None:
         },
         column_order=["symbol", "address", "enabled", "last_rsi", "last_price",
                       "last_checked_at", "meteora_link"],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -93,15 +93,15 @@ def render_page() -> None:
         m1, m2, m3 = st.columns(3)
         current = next((p["enabled"] for p in pools if p["address"] == target), True)
         with m1:
-            if st.button("启用" if not current else "停用", use_container_width=True):
+            if st.button("启用" if not current else "停用", width="stretch"):
                 set_meme_pool_enabled(target, not current)
                 st.rerun()
         with m2:
-            if st.button("🗑️ 删除", use_container_width=True):
+            if st.button("🗑️ 删除", width="stretch"):
                 remove_meme_pool(target)
                 st.rerun()
 
-    if st.button("🔍 立即扫描一次", type="primary", use_container_width=True):
+    if st.button("🔍 立即扫描一次", type="primary", width="stretch"):
         with st.spinner(f"正在扫描 {len(pools)} 个池子..."):
             progress = st.progress(0, text="准备扫描...")
 
@@ -117,7 +117,7 @@ def render_page() -> None:
             progress.empty()
         if hits:
             st.warning(f"命中 {len(hits)} 个越界标的（仅展示，未发飞书）")
-            st.dataframe(pd.DataFrame(hits), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(hits), width="stretch", hide_index=True)
         else:
             st.success("本轮无越界标的")
 

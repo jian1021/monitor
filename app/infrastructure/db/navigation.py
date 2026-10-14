@@ -10,7 +10,7 @@ NAVIGATION_GROUPS = {
     "策略与数据": [
         "dashboard", "mainstream_crypto", "discover_lp", "lp_bands",
         "price_monitor", "pool_simulator", "token_distribution",
-        "lp_position_alert", "robinhood_pools", "lp_apr", "exit_strategy",
+        "lp_position_alert", "lp_apr", "exit_strategy",
     ],
     "系统管理": ["monitor_settings", "logout"],
 }

@@ -305,7 +305,7 @@ def build_push_message(hits, rsi_max=DEFAULT_RSI_MAX):
             f"  🌊 Meteora: https://app.meteora.ag/dlmm/{hit['pool_address']}"
         )
     if len(hits) > 5:
-        lines.append(f"（消息仅列出前 5 个）")
+        lines.append("（消息仅列出前 5 个）")
     return "\n".join(lines)
 
 

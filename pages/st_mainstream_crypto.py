@@ -42,11 +42,11 @@ def render_crypto_adder():
             help="OKX 交易对格式，例如 BTC-USDT",
         )
         if search_okx_symbols is not None and st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
-                                   use_container_width=True, type="secondary"):
+                                   width="stretch", type="secondary"):
             with st.spinner("正在搜索 ..."):
                 st.session_state["crypto_candidates"] = search_okx_symbols(new_code or "BTC")
         elif search_okx_symbols is None and st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
-                                   use_container_width=True, type="secondary"):
+                                   width="stretch", type="secondary"):
             st.warning("⚠️ 搜索功能暂时不可用，请直接输入交易对名称添加。")
 
         candidates = st.session_state.get("crypto_candidates") or []

@@ -122,7 +122,7 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
         })
         with st.form(f"save_assets_{type_key}"):
             edited = st.data_editor(
-                display_df, hide_index=True, use_container_width=True, num_rows="fixed",
+                display_df, hide_index=True, width="stretch", num_rows="fixed",
                 disabled=[column for column in display_df.columns if column != "运行"],
                 column_config={
                     "ID": st.column_config.NumberColumn(width="small"),

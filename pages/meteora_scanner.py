@@ -198,12 +198,12 @@ def page_scan() -> None:
 
     b1, b2, b3 = st.columns(3)
     with b1:
-        start = st.button("▶️ 开始扫描", type="primary", use_container_width=True,
+        start = st.button("▶️ 开始扫描", type="primary", width="stretch",
                           disabled=scanner.is_running())
     with b2:
-        stop = st.button("⏹ 停止", use_container_width=True, disabled=not scanner.is_running())
+        stop = st.button("⏹ 停止", width="stretch", disabled=not scanner.is_running())
     with b3:
-        if st.button("🔄 刷新数据缓存", use_container_width=True):
+        if st.button("🔄 刷新数据缓存", width="stretch"):
             st.session_state.refresh_counter = st.session_state.get("refresh_counter", 0) + 1
             st.cache_data.clear()
             st.rerun()
@@ -256,7 +256,7 @@ def page_scan() -> None:
     st.subheader("扫描状态（持久化）")
     status = db.get_scan_status()
     if status:
-        st.dataframe(pd.DataFrame(status), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(status), width="stretch", hide_index=True)
     else:
         st.caption("尚无扫描记录。")
 
@@ -469,7 +469,7 @@ def page_results() -> None:
     view = df_sorted.iloc[start:start + page_size].reset_index(drop=True)
 
     event = st.dataframe(
-        view, use_container_width=True, hide_index=True,
+        view, width="stretch", hide_index=True,
         on_select="rerun", selection_mode="multi-row",
         column_config={
             "代币X市值": st.column_config.NumberColumn(format="%.0f"),
@@ -545,7 +545,7 @@ def page_api_status() -> None:
     errs = db.get_api_errors(300)
     if errs:
         st.subheader("API 错误日志")
-        st.dataframe(pd.DataFrame(errs), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(errs), width="stretch", hide_index=True)
     else:
         st.success("暂无 API 错误记录。")
 

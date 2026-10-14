@@ -15,7 +15,7 @@ NAVIGATION_LABELS = {
     "discover_lp": "Meme 低估监控", "lp_bands": "LP 区间可视化",
     "price_monitor": "价格监控", "pool_simulator": "池子价格模拟",
     "token_distribution": "代币分布图", "lp_position_alert": "LP 仓位告警",
-    "robinhood_pools": "Robinhood Pools 观测站", "lp_apr": "LP 区间 APR",
+    "lp_apr": "LP 区间 APR",
     "exit_strategy": "退出策略",
     "monitor_settings": "监控模块设置",
     "logout": "退出登录",
@@ -41,11 +41,11 @@ selected_module = module_col.selectbox(
     key="navigation_module",
 )
 module_index = group_order.index(selected_module)
-if up_col.button("↑ 上移", disabled=module_index == 0, use_container_width=True):
+if up_col.button("↑ 上移", disabled=module_index == 0, width="stretch"):
     group_order[module_index - 1], group_order[module_index] = group_order[module_index], group_order[module_index - 1]
     st.session_state.sidebar_order_draft[selected_group] = group_order
     st.rerun()
-if down_col.button("↓ 下移", disabled=module_index == len(group_order) - 1, use_container_width=True):
+if down_col.button("↓ 下移", disabled=module_index == len(group_order) - 1, width="stretch"):
     group_order[module_index + 1], group_order[module_index] = group_order[module_index], group_order[module_index + 1]
     st.session_state.sidebar_order_draft[selected_group] = group_order
     st.rerun()

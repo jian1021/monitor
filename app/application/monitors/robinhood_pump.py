@@ -219,7 +219,7 @@ def filter_tokens(raw_pairs):
 # ================= 5. 主循环 =================
 def run_monitor():
     print("🚀 [Robinhood 全链监控] 启动")
-    print(f"   数据源: GeckoTerminal 新池 + DexScreener Boost/Profiles")
+    print("   数据源: GeckoTerminal 新池 + DexScreener Boost/Profiles")
     print(f"   条件: MC≥{MIN_MC:,} & TVL≥{MIN_TVL:,} & ≤{MAX_AGE_HOURS}h")
     print(f"   扫描间隔: {SCAN_INTERVAL}s\n")
 

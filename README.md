@@ -26,7 +26,7 @@ docs/                              架构、功能与 API 说明
 
 页面、应用逻辑、基础设施和外部适配各有明确位置。`pages/onchain_hub.py` 将链上代币管理、Meme RSI、Meteora DLMM 扫描和 Robinhood Uniswap 扫描整合为标签页；各页面的扫描逻辑保留在对应应用模块中。
 
-Robinhood Pools 观测站提供 DexPaprika Uniswap V2/V3/V4 池发现，可按 24h 成交量、流动性和交易数筛选；候选池搜索不依赖本地 RPC 索引进度。rhpools 本地服务继续用于链上事件、手续费和索引状态等详细数据。
+Robinhood 全池扫描（`pages/fee_screen.py`）内含 DexPaprika Uniswap V2/V3/V4 池发现，可按 24h 成交量、流动性和交易数筛选；候选池搜索不依赖本地 RPC 索引进度。原先独立的「Robinhood Pools 观测站」已并入该页面的「📡 池发现与索引观测」Tab，rhpools 本地服务继续用于链上事件、手续费和索引状态等详细数据。
 
 所有项目源码均纳入本仓库的 `modules/` 目录：Meteora 雷达、代币反转监控、Robinhood 池服务和 LP 工具作为独立模块维护，共用仓库级版本管理。各模块可单独启动，但密钥、数据库、运行状态和 `node_modules` 均不提交。
 

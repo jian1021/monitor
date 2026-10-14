@@ -65,7 +65,7 @@ docs/                  # 架构、功能模块与数据源说明
 3. ✅ LP 告警 → `domain/lp_alert` + `infrastructure/db/lp_alert` + `market_data/{meteora,evm_rpc}` + `application/lp_alert/service`，顶层为 CLI。
 4. ✅ `main.py` 轮询 → scheduler + monitor registry，删除重复的 `compute_sleep_seconds`。
 5. ✅ Streamlit 页面收敛为 UI 层：`pages/app.py` 的内联 `asset_config` 副本已删除，资产逻辑移入 `app/application/assets/service.py`。
-6. ✅ rhpools 观测站接入：`modules/robinhoodpools` 模块 + `infrastructure/rhpools/client`（进程管理）+ `application/rhpools/monitor`（健康/价差告警），主循环模块名 `rhpools`，页面 `pages/robinhood_pools.py`。
+6. ✅ rhpools 观测站接入：`modules/robinhoodpools` 模块 + `infrastructure/rhpools/client`（进程管理）+ `application/rhpools/monitor`（健康/价差告警），主循环模块名 `rhpools`。观测面板已并入 `pages/fee_screen.py`（「📡 池发现与索引观测」Tab，组件 `app/interfaces/robinhood_observer.py`），不再保留独立页面。
 7. ✅ robinhood-chain-lp-tools 接入：`modules/robinhood-chain-lp-tools` 模块 + `infrastructure/lp_tools/runner`（Node CLI 运行与解析）+ `application/lp_tools/monitor`（APR 阈值告警）+ `infrastructure/db/apr_watchlist`，主循环模块名 `lp_apr`，页面 `pages/lp_apr.py`。详见 `docs/robinhood_lp_modules.md`。
 8. ✅ Robinhood Chain Uniswap 全池扫描：`domain/fee_screen`（纯筛选逻辑）+ `market_data/rh_fee_sources`（Robinhood 链验证/rhpools+DexScreener 取数）+ `application/fee_screen/{service,monitor,ui_data}` + `db/fee_screen_store`。Robinhood 与 Meteora DLMM 扫描器直接嵌入 `pages/onchain_hub.py` 的全链扫描标签页；飞书通知使用共享配置，不提供重复的页面级 Webhook 输入。
 9. ✅ 监控实现迁入 `application/monitors/`；兼容/CLI 入口集中到 `scripts/`，页面与主循环直接调用应用层实现；命令行入口通过 `python -m scripts.*` 启动。其他实现迁移：`keccak_pure` → `infrastructure/market_data/`、飞书发送 → `infrastructure/notifications/sender.py`、LP bands → `application/lp_bands/`。

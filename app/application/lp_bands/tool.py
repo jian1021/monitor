@@ -159,7 +159,6 @@ def pnl_estimate(p0, d, sigma_h, T_bar, V_h, fee, cap, cost_rate, mu=0.0, npaths
     rng = np.random.default_rng(seed)
     a,b = p0*exp(-d), p0*exp(d); sa,sb = sqrt(a),sqrt(b)
     ell = cap/((1/sqrt(p0)-1/sb)*p0 + (sqrt(p0)-sa))
-    x0 = ell*(1/sqrt(p0)-1/sb); y0 = ell*(sqrt(p0)-sa)
     z = rng.standard_normal((npaths,int(T_bar)))
     logp = np.cumsum(mu - 0.5*sigma_h**2 + sigma_h*z, axis=1)
     out = np.abs(logp) >= d

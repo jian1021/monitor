@@ -176,7 +176,7 @@ with st.form("add_apr_pool", clear_on_submit=True):
                               help="0 = 不设下限")
     new_max = t2.number_input("APR 上限 (%)", min_value=0.0, value=0.0, step=5.0,
                               help="0 = 不设上限")
-    submitted = t3.form_submit_button("➕ 加入列表", use_container_width=True)
+    submitted = t3.form_submit_button("➕ 加入列表", width="stretch")
     if submitted:
         if not new_pool.strip():
             st.error("❌ 池子地址不能为空")

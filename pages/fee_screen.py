@@ -36,6 +36,7 @@ from app.infrastructure.db.fee_screen_store import (
     set_screening_config_json,
 )
 from app.infrastructure.market_data import rh_fee_sources as src
+from app.interfaces.robinhood_observer import render_robinhood_observer
 from app.interfaces.monitor_controls import render_monitor_controls
 
 def render_page() -> None:
@@ -56,15 +57,16 @@ def render_page() -> None:
             st.error(f"❌ 链验证失败，停止筛选：{chain.get('reason')}——"
                      "不会展示任何池子数据，避免混入其他链。")
     with banner[1]:
-        if st.button("🔄 重新验证", use_container_width=True):
+        if st.button("🔄 重新验证", width="stretch"):
             st.session_state.pop("fee_screen_chain", None)
             st.rerun()
 
     st.divider()
 
-    tab_config, tab_pools, tab_detail, tab_monitor = st.tabs(
+    tab_config, tab_pools, tab_detail, tab_monitor, tab_observer = st.tabs(
         ["🎚️ 筛选参数（页面一）", "📋 流动池列表（页面二）",
-         "🔎 单池详情（页面三）", "🔔 监控与报警（页面四）"],
+         "🔎 单池详情（页面三）", "🔔 监控与报警（页面四）",
+         "📡 池发现与索引观测"],
         on_change="rerun", key="fee_screen_tabs")
 
 
@@ -130,7 +132,7 @@ def render_page() -> None:
             if abs(weight_sum - 1.0) > 1e-9:
                 st.warning(f"权重之和为 {weight_sum:.2f}，建议调整为 1.00（当前按原值加权）。")
 
-            if st.button("💾 保存筛选参数", type="primary", use_container_width=True):
+            if st.button("💾 保存筛选参数", type="primary", width="stretch"):
                 new_cfg = ScreenConfig(
                     min_volume_24h=min_volume_24h, min_fees_24h=min_fees_24h,
                     min_fee_rate=min_fee_rate, min_fees_active_tvl=min_fees_active_tvl,
@@ -276,7 +278,7 @@ def render_page() -> None:
                 for i, r in enumerate(filtered)
             ]
             st.dataframe(
-                table, use_container_width=True, hide_index=True,
+                table, width="stretch", hide_index=True,
                 column_config={
                     "24h成交量($)": st.column_config.NumberColumn(format="$%.0f"),
                     "24h手续费($)": st.column_config.NumberColumn(format="$%.0f"),
@@ -331,7 +333,7 @@ def render_page() -> None:
 
             with st.expander(f"❌ 未通过初筛的池子（{len(failed_rows)} 个）及原因"):
                 if failed_rows:
-                    st.dataframe(failed_rows, use_container_width=True, hide_index=True)
+                    st.dataframe(failed_rows, width="stretch", hide_index=True)
                 else:
                     st.caption("无（全部池子通过，或没有池子数据）")
 
@@ -422,7 +424,7 @@ def render_page() -> None:
                                   annotation_text="区间最低")
                     fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10),
                                       xaxis_rangeslider_visible=False)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 else:
                     st.info("K 线数据不可用：tape 事件不足（该池近期无交易或索引未覆盖）。"
                             "可用参考：DexScreener 聚合涨跌幅 "
@@ -443,7 +445,7 @@ def render_page() -> None:
                                     yaxis="y2", line=dict(color="orange"))
                     fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10),
                                       y2=dict(overlaying="y", side="right", showgrid=False))
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 else:
                     st.info("成交量/手续费 5 分钟序列数据不可用（tape 无该池 swap 事件）")
 
@@ -458,7 +460,7 @@ def render_page() -> None:
                 "日均手续费($)": windows["fees_daily"],
                 "日均 Fees/ActiveTVL": windows["fat_daily"],
             })
-            st.dataframe(wdf, use_container_width=True, hide_index=True)
+            st.dataframe(wdf, width="stretch", hide_index=True)
 
             st.markdown("##### 🚨 风险事件与扣分记录")
             risk_items = [
@@ -551,9 +553,6 @@ def render_page() -> None:
             st.caption("模块名 fee_screen；实际轮询由主循环（main.py）按 "
                        "module_intervals 执行，此处修改实时生效。")
 
-            render_monitor_controls("fee_screen", "Robinhood 全池扫描")
-            render_monitor_controls("robinhood_pump", "Robinhood 新池策略")
-
             st.markdown("##### ⚙️ 报警参数")
             mon = load_monitor_config()
             w1, w2, w3, w4 = st.columns(4)
@@ -573,7 +572,7 @@ def render_page() -> None:
                 st.success("✅ 已保存" if ok else "⚠️ 保存失败（数据库不可用）")
 
             st.markdown("##### ⚡ 立即执行一轮监控")
-            if st.button("▶️ 立即执行", use_container_width=True):
+            if st.button("▶️ 立即执行", width="stretch"):
                 with st.spinner("执行链验证 → 筛选 → 对比 → 推送..."):
                     started = time.time()
                     try:
@@ -607,12 +606,21 @@ def render_page() -> None:
                 st.dataframe(
                     [{"时间": a["created_at"], "类型": a["kind"], "池子": a["pool_id"],
                       "内容": a["message"].replace("\n", " ｜ ")} for a in alerts],
-                    use_container_width=True, hide_index=True)
+                    width="stretch", hide_index=True)
             else:
                 st.caption("暂无告警记录（监控尚未触发或数据库不可用）")
 
             st.caption("报警内容包含池子地址、链、成交量、手续费率、Fees/Active TVL、价格变化、"
                        "风险原因与数据时间；去重后同一风险不会反复推送。")
+
+
+    def render_observer_tab() -> None:
+        with tab_observer:
+            st.markdown("##### 📡 池发现、索引服务与链上观测")
+            st.caption(
+                "外部池发现、GMGN 风险检查、本地 rhpools 索引状态、原始池列表和池间价差都集中在这里。"
+            )
+            render_robinhood_observer()
 
 
     if tab_config.open:
@@ -623,6 +631,19 @@ def render_page() -> None:
         render_detail_tab()
     if tab_monitor.open:
         render_monitor_tab()
+    if tab_observer.open:
+        render_observer_tab()
+
+    st.divider()
+    with st.container(border=True):
+        st.subheader("⚙️ 后台监控设置")
+        st.caption(
+            "以下是三个独立后台任务的开关和轮询间隔：全池扫描、新池策略和 rhpools 索引监控分别运行，"
+            "设置仅影响常驻进程 `python main.py`，手动查询不受影响。"
+        )
+        render_monitor_controls("fee_screen", "Robinhood 全池扫描")
+        render_monitor_controls("robinhood_pump", "Robinhood 新池策略")
+        render_monitor_controls("rhpools", "Robinhood 索引与价差监控")
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Robinhood 全池扫描", page_icon="🦅", layout="wide")

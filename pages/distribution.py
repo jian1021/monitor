@@ -651,7 +651,7 @@ with st.container(border=True):
     with r1:
         range_pct = st.slider("价格显示范围 (%)", min_value=5, max_value=200, value=50, step=5)
     with r2:
-        run = st.button("生成分布图", type="primary", use_container_width=True)
+        run = st.button("生成分布图", type="primary", width="stretch")
 
 if not run:
     st.info("请在上方填写池子信息并点击「生成分布图」")
@@ -710,7 +710,7 @@ with st.spinner("正在从链上读取池子数据..."):
             if pid and manual_key["poolId"] != pid:
                 st.error(f"手动 PoolKey 计算出的 poolId 与输入不一致\n{manual_key['poolId']}\n≠\n{pid}\n请检查 currency0/currency1/fee/tickSpacing/hooks 是否填写正确。")
                 st.stop()
-            with st.expander(f"已由手动 PoolKey 计算 poolId"):
+            with st.expander("已由手动 PoolKey 计算 poolId"):
                 st.code(manual_key["poolId"])
             key = manual_key
 

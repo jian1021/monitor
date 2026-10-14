@@ -45,7 +45,7 @@
 
 ### 3. DexPaprika（Robinhood Uniswap 候选池扫描）
 
-- 页面：`pages/robinhood_pools.py` 的「DexPaprika Robinhood Uniswap 池扫描」区。
+- 页面：`pages/fee_screen.py` 的「📡 池发现与索引观测」Tab（组件 `app/interfaces/robinhood_observer.py`）中的「DexPaprika Robinhood Uniswap 池扫描」区。
 - 接口：`GET https://api.dexpaprika.com/networks/robinhood/pools/search`，按 `uniswap_v2`、`uniswap_v3`、`uniswap_v4` 分别查询，并支持 24h 成交量、流动性、24h 交易数筛选与游标分页。
 - 可选配置：仓库根目录 `.env` 中的 `DEXPAPRIKA_BASE_URL`、`DEXPAPRIKA_API_KEY`；公开 API 可不带 Key 调用。
 - 该扫描用于发现符合门槛的候选池，不需要本机 RPC 扫描或等待本地索引追块；rhpools 仍提供本地链上事件、手续费估算和索引诊断等详细数据。
