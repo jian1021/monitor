@@ -14,7 +14,7 @@ def render_dexpaprika_scan() -> None:
         st.subheader("🔎 DexPaprika Robinhood Uniswap 池扫描")
         st.caption(
             "直接从 DexPaprika 的 Robinhood Chain 池搜索 API 获取 Uniswap V2/V3/V4 候选池，"
-            "按成交量、流动性和交易数筛选。"
+            "按成交量、流动性（TVL）、交易数、代币市值（FDV）与池费率筛选。"
         )
         with st.form("dexpaprika_robinhood_scan_form"):
             dex_labels = {
@@ -27,9 +27,16 @@ def render_dexpaprika_scan() -> None:
             selected_dex = f1.selectbox("协议", list(dex_labels))
             scan_min_volume = f2.number_input("最低 24h 成交量 ($)", min_value=0.0,
                                               value=1_000_000.0, step=100_000.0)
-            scan_min_liquidity = f3.number_input("最低流动性 ($)", min_value=0.0,
-                                                 value=100_000.0, step=50_000.0)
+            scan_min_liquidity = f3.number_input("最低流动性/TVL ($)", min_value=0.0,
+                                                 value=10_000.0, step=5_000.0)
             scan_min_txns = f4.number_input("最低 24h 交易数", min_value=0, value=30, step=10)
+            g1, g2 = st.columns(2)
+            scan_min_fdv = g1.number_input("最低代币市值 FDV ($)", min_value=0.0,
+                                           value=100_000.0, step=50_000.0,
+                                           help="要求池中每个代币的 FDV 都达标；任一代币缺失 FDV 视为不满足。")
+            scan_min_fee_pct = g2.number_input("最低池费率 (%)", min_value=0.0,
+                                               value=0.2, step=0.05,
+                                               help="按 DexPaprika 上报的池费率过滤；V2 等未上报费率的池会被排除。")
             risk_col1, risk_col2, risk_col3 = st.columns([1.2, 1, 1.5])
             enable_risk_filter = risk_col1.checkbox("启用基础貔貅风险过滤", value=True)
             min_token_sells = risk_col2.number_input("每个代币最低 24h 卖出数", min_value=0,
@@ -107,6 +114,8 @@ def render_dexpaprika_scan() -> None:
                     "risk_filter_enabled": enable_risk_filter,
                     "min_token_sells": int(min_token_sells),
                     "max_buy_sell_ratio": float(max_buy_sell_ratio),
+                    "min_token_fdv": float(scan_min_fdv),
+                    "min_fee_rate": float(scan_min_fee_pct) / 100.0,
                     "gmgn_filter_enabled": enable_gmgn_check,
                     "gmgn_status": gmgn_status,
                 })
@@ -118,31 +127,45 @@ def render_dexpaprika_scan() -> None:
                 (st.warning if scan_result.get("ok") else st.error)(scan_result["reason"])
             scan_rows = scan_result.get("rows") or []
             if scan_rows:
+                min_fdv_gate = float(scan_result.get("min_token_fdv", 100_000.0) or 0)
+                min_fee_gate = float(scan_result.get("min_fee_rate", 0.002) or 0)
+                gate_checked = [
+                    (row, dexpaprika_robinhood.apply_pool_thresholds(
+                        row,
+                        min_token_fdv=min_fdv_gate,
+                        min_fee_rate=min_fee_gate,
+                    ))
+                    for row in scan_rows
+                ]
+                gate_passed = [(row, gate) for row, gate in gate_checked if gate["passed"]]
+                gate_rejected = [(row, gate) for row, gate in gate_checked if not gate["passed"]]
                 risk_filter_on = bool(scan_result.get("risk_filter_enabled"))
                 risk_checked = [
                     (row, dexpaprika_robinhood.basic_token_trade_risk(
                         row,
                         min_sells_per_token=int(scan_result.get("min_token_sells", 5)),
                         max_buy_sell_ratio=float(scan_result.get("max_buy_sell_ratio", 20.0)),
-                    ))
-                    for row in scan_rows
+                    ), gate)
+                    for row, gate in gate_passed
                 ]
-                basic_accepted = [(row, risk) for row, risk in risk_checked
+                basic_accepted = [(row, risk, gate) for row, risk, gate in risk_checked
                                   if risk["passed"] or not risk_filter_on]
                 gmgn_filter_on = bool(scan_result.get("gmgn_filter_enabled"))
                 gmgn_rejected = [
-                    (row, risk) for row, risk in basic_accepted
+                    (row, risk, gate) for row, risk, gate in basic_accepted
                     if gmgn_filter_on and any(
                         item.get("status") == "honeypot"
                         for item in row.get("gmgn_checks", [])
                     )
                 ]
-                accepted = [(row, risk) for row, risk in basic_accepted
-                            if (row, risk) not in gmgn_rejected]
-                rejected = [(row, risk) for row, risk in risk_checked if not risk["passed"]]
+                rejected_ids = {(id(row), id(risk), id(gate)) for row, risk, gate in gmgn_rejected}
+                accepted = [(row, risk, gate) for row, risk, gate in basic_accepted
+                            if (id(row), id(risk), id(gate)) not in rejected_ids]
+                rejected = [(row, risk) for row, risk, _ in risk_checked if not risk["passed"]]
                 st.success(
                     f"DexPaprika 返回 {len(scan_rows):,} 个候选池；"
-                    f"当前结果 {len(accepted):,} 个；基础活动风险排除 {len(rejected):,} 个，"
+                    f"当前结果 {len(accepted):,} 个；市值/费率门槛排除 {len(gate_rejected):,} 个，"
+                    f"基础活动风险排除 {len(rejected):,} 个，"
                     f"GMGN 标记貔貅排除 {len(gmgn_rejected):,} 个。"
                 )
                 st.caption(
@@ -168,7 +191,7 @@ def render_dexpaprika_scan() -> None:
                     ) or "—"
 
                 unknown_pool_count = sum(
-                    gmgn_summary(row) == "未知 / 人工复核" for row, _ in accepted
+                    gmgn_summary(row) == "未知 / 人工复核" for row, _, _ in accepted
                 )
                 if gmgn_filter_on:
                     st.caption(f"当前结果中有 {unknown_pool_count:,} 个池至少含一个未验证代币。")
@@ -184,6 +207,9 @@ def render_dexpaprika_scan() -> None:
                     "流动性 ($)": row.get("liquidity_usd"),
                     "24h 成交量 ($)": row.get("volume_usd_24h"),
                     "24h 交易数": row.get("transactions_24h"),
+                    "费率": (f"{gate.get('fee_rate'):.2%}"
+                             if gate.get("fee_rate") is not None else "未知"),
+                    "最大代币市值 ($)": gate.get("max_fdv"),
                     "1h 涨跌 (%)": row.get("price_change_percentage_1h"),
                     "24h 涨跌 (%)": row.get("price_change_percentage_24h"),
                     "最低代币卖出数": risk.get("min_sells"),
@@ -193,11 +219,27 @@ def render_dexpaprika_scan() -> None:
                     "GMGN 貔貅检测": gmgn_summary(row),
                     "GMGN 未知原因": gmgn_reason(row),
                     "创建时间": row.get("created_at"),
-                } for row, risk in accepted])
+                } for row, risk, gate in accepted])
                 if not scan_df.empty:
                     st.dataframe(scan_df, width="stretch", hide_index=True)
                 else:
-                    st.warning("当前门槛下的候选池均被基础风险过滤排除。")
+                    st.warning("当前门槛下的候选池均被门槛或风险过滤排除。")
+                if gate_rejected:
+                    with st.expander(f"查看未达市值/费率门槛的池（{len(gate_rejected)}）"):
+                        gate_df = pd.DataFrame.from_records([{
+                            "池地址 / ID": row.get("id"),
+                            "协议": row.get("dex_name") or row.get("dex_id"),
+                            "交易对": "/".join(
+                                str(token.get("symbol") or token.get("name") or "?")
+                                for token in (row.get("tokens") or []) if isinstance(token, dict)
+                            ),
+                            "流动性 ($)": row.get("liquidity_usd"),
+                            "费率": (f"{gate.get('fee_rate'):.2%}"
+                                     if gate.get("fee_rate") is not None else "未知"),
+                            "最大代币市值 ($)": gate.get("max_fdv"),
+                            "原因": gate.get("reason"),
+                        } for row, gate in gate_rejected])
+                        st.dataframe(gate_df, width="stretch", hide_index=True)
                 if rejected:
                     with st.expander(f"查看被排除的池（{len(rejected)}）"):
                         rejected_df = pd.DataFrame.from_records([{
@@ -224,7 +266,7 @@ def render_dexpaprika_scan() -> None:
                                 str(item.get("symbol")) for item in row.get("gmgn_checks", [])
                                 if item.get("status") == "honeypot"
                             ),
-                        } for row, _ in gmgn_rejected])
+                        } for row, _, _ in gmgn_rejected])
                         st.dataframe(gmgn_df, width="stretch", hide_index=True)
                 st.download_button(
                     "⬇️ 下载扫描结果 CSV",

@@ -163,6 +163,91 @@ def basic_token_trade_risk(
     }
 
 
+def pool_fee_rate(pool: dict[str, Any]) -> float | None:
+    """Read a pool fee tier as a fraction (``0.01`` means 1%).
+
+    DexPaprika reports e.g. ``0.01`` / ``0.05`` on V3 pools and ``None``
+    on pools (notably V2) without a reported fee. Returns ``None`` when
+    missing or unparsable so callers treat it as unknown instead of 0.
+    """
+    fee = pool.get("fee") if isinstance(pool, dict) else None
+    if fee is None:
+        return None
+    try:
+        if isinstance(fee, str):
+            text = fee.strip()
+            is_percent = text.endswith("%")
+            value = float(text.rstrip("%").strip())
+            if is_percent:
+                value /= 100.0
+        else:
+            value = float(fee)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if value < 0:
+        return None
+    if value > 1:  # defensive: treat 1-100 style input as percent
+        value /= 100.0
+    return value
+
+
+def pool_fdv_stats(pool: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Return (min_token_fdv, max_token_fdv) across a pool's tokens.
+
+    ``min`` is ``None`` when any token lacks a usable ``fdv`` so a threshold
+    check marks the pool unverifiable instead of guessing.
+    """
+    tokens = pool.get("tokens") if isinstance(pool, dict) else None
+    if not isinstance(tokens, list) or not tokens:
+        return None, None
+    fdvs: list[float] = []
+    for token in tokens:
+        if not isinstance(token, dict):
+            return None, None
+        try:
+            value = float(token.get("fdv"))
+        except (TypeError, ValueError, OverflowError):
+            return None, None
+        if value < 0:
+            return None, None
+        fdvs.append(value)
+    return min(fdvs), max(fdvs)
+
+
+def apply_pool_thresholds(
+    pool: dict[str, Any], *, min_token_fdv: float = 0,
+    min_fee_rate: float = 0,
+) -> dict[str, Any]:
+    """Client-side gates on token FDV (market-cap proxy) and pool fee rate.
+
+    DexPaprika's pool search API only filters server-side on volume /
+    liquidity / txns, so FDV and fee are enforced here after fetching.
+    Missing data fails an enabled gate (it must not silently pass).
+    """
+    reasons: list[str] = []
+    min_fdv, max_fdv = pool_fdv_stats(pool)
+    fee_rate = pool_fee_rate(pool)
+    if min_token_fdv > 0:
+        if min_fdv is None:
+            reasons.append("代币市值（FDV）缺失")
+        elif min_fdv < min_token_fdv:
+            reasons.append(
+                f"最小代币市值 ${min_fdv:,.0f} 低于 ${min_token_fdv:,.0f}")
+    if min_fee_rate > 0:
+        if fee_rate is None:
+            reasons.append("池费率缺失")
+        elif fee_rate < min_fee_rate:
+            reasons.append(
+                f"池费率 {fee_rate:.2%} 低于 {min_fee_rate:.2%}")
+    return {
+        "passed": not reasons,
+        "min_fdv": min_fdv,
+        "max_fdv": max_fdv,
+        "fee_rate": fee_rate,
+        "reason": "；".join(reasons),
+    }
+
+
 def search_uniswap_pools(
     *,
     dex_id: str | None = None,
