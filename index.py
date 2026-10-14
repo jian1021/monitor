@@ -99,7 +99,11 @@ if st.session_state.logged_in:
     }
     saved_order = get_navigation_order()
     navigation = {
-        group: [page_by_id[key] for key in saved_order.get(group, NAVIGATION_GROUPS[group])]
+        group: [
+            page_by_id[key]
+            for key in saved_order.get(group, NAVIGATION_GROUPS[group])
+            if key in page_by_id
+        ]
         for group in NAVIGATION_GROUPS
     }
     # Hidden child pages stay routable from the on-chain hub cards without
