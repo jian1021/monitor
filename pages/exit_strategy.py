@@ -104,4 +104,4 @@ if eligible:
     st.dataframe(pd.DataFrame(eligible)[["pool_type", "pool_address", "token_x_symbol", "token_y_symbol", "price", "tvl"]],
                  use_container_width=True, hide_index=True)
 else:
-    st.info("扫描器数据库暂无池子。先运行 Solana 或 Robinhood 全池扫描，再回到这里人工勾选。")
+    st.info("扫描器数据库暂无池子。先运行 Meteora 扫描，或手动录入池地址，再回到这里人工勾选。")

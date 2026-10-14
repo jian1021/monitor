@@ -68,7 +68,6 @@ token_distribution = st.Page("pages/distribution.py", title="代币分布图", i
 lp_position_alert_page = st.Page("pages/lp_position_alert.py", title="LP 仓位告警", icon=":material/notifications_active:")
 robinhood_pools = st.Page("pages/robinhood_pools.py", title="Robinhood Pools 观测站", icon=":material/satellite_alt:")
 lp_apr = st.Page("pages/lp_apr.py", title="LP 区间 APR", icon=":material/function:")
-fee_screen = st.Page("pages/fee_screen.py", title="Robinhood 全池扫描", icon=":material/stacked_line_chart:")
 meteora_scanner = st.Page("pages/meteora_scanner.py", title="Meteora 全池扫描", icon=":material/radar:")
 exit_strategy = st.Page("pages/exit_strategy.py", title="退出策略", icon=":material/notifications_active:")
 monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设置", icon=":material/tune:")
@@ -81,7 +80,6 @@ onchain_hub_page = st.Page("pages/onchain_hub.py", title="链上代币", icon=":
 if st.session_state.logged_in:
     page_by_id = {
         "meteora_scanner": meteora_scanner,
-        "fee_screen": fee_screen,
         "dashboard": dashboard,
         "mainstream_crypto": mainstream_crypto,
         "discover_lp": discover_lp,

@@ -12,7 +12,6 @@ app/
   domain/                         纯业务规则
   application/                    业务模块与用例编排
     meteora_scanner/               Meteora DLMM API、扫描、筛选、评分与数据
-    fee_screen/                    Robinhood Chain 全池筛选
     exit_strategy/                 人工选池与退出告警
     monitors/                      RSI、Meme、价格等监控
   infrastructure/                 数据库、行情 API 与飞书通知适配
@@ -24,7 +23,7 @@ tests/                             主项目及 Meteora 扫描器测试
 docs/                              架构、功能与 API 说明
 ```
 
-页面、应用逻辑、基础设施和外部适配各有明确位置。Meteora 页面入口是 `pages/meteora_scanner.py`，扫描器实现位于 `app/application/meteora_scanner/`；Robinhood 全池扫描页面是 `pages/fee_screen.py`。
+页面、应用逻辑、基础设施和外部适配各有明确位置。Meteora 页面入口是 `pages/meteora_scanner.py`，扫描器实现位于 `app/application/meteora_scanner/`。
 
 所有项目源码均纳入本仓库的 `modules/` 目录：Meteora 雷达、代币反转监控、Robinhood 池服务和 LP 工具作为独立模块维护，共用仓库级版本管理。各模块可单独启动，但密钥、数据库、运行状态和 `node_modules` 均不提交。
 
@@ -74,12 +73,11 @@ Meteora 扫描器仅支持 DLMM，数据源与飞书配置可放在 `app/applica
 
 ## 功能说明
 
-统一看板在左侧导航中提供全链扫描、策略与数据、链上代币和系统管理模块。全链扫描包含 Solana 的 Meteora DLMM，以及 Robinhood Chain 池筛选。Meteora 扫描结果可人工挑选并加入链上 Meme 监控；退出策略可人工选池，并按价格下限、RSI(3) 或布林带条件发送飞书告警。后台 `main.py` 负责按模块设置的间隔执行监控。
+统一看板在左侧导航中提供全链扫描、策略与数据、链上代币和系统管理模块。全链扫描提供 Solana 的 Meteora DLMM 扫描。Meteora 扫描结果可人工挑选并加入链上 Meme 监控；退出策略可人工选池，并按价格下限、RSI(3) 或布林带条件发送飞书告警。后台 `main.py` 负责按模块设置的间隔执行监控。
 
 ## 文档
 
 - [架构与模块边界](docs/architecture.md)
 - [Meteora 扫描器说明](docs/meteora_scanner/README.md)
-- [Robinhood Chain 池筛选](docs/fee_screen.md)
 - [Robinhood LP 模块](docs/robinhood_lp_modules.md)
 - [Robinhood Chain 池与行情 API 验证](docs/verification_robinhood_chain.md)

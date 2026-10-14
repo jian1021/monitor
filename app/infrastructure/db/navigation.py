@@ -6,7 +6,7 @@ from app.infrastructure.db.client import get_db_client
 
 
 NAVIGATION_GROUPS = {
-    "全链扫描": ["meteora_scanner", "fee_screen"],
+    "全链扫描": ["meteora_scanner"],
     "策略与数据": [
         "dashboard", "mainstream_crypto", "discover_lp", "lp_bands",
         "price_monitor", "pool_simulator", "token_distribution",

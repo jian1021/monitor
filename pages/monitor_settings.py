@@ -28,11 +28,10 @@ MODULE_LABELS = {
     "lp_alert": "💧 LP 仓位 / 池子价格告警",
     "rhpools": "🛰️ Robinhood Pools 观测站",
     "lp_apr": "📐 LP 区间 APR",
-    "fee_screen": "💰 高手续费池筛选",
 }
 
 NAVIGATION_LABELS = {
-    "meteora_scanner": "Meteora 全池扫描", "fee_screen": "Robinhood 全池扫描",
+    "meteora_scanner": "Meteora 全池扫描",
     "dashboard": "监控标的管理", "mainstream_crypto": "主流加密货币",
     "discover_lp": "Meme 低估监控", "lp_bands": "LP 区间可视化",
     "price_monitor": "价格监控", "pool_simulator": "池子价格模拟",

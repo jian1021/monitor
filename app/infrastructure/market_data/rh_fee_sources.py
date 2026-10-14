@@ -1,4 +1,4 @@
-"""Robinhood Chain fee-screen 数据源（全部为实测可用的真实接口）。
+"""Robinhood Chain 池行情与事件数据源（全部为实测可用的真实接口）。
 
 数据源：
 1. Robinhood Chain 官方 RPC（链验证）
