@@ -195,6 +195,7 @@ def render_status_bar() -> None:
 def page_scan() -> None:
     st.header("① 全池扫描")
     st.caption("扫描 Meteora DLMM 流动池。支持分页、去重、断点续扫。")
+    render_monitor_controls("meteora_scan", "Meteora DLMM 全池扫描")
 
     scanner = get_scanner()
     db = get_db()
@@ -209,8 +210,6 @@ def page_scan() -> None:
         resume = st.checkbox("断点续扫", value=True, help="从上次中断的页继续")
     with col4:
         st.caption("后台扫描需保持 `python main.py` 运行。")
-
-    render_monitor_controls("meteora_scan", "Meteora DLMM 全池扫描")
 
     b1, b2, b3 = st.columns(3)
     with b1:

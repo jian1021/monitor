@@ -22,34 +22,28 @@ st.caption("Robinhood Chain（4663）LP 池索引服务的只读面板。所有�
            "缺失字段不补零；请先看索引状态再解读下面的表。")
 render_monitor_controls("rhpools", "Robinhood Pools 观测")
 
-# ------------------------- 侧边栏：服务与参数 -------------------------
-with st.sidebar:
-    st.header("服务")
-    st.code(client.base_url(), language=None)
-    c1, c2 = st.columns(2)
-    if c1.button("🔄 探活", use_container_width=True):
-        st.session_state.pop("rhp_last_error", None)
-    if c2.button("▶️ 启动服务", use_container_width=True):
-        with st.spinner("等待服务就绪（首次启动会初始化索引）..."):
-            got = client.ensure_running(wait_s=90)
-        st.session_state["rhp_last_error"] = None if got else client.last_error()
-        st.rerun()
-    if client.available():
-        st.caption("子模块：modules/robinhoodpools ✅")
+# ------------------------- 页面内服务管理 -------------------------
+status = client.health()
+with st.container(border=True):
+    st.subheader("🖥️ 服务管理")
+    address_col, state_col, action_col = st.columns([2, 1, 2])
+    with address_col:
+        st.code(client.base_url(), language=None)
+        st.caption("子模块：modules/robinhoodpools " + ("✅" if client.available() else "❌ 未拉取"))
         st.caption("日志：logs/rhpools.log")
-    else:
-        st.error("子模块未拉取（Streamlit Cloud 不支持 submodule）")
-        if st.button("📦 一键拉取子模块", use_container_width=True):
-            with st.spinner("git clone 中（约 10~30 秒）..."):
-                ok = client.ensure_repo()
-            if ok:
-                st.success("✅ 已拉取，点「启动服务」")
-            else:
-                st.error("❌ 拉取失败，看终端日志")
+    with state_col:
+        st.metric("服务状态", "运行中" if status is not None else "未连接")
+    with action_col:
+        probe_col, start_col = st.columns(2)
+        if probe_col.button("🔄 探活", use_container_width=True):
+            st.session_state.pop("rhp_last_error", None)
+        if start_col.button("▶️ 拉取并启动" if not client.available() else "▶️ 启动服务",
+                            type="primary", use_container_width=True):
+            with st.spinner("准备服务并等待索引就绪（首次启动可能需要一些时间）..."):
+                got = client.ensure_running(wait_s=90)
+            st.session_state["rhp_last_error"] = None if got else client.last_error()
             st.rerun()
-    st.markdown(
-        f"[打开观测站终端 UI]({client.base_url()}/)（服务已启动时可用）"
-    )
+    st.markdown(f"[打开观测站终端 UI]({client.base_url()}/)（服务已启动时可用）")
 
 with st.container(border=True):
     st.subheader("⚙️ 观测参数")
@@ -57,20 +51,11 @@ with st.container(border=True):
     min_bps = c1.number_input("价差阈值 (bps)", 0.0, 10000.0, 50.0, 10.0)
     min_depth = c2.number_input("浅边深度下限 ($)", 0.0, 1e6, 300.0, 100.0)
 
-status = client.health()
 if status is None:
-    st.warning(
-        "服务未运行。点下面的按钮即可——子模块缺失会**自动拉取**，"
-        "首次启动要初始化索引，等状态变成 live 后再看下面的表。"
-    )
+    st.warning("服务尚未连接。可在页面上方“服务管理”中拉取并启动；首次启动会初始化索引。")
     if st.session_state.get("rhp_last_error"):
         st.error("⛔ 上次启动失败：\n\n```\n"
                  + st.session_state["rhp_last_error"] + "\n```")
-    if st.button("▶️ 启动服务（缺代码会自动拉取）", type="primary"):
-        with st.spinner("拉取代码 → 启动 → 等待就绪（最长约 2 分钟，看终端/云端 Logs 有进度）..."):
-            got = client.ensure_running(wait_s=90)
-        st.session_state["rhp_last_error"] = None if got else client.last_error()
-        st.rerun()
     with st.expander("手动启动（本机终端）"):
         st.code(
             "git submodule update --init\n"

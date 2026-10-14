@@ -13,7 +13,7 @@ import traceback
 import baostock as bs
 
 from app.application.monitors import rsi as monitor_rsi
-from app.core.settings import FEISHU_WEBHOOK
+from app.core.settings import FEISHU_WEBHOOK, LIBSQL_TOKEN, LIBSQL_URL
 from app.infrastructure.db.assets import load_instruments, update_asset_alert_state
 from app.infrastructure.db.intervals import DEFAULT_INTERVALS, get_module_intervals
 from app.infrastructure.db.module_settings import get_module_settings
@@ -409,10 +409,16 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    config = load_instruments()
-    if not config:
-        print("停止运行：未能加载有效的配置文件。")
-        exit(1)
+    if not LIBSQL_URL or not LIBSQL_TOKEN:
+        print("停止运行：后台监控必须配置 LIBSQL_URL 和 LIBSQL_TOKEN。")
+        raise SystemExit(2)
+    if not FEISHU_WEBHOOK:
+        print("⚠️ 未配置 FEISHU_WEBHOOK；需要飞书告警的模块不会发送通知。")
+    try:
+        config = load_instruments()
+    except Exception as exc:
+        print(f"停止运行：读取后台资产配置失败：{exc}")
+        raise SystemExit(2) from exc
 
     # 界面增删改资产后，常驻进程需周期性重载配置才会生效
     CONFIG_REFRESH_SECONDS = 60
