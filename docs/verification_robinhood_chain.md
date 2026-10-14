@@ -1,8 +1,9 @@
-# Robinhood Chain 池与数据 API 验证记录
+# Robinhood Chain 池与数据 API 验证报告
 
-> 本文保留 Robinhood Chain 链与数据源的核验记录。Robinhood 高手续费全池筛选页面和后台任务已从项目中移除；这些信息不代表 Meteora 扫描能力。
+> 本报告记录 Robinhood Chain 全池筛选器使用的链与数据源。结论先行：
 >
 > 1. **Robinhood Chain 主网真实存在**：Chain ID **4663**，EVM（Arbitrum Orbit）L2，gas 为 ETH，官方 RPC `https://rpc.mainnet.chain.robinhood.com/`，主网 2026-07-01 上线。已通过 `eth_chainId` 实测返回 `0x1237`（=4663）。
+> 2. Robinhood Chain 全池筛选使用 **Uniswap V2 / V3 / V4 与 Slipstream**（rhpools 索引的已审核部署）。Solana Meteora DLMM 由独立扫描器处理，与本模块分开。
 
 ## 一、链验证（启动时执行，已实测）
 

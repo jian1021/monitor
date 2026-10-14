@@ -21,6 +21,7 @@ from app.application.monitors.meme_rsi_batch import run_batch_meme_rsi_monitor
 from app.application.monitors.robinhood_pump import run_monitor
 from app.application.rhpools.monitor import run_rhpools_monitor
 from app.application.lp_tools.monitor import run_lp_apr_monitor
+from app.application.fee_screen.monitor import run_fee_screen_monitor
 from app.application.exit_strategy.monitor import run_monitor as run_exit_strategy_monitor
 from app.application.lp_alert.service import run_once as run_lp_alert_once
 from app.infrastructure.db.lp_alert import ensure_table as ensure_lp_alert_table
@@ -311,6 +312,16 @@ def _run_lp_apr():
         traceback.print_exc()
 
 
+def _run_fee_screen():
+    print(f"\n{'='*50}")
+    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 Robinhood 全池扫描监控")
+    try:
+        run_fee_screen_monitor()
+    except Exception as e:
+        print(f"❌ run_fee_screen_monitor 发生异常：{e}")
+        traceback.print_exc()
+
+
 def _run_exit_strategy():
     print(f"\n{'='*50}")
     print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行退出策略监控")
@@ -332,6 +343,7 @@ def build_scheduler() -> MonitoringScheduler:
     registry.register(MonitorSpec("lp_alert", "lp_alert", _run_lp_alert))
     registry.register(MonitorSpec("rhpools", "rhpools", _run_rhpools))
     registry.register(MonitorSpec("lp_apr", "lp_apr", _run_lp_apr))
+    registry.register(MonitorSpec("fee_screen", "fee_screen", _run_fee_screen))
     registry.register(MonitorSpec("exit_strategy", "exit_strategy", _run_exit_strategy))
     return MonitoringScheduler(registry, poll_interval=POLL_INTERVAL)
 

@@ -33,8 +33,8 @@ from app.application.meteora_scanner.scoring import (COMPONENT_LABELS, DEFAULT_W
                          formula_text, stability_score, volatility_score_fallback)
 from app.application.meteora_scanner.feishu import FeishuAlerter
 
-st.set_page_config(page_title=config.APP_TITLE, page_icon="📊", layout="wide")
-
+if __name__ == "__main__":
+    st.set_page_config(page_title=config.APP_TITLE, page_icon="📊", layout="wide")
 
 # ===========================================================================
 # 资源
