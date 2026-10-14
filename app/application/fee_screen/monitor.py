@@ -129,7 +129,7 @@ def run_fee_screen_monitor(cfg: ScreenConfig | None = None,
     summary: dict = {"alerts_sent": 0, "pools_in_list": 0, "reason": ""}
 
     if not webhook:
-        summary["reason"] = "未配置环境变量 FEISHU_WEBHOOK，跳过飞书推送"
+        summary["reason"] = "飞书 Webhook 未配置（FEISHU_WEBHOOK），跳过推送"
         return summary
 
     from app.application.fee_screen.service import run_screening
