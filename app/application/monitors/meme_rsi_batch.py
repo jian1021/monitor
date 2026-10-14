@@ -1,4 +1,4 @@
-"""批量 meme 池子超卖超买监控：RSI(3,5m) 越界(>90 或 <10) 推送飞书。"""
+"""批量 meme 池子超卖超买监控：支持 15m/1h RSI 周期并推送飞书。"""
 
 import re
 import time
@@ -48,19 +48,20 @@ def fetch_pool_name(address) -> str:
         return ""
 
 
-def _default_rsi_fetcher(address, length):
-    from app.application.monitors.rsi import get_meteora_native_rsi
+def _default_rsi_fetcher(address, length, timeframe="15m"):
+    from app.application.monitors.rsi import get_meteora_batch_rsi
 
-    return get_meteora_native_rsi(address, "5m", 1, length)
+    return get_meteora_batch_rsi(address, timeframe, length)
 
 
 def scan_watchlist(pools=None, rsi_low=10.0, rsi_high=90.0, period=RSI_PERIOD,
+                   timeframe="15m",
                    fetcher=None, on_progress=None):
     """逐池计算 RSI，回写 last_rsi/last_price，返回越界命中列表。"""
     if pools is None:
         pools = list_meme_watchlist_pools()
     if fetcher is None:
-        fetcher = _default_rsi_fetcher
+        fetcher = lambda address, length: _default_rsi_fetcher(address, length, timeframe)
 
     enabled = [p for p in pools if p.get("enabled", True)]
     hits = []
@@ -97,10 +98,11 @@ def scan_watchlist(pools=None, rsi_low=10.0, rsi_high=90.0, period=RSI_PERIOD,
     return hits
 
 
-def build_alert_message(hits, rsi_low=10.0, rsi_high=90.0, period=RSI_PERIOD):
+def build_alert_message(hits, rsi_low=10.0, rsi_high=90.0, period=RSI_PERIOD,
+                        timeframe="15m"):
     lines = [
         f"📡【批量 Meme 超卖超买告警】命中 {len(hits)} 个 "
-        f"(RSI({int(period)},5m) >{float(rsi_high):g} 或 <{float(rsi_low):g})"
+        f"(RSI({int(period)},{timeframe}) >{float(rsi_high):g} 或 <{float(rsi_low):g})"
     ]
     for hit in hits:
         price = "未知" if hit.get("price") is None else f"${hit['price']:.6g}"
@@ -117,19 +119,24 @@ def run_batch_meme_rsi_monitor():
     params = get_meme_rsi_params()
     rsi_low = float(params.get("rsi_low", 10))
     rsi_high = float(params.get("rsi_high", 90))
+    timeframe = params.get("timeframe", "15m")
+    if timeframe not in {"15m", "1h"}:
+        timeframe = "15m"
 
     pools = list_meme_watchlist_pools()
     if not pools:
         print("ℹ️ [批量 Meme RSI] 监控列表为空，本轮跳过。")
         return []
 
-    hits = scan_watchlist(pools, rsi_low=rsi_low, rsi_high=rsi_high, period=RSI_PERIOD)
+    hits = scan_watchlist(pools, rsi_low=rsi_low, rsi_high=rsi_high,
+                          period=RSI_PERIOD, timeframe=timeframe)
     if not hits:
         print("✨ [批量 Meme RSI] 本轮无越界标的。")
         return []
 
     text = ("🚀【批量 Meme 超卖超买监控】\n" + "=" * 40 + "\n\n"
-            + build_alert_message(hits, rsi_low=rsi_low, rsi_high=rsi_high, period=RSI_PERIOD))
+            + build_alert_message(hits, rsi_low=rsi_low, rsi_high=rsi_high,
+                                  period=RSI_PERIOD, timeframe=timeframe))
     send_feishu_msg(FEISHU_WEBHOOK, text)
     print(f"🎉 [批量 Meme RSI] 推送 {len(hits)} 个越界标的。")
     return hits

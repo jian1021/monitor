@@ -5,6 +5,7 @@ from app.infrastructure.db.client import get_db_client
 MEME_RSI_PARAM_DEFAULTS = {
     "rsi_low": 10.0,
     "rsi_high": 90.0,
+    "timeframe": "15m",
 }
 
 
@@ -27,7 +28,7 @@ def ensure_meme_watchlist_schema():
         client.execute("""
             CREATE TABLE IF NOT EXISTS meme_rsi_config (
                 param TEXT PRIMARY KEY,
-                value REAL NOT NULL,
+                value TEXT NOT NULL,
                 updated_at TEXT DEFAULT (datetime('now'))
             )
         """)
@@ -166,6 +167,11 @@ def get_meme_rsi_params() -> dict:
             raw = row[1]
             if not isinstance(raw, (int, float, str)):
                 continue
+            if name == "timeframe":
+                value = str(raw).strip()
+                if value in {"15m", "1h"}:
+                    base[name] = value
+                continue
             try:
                 base[name] = float(raw)
             except (TypeError, ValueError):
@@ -189,6 +195,12 @@ def update_meme_rsi_params(params: dict) -> bool:
     try:
         values = []
         for name, raw in known.items():
+            if name == "timeframe":
+                timeframe = str(raw).strip()
+                if timeframe not in {"15m", "1h"}:
+                    continue
+                values.append((name, timeframe))
+                continue
             try:
                 values.append((name, float(raw)))
             except (TypeError, ValueError):

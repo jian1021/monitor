@@ -14,11 +14,9 @@ from app.infrastructure.db.module_settings import (
     get_module_settings,
     update_module_setting,
 )
-from app.application.monitors.rsi import get_meteora_native_rsi
-
 st.set_page_config(page_title="批量 Meme 超卖超买监控", layout="wide")
 st.title("📡 批量 Meme 超卖超买监控")
-st.caption("粘贴 Solana(Meteora) 池子地址生成监控列表；常驻进程按 RSI(3,5m) 越界(>90 或 <10) 合并推送飞书。")
+st.caption("粘贴 Solana(Meteora) 池子地址生成监控列表；常驻进程按所选周期的 RSI(3) 越界合并推送飞书。")
 
 running = bool(get_module_settings().get("meme_rsi_batch", True))
 
@@ -41,8 +39,12 @@ with c2:
 st.divider()
 
 params = get_meme_rsi_params()
-st.caption(f"RSI 周期固定为 {mrb.RSI_PERIOD}（不可改）；下面只调超买 / 超卖阈值。")
-p1, p2, p3 = st.columns([1, 1, 1])
+st.caption(f"RSI 周期固定为 {mrb.RSI_PERIOD}（不可改）；可选 15 分钟或 1 小时 K 线周期。")
+p0, p1, p2, p3 = st.columns([1, 1, 1, 1])
+with p0:
+    timeframe = st.selectbox("K 线周期", ["15m", "1h"],
+                             index=0 if params.get("timeframe", "15m") == "15m" else 1,
+                             format_func={"15m": "15 分钟", "1h": "1 小时"}.get)
 with p1:
     rsi_low = st.number_input("超卖阈值 (RSI <)", min_value=0.0, max_value=100.0,
                               value=float(params["rsi_low"]), step=1.0)
@@ -51,10 +53,11 @@ with p2:
                                value=float(params["rsi_high"]), step=1.0)
 with p3:
     st.write("")
-    if st.button("💾 保存阈值", use_container_width=True):
-        ok = update_meme_rsi_params({"rsi_low": float(rsi_low),
+    if st.button("💾 保存周期和阈值", use_container_width=True):
+        ok = update_meme_rsi_params({"timeframe": timeframe,
+                                     "rsi_low": float(rsi_low),
                                      "rsi_high": float(rsi_high)})
-        st.success("✅ 阈值已保存") if ok else st.error("❌ 保存失败（数据库不可用）")
+        st.success("✅ 周期和阈值已保存；后台监控将在下一轮使用新设置") if ok else st.error("❌ 保存失败（数据库不可用）")
 
 st.divider()
 st.markdown("##### ➕ 导入池子地址")
@@ -83,6 +86,7 @@ if not pools:
 
 df = pd.DataFrame(pools)
 df["meteora_link"] = df["address"].apply(lambda a: f"https://app.meteora.ag/dlmm/{a}")
+st.caption("最新 RSI 值对应所选周期；修改后台告警周期后需点击上方保存按钮生效。")
 st.dataframe(
     df,
     column_config={
@@ -125,8 +129,7 @@ if st.button("🔍 立即扫描一次", type="primary", use_container_width=True
 
         hits = mrb.scan_watchlist(
             pools, rsi_low=float(rsi_low), rsi_high=float(rsi_high),
-            period=mrb.RSI_PERIOD,
-            fetcher=lambda addr, length: get_meteora_native_rsi(addr, "5m", 1, length),
+            period=mrb.RSI_PERIOD, timeframe=timeframe,
             on_progress=_report,
         )
         progress.empty()

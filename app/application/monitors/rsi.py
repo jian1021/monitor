@@ -150,6 +150,81 @@ def _meme_side_usd_price(pool_meta):
         return None
 
 
+def _meteora_meme_usd_price(pool_address):
+    """Fetch the USD price for the non-quote token in a Meteora pool."""
+    try:
+        response = requests.get(
+            f"{METEORA_DATAPI_BASE}/pools/{pool_address}",
+            headers=headers, timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return _meme_side_usd_price(payload) if isinstance(payload, dict) else None
+    except Exception as exc:
+        print(f"⚠️ Meteora [{str(pool_address)[:10]}...] 获取美元价格失败: {exc}")
+        return None
+
+
+def get_meteora_batch_rsi(pool_address, timeframe="15m", length=3):
+    """Batch meme RSI: use aggregated DLMM 5m candles for 15m and native 1h bars."""
+    if timeframe == "1h":
+        return get_meteora_native_rsi(pool_address, "1h", 1, length)
+    if timeframe != "15m":
+        raise ValueError(f"不支持的批量 Meme RSI 周期: {timeframe}")
+
+    now = int(time.time())
+    try:
+        response = requests.get(
+            f"{METEORA_DATAPI_BASE}/pools/{pool_address}/ohlcv",
+            params={"timeframe": "5m", "start_time": now - 96 * 300,
+                    "end_time": now},
+            headers=headers, timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        raw_candles = payload.get("data", []) if isinstance(payload, dict) else []
+        candles = _aggregate_meteora_candles(raw_candles, 900)
+        if len(candles) < length + RSI_BAR_OFFSET - 1:
+            return None, None
+        close = pd.Series([candle["close"] for candle in candles], dtype="float64")
+        rsi, _close = _calc_rsi(close, length)
+    except Exception as exc:
+        print(f"❌ Meteora [{str(pool_address)[:10]}...] 15m RSI 获取失败: {exc}")
+        return None, None
+    return rsi, _meteora_meme_usd_price(pool_address)
+
+
+def _aggregate_meteora_candles(candles, interval_seconds):
+    """Aggregate native Meteora OHLCV rows into fixed UTC candle intervals."""
+    def timestamp_of(row):
+        try:
+            return int(row.get("timestamp", 0))
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            return 0
+
+    buckets = {}
+    for candle in sorted(candles or [], key=timestamp_of):
+        try:
+            timestamp = int(candle["timestamp"])
+            bucket = timestamp // interval_seconds * interval_seconds
+            opened, high = float(candle["open"]), float(candle["high"])
+            low, close = float(candle["low"]), float(candle["close"])
+            volume = float(candle.get("volume") or 0)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        current = buckets.get(bucket)
+        if current is None:
+            buckets[bucket] = {"timestamp": bucket, "open": opened,
+                               "high": high, "low": low, "close": close,
+                               "volume": volume}
+        else:
+            current["high"] = max(current["high"], high)
+            current["low"] = min(current["low"], low)
+            current["close"] = close
+            current["volume"] += volume
+    return [buckets[key] for key in sorted(buckets)]
+
+
 def get_meteora_rsi(pool_address, timeframe="hour", aggregate=1, length=14):
     """Meteora 池 RSI（GeckoTerminal 池 K 线口径；除 meme 低估监控外各调用方共用）。"""
     url = f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/{timeframe}?aggregate={aggregate}&limit=100"
@@ -160,6 +235,8 @@ def get_meteora_rsi(pool_address, timeframe="hour", aggregate=1, length=14):
             df = pd.DataFrame(data_list, columns=["timestamp", "open", "high", "low", "close", "volume"])
             df = df.iloc[::-1].reset_index(drop=True)
             close = df['close'].astype(float)
+            if len(close) < length + RSI_BAR_OFFSET - 1:
+                return None, None
             return _calc_rsi(close, length)
     except Exception as e:
         import traceback
