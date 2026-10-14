@@ -25,14 +25,6 @@ def test_dashboard_logout_uses_canonical_session_key():
     assert _session_subscript_keys("pages/dashboard.py") <= {"logged_in"}
 
 
-def test_robinhood_parse_created_at_handles_microseconds():
-    from app.application.monitors.robinhood_pump import parse_created_at
-
-    assert abs(parse_created_at(1_757_000_000_000_000) - 1_757_000_000.0) < 1.0
-    assert abs(parse_created_at(1_757_000_000_000) - 1_757_000_000.0) < 1.0
-    assert abs(parse_created_at(1_757_000_000) - 1_757_000_000.0) < 1.0
-
-
 def test_price_alert_ddl_single_sourced():
     page_src = (REPO_ROOT / "pages" / "st_monitor_price.py").read_text(
         encoding="utf-8")

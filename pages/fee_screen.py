@@ -165,6 +165,12 @@ def render_page() -> None:
                 "| 每日成交量序列 / 5m 官方 K 线 / 奖励数据 | — | ❌ 不可用（界面标记，不编造） |\n"
             )
 
+            st.divider()
+            st.markdown("##### ⚙️ 后台监控设置")
+            st.caption("仅控制常驻后台进程 `python main.py` 中的全池扫描监控（开关 + 轮询间隔）；"
+                       "页面上的手动查询或扫描不受影响，此处修改实时生效。")
+            render_monitor_controls("fee_screen", "Robinhood 全池扫描")
+
 
     # ================================================================ 页面二
     def render_pools_tab() -> None:
@@ -633,17 +639,6 @@ def render_page() -> None:
         render_monitor_tab()
     if tab_observer.open:
         render_observer_tab()
-
-    st.divider()
-    with st.container(border=True):
-        st.subheader("⚙️ 后台监控设置")
-        st.caption(
-            "以下是三个独立后台任务的开关和轮询间隔：全池扫描、新池策略和 rhpools 索引监控分别运行，"
-            "设置仅影响常驻进程 `python main.py`，手动查询不受影响。"
-        )
-        render_monitor_controls("fee_screen", "Robinhood 全池扫描")
-        render_monitor_controls("robinhood_pump", "Robinhood 新池策略")
-        render_monitor_controls("rhpools", "Robinhood 索引与价差监控")
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Robinhood 全池扫描", page_icon="🦅", layout="wide")

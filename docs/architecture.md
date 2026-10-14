@@ -17,7 +17,7 @@ domain -X-> Streamlit / database / external APIs（由架构测试检查）
 | 层 | 组织方式 | 现状示例 |
 |---|---|---|
 | `app/application/<功能>/` | 一个功能域一个文件夹；今天只有 1 个文件也用文件夹（功能会长，晚改目录不如早定边界） | `fee_screen/`(3 文件)、`rhpools/`、`lp_tools/`、`lp_alert/`、`assets/`、`monitoring/`、`lp_bands/` |
-| `app/application/monitors/` | **遗留单文件监控的隔离区**：5 个老监控脚本平铺于此，只许改不许长；新功能一律建自己的文件夹，不再往这里加 | `rsi.py`、`meme_underval.py`、`meme_rsi_batch.py`、`robinhood_pump.py`、`price.py` |
+| `app/application/monitors/` | **遗留单文件监控的隔离区**：4 个老监控脚本平铺于此，只许改不许长；新功能一律建自己的文件夹，不再往这里加 | `rsi.py`、`meme_underval.py`、`meme_rsi_batch.py`、`price.py` |
 | `app/domain/<子域>/` | 按子域分文件夹（纯逻辑，无 IO） | `fee_screen/`、`lp_alert/`、`monitoring/` |
 | `app/infrastructure/<边界>/` | 按外部系统或技术边界分文件夹 | `db/`(每功能一个 store 文件)、`market_data/`(每数据源一个文件)、`rhpools/`、`lp_tools/`、`notifications/` |
 | `app/interfaces/` | 页面共用的 UI 组件（渲染层，依赖 streamlit） | `asset_config.py`、`asset_grid.py` |

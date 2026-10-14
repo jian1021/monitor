@@ -25,7 +25,6 @@ APP_MODULES = [
     "app.application.monitoring.scheduler",
     "app.infrastructure.notifications.feishu",
     "app.infrastructure.rhpools.client",
-    "app.application.rhpools.monitor",
     "app.infrastructure.lp_tools.runner",
     "app.application.lp_tools.monitor",
     "app.infrastructure.db.apr_watchlist",

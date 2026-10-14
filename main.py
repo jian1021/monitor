@@ -19,8 +19,6 @@ from app.infrastructure.db.intervals import DEFAULT_INTERVALS, get_module_interv
 from app.infrastructure.db.module_settings import get_module_settings
 from app.application.monitors.meme_underval import run_meme_underval_monitor
 from app.application.monitors.meme_rsi_batch import run_batch_meme_rsi_monitor
-from app.application.monitors.robinhood_pump import run_monitor
-from app.application.rhpools.monitor import run_rhpools_monitor
 from app.application.lp_tools.monitor import run_lp_apr_monitor
 from app.application.fee_screen.monitor import run_fee_screen_monitor
 from app.application.exit_strategy.monitor import run_monitor as run_exit_strategy_monitor
@@ -333,16 +331,6 @@ def _run_meme_rsi_batch():
         traceback.print_exc()
 
 
-def _run_robinhood_pump():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 RobinHood pump 策略监控")
-    try:
-        run_monitor()
-    except Exception as e:
-        print(f"❌ run_monitor() 发生异常：{e}")
-        traceback.print_exc()
-
-
 def _run_lp_alert():
     print(f"\n{'='*50}")
     print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 LP 仓位 / 池子价格告警")
@@ -351,16 +339,6 @@ def _run_lp_alert():
         run_lp_alert_once()
     except Exception as e:
         print(f"❌ lp_position_alert 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_rhpools():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 Robinhood Pools 观测站监控")
-    try:
-        run_rhpools_monitor()
-    except Exception as e:
-        print(f"❌ run_rhpools_monitor 发生异常：{e}")
         traceback.print_exc()
 
 
@@ -401,9 +379,7 @@ def build_scheduler() -> MonitoringScheduler:
     registry.register(MonitorSpec("onchain_token", "onchain_token", _run_onchain_token))
     registry.register(MonitorSpec("meme_underval", "meme_underval", _run_meme_underval))
     registry.register(MonitorSpec("meme_rsi_batch", "meme_rsi_batch", _run_meme_rsi_batch))
-    registry.register(MonitorSpec("robinhood_pump", "robinhood_pump", _run_robinhood_pump))
     registry.register(MonitorSpec("lp_alert", "lp_alert", _run_lp_alert))
-    registry.register(MonitorSpec("rhpools", "rhpools", _run_rhpools))
     registry.register(MonitorSpec("lp_apr", "lp_apr", _run_lp_apr))
     registry.register(MonitorSpec("fee_screen", "fee_screen", _run_fee_screen))
     registry.register(MonitorSpec("meteora_scan", "meteora_scan", _run_meteora_scan))

@@ -15,7 +15,7 @@ def render_robinhood_observer() -> None:
     with st.container(border=True):
         st.subheader("🖥️ 后台运行与开始扫描")
         st.caption(
-            "启用页面底部的 rhpools 后台监控后，运行中的 `python main.py` 会按设定间隔检查并自动拉起索引服务。"
+            "运行中的 `python main.py` 会在执行「Robinhood 全池扫描」监控时按需检查并自动拉起索引服务。"
             "点击下方按钮可立即启动服务；索引器启动后会在后台持续扫描，关闭网页不会中断。"
         )
         address_col, state_col, action_col = st.columns([2, 1, 2])
