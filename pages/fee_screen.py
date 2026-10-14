@@ -64,7 +64,8 @@ def render_page() -> None:
 
     tab_config, tab_pools, tab_detail, tab_monitor = st.tabs(
         ["🎚️ 筛选参数（页面一）", "📋 流动池列表（页面二）",
-         "🔎 单池详情（页面三）", "🔔 监控与报警（页面四）"])
+         "🔎 单池详情（页面三）", "🔔 监控与报警（页面四）"],
+        on_change="rerun", key="fee_screen_tabs")
 
 
     # ================================================================ 页面一
@@ -614,10 +615,14 @@ def render_page() -> None:
                        "风险原因与数据时间；去重后同一风险不会反复推送。")
 
 
-    render_config_tab()
-    render_pools_tab()
-    render_detail_tab()
-    render_monitor_tab()
+    if tab_config.open:
+        render_config_tab()
+    if tab_pools.open:
+        render_pools_tab()
+    if tab_detail.open:
+        render_detail_tab()
+    if tab_monitor.open:
+        render_monitor_tab()
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Robinhood 全池扫描", page_icon="🦅", layout="wide")

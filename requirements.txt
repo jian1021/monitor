@@ -1,4 +1,4 @@
-streamlit>=1.30
+streamlit>=1.55,<2
 requests
 pandas
 ta

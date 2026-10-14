@@ -145,22 +145,13 @@ def render_status_bar() -> None:
     failures = dlmm_status.get("failures") or 0
     last_scan = dlmm_status.get("last_scan_time") or "-"
 
-    # 符合条件的池数量 + 市值缺失
-    rows = load_pools(data_signature())
-    evald = get_evaluated()
-    matched = sum(1 for r in evald if r["passed"])
-    mcap_missing = sum(1 for r in rows if r.get("token_x_market_cap") in (None, 0)
-                       and r.get("token_y_market_cap") in (None, 0))
-
     st.markdown(f"### 📈 {config.APP_TITLE} {config.APP_VERSION}")
-    c = st.columns(7)
+    c = st.columns(5)
     c[0].metric("当前扫描类型", current)
     c[1].metric("DLMM 已发现", f"{dlmm_found:,}")
     c[2].metric("已处理池数", f"{processed:,}")
-    c[3].metric("符合筛选", f"{matched:,}")
-    c[4].metric("市值缺失", f"{mcap_missing:,}")
-    c[5].metric("API 失败", f"{failures:,}")
-    c[6].metric("最后扫描", last_scan[11:19] if len(last_scan) > 11 else last_scan)
+    c[3].metric("API 失败", f"{failures:,}")
+    c[4].metric("最后扫描", last_scan[11:19] if len(last_scan) > 11 else last_scan)
 
     # 覆盖范围
     cov = []
@@ -721,11 +712,12 @@ PAGE_DESCRIPTIONS = {
 
 def main() -> None:
     render_status_bar()
-    tabs = st.tabs(list(PAGES))
+    tabs = st.tabs(list(PAGES), on_change="rerun", key="meteora_scanner_tabs")
     for (label, render_page), tab in zip(PAGES.items(), tabs):
-        with tab:
-            st.caption(PAGE_DESCRIPTIONS[label])
-            render_page()
+        if tab.open:
+            with tab:
+                st.caption(PAGE_DESCRIPTIONS[label])
+                render_page()
 
 
 if __name__ == "__main__":
