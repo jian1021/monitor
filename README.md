@@ -72,11 +72,11 @@ LIBSQL_TOKEN=
 ROBINHOOD_RPC=
 ```
 
-Meteora 扫描器仅支持 DLMM，数据源与飞书配置可放在 `app/application/meteora_scanner/.env`。本地 `.env` 和数据库文件不会提交到仓库。
+Meteora 扫描器仅支持 DLMM。飞书 Webhook 与其他模块统一配置在 `app/core/.env` 或部署环境变量 `FEISHU_WEBHOOK`；Meteora 签名密钥可选配置在其模块 `.env`。本地 `.env` 和数据库文件不会提交到仓库。
 
 ## 功能说明
 
-统一看板在左侧导航中提供全链扫描、策略与数据和系统管理模块。“全链扫描”页面使用标签页直接展示链上代币管理、批量 Meme RSI、Solana Meteora DLMM 扫描及 Robinhood Chain Uniswap 全池扫描。Meteora 扫描结果可人工挑选并加入链上 Meme 监控；退出策略可人工选池，并按价格下限、RSI(3) 或布林带条件发送飞书告警。后台 `main.py` 负责按模块设置的间隔执行监控。
+统一看板在左侧导航中提供全链扫描、策略与数据和系统管理模块。“全链扫描”页面使用标签页直接展示链上代币管理、批量 Meme RSI、Solana Meteora DLMM 扫描及 Robinhood Chain Uniswap 全池扫描。所有模块统一读取环境变量 `FEISHU_WEBHOOK` 发送飞书通知；Meteora 后台扫描完整结束后会按已保存的筛选条件评估结果并报警。Meteora 可选签名密钥仍由 `FEISHU_WEBHOOK_SECRET` 提供。退出策略可人工选池，并按价格下限、RSI(3) 或布林带条件发送飞书告警。后台 `main.py` 负责按模块设置的间隔执行监控。
 
 ## 文档
 

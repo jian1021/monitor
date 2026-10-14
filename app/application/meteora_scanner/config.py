@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from app.core.settings import FEISHU_WEBHOOK
 
 # Meteora 模块目录；其配置与持久化数据由主项目统一管理。
 MODULE_ROOT = Path(__file__).resolve().parent
@@ -74,7 +75,6 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 # --------------------------------------------------------------------------
 # 飞书
 # --------------------------------------------------------------------------
-FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL", "").strip()
 FEISHU_WEBHOOK_SECRET = os.getenv("FEISHU_WEBHOOK_SECRET", "").strip()
 
 # --------------------------------------------------------------------------

@@ -14,7 +14,7 @@ cd token-reversal-monitor
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export FEISHU_WEBHOOK='粘贴你的飞书机器人Webhook'  # 可选，也可在网页侧栏输入
+export FEISHU_WEBHOOK='粘贴你的飞书机器人Webhook'  # 可选，也可在网页输入
 streamlit run app.py
 ```
 

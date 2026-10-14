@@ -25,7 +25,9 @@ from app.application.lp_tools.monitor import run_lp_apr_monitor
 from app.application.fee_screen.monitor import run_fee_screen_monitor
 from app.application.exit_strategy.monitor import run_monitor as run_exit_strategy_monitor
 from app.application.meteora_scanner import config as meteora_config
+from app.application.meteora_scanner.alerts import evaluate_saved_scan
 from app.application.meteora_scanner.db import Database as MeteoraDatabase
+from app.application.meteora_scanner.feishu import FeishuAlerter as MeteoraFeishuAlerter
 from app.application.meteora_scanner.scanner import Scanner as MeteoraScanner
 from app.application.lp_alert.service import run_once as run_lp_alert_once
 from app.infrastructure.db.lp_alert import ensure_table as ensure_lp_alert_table
@@ -77,6 +79,16 @@ def _run_meteora_scan():
                 list(meteora_config.SUPPORTED_POOL_TYPES), resume=True
             )
             print(f"✅ Meteora 全池扫描完成：{result}")
+            if result and all(item.get("state") == "done" for item in result.values()):
+                alerter = MeteoraFeishuAlerter(
+                    scanner.db,
+                    FEISHU_WEBHOOK,
+                    meteora_config.FEISHU_WEBHOOK_SECRET,
+                )
+                alert_stats = evaluate_saved_scan(scanner.db, alerter)
+                print(f"📨 Meteora 筛选结果飞书评估：{alert_stats}")
+            else:
+                print("⏭️ 扫描未完整完成，本轮不评估筛选结果或发送飞书报警")
         except Exception as exc:  # noqa: BLE001
             print(f"❌ Meteora 全池扫描异常：{exc}")
             traceback.print_exc()

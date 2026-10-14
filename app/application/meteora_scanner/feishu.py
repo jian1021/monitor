@@ -74,7 +74,7 @@ class FeishuAlerter:
 
     def _post(self, text: str) -> tuple[bool, str]:
         if not self.configured:
-            return False, "未配置 FEISHU_WEBHOOK_URL"
+            return False, "未配置 FEISHU_WEBHOOK（项目统一飞书配置）"
         try:
             resp = requests.post(
                 self.webhook_url,

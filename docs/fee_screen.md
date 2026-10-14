@@ -47,7 +47,7 @@ rhpools 服务由 `app/infrastructure/rhpools/client.py` 自动拉起（默认
 
 - 筛选参数：页面一修改并保存（`fee_screen_settings` 表，主循环共用）。
 - 监控参数：监控子标签（下降阈值、top_n、轮询间隔）。
-- 飞书：使用共享配置 `FEISHU_WEBHOOK`。
+- 飞书：使用共享环境变量 `FEISHU_WEBHOOK`。
 
 ## 告警与去重
 

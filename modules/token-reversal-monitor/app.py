@@ -35,14 +35,12 @@ with c_break:
     breakout_m = st.number_input("局部高点观察根数", min_value=3, max_value=12, value=6)
 with c_webhook:
     webhook_env = os.getenv("FEISHU_WEBHOOK", "").strip()
-    if webhook_env:
-        webhook = webhook_env
-        st.success("飞书 Webhook 已从 env / .env 加载")
-        st.caption("无需在页面输入")
+    webhook = webhook_env
+    if webhook:
+        st.success("飞书 Webhook 已从 FEISHU_WEBHOOK 加载")
     else:
-        webhook = st.text_input("飞书机器人 Webhook", type="password",
-                                help="未检测到 FEISHU_WEBHOOK，此处手动输入；建议改配到 .env 或环境变量。")
-        st.caption("建议配置在 .env 或环境变量 FEISHU_WEBHOOK 中。Webhook 属于密钥，不要公开或提交到 Git。")
+        st.warning("未配置 FEISHU_WEBHOOK，飞书报警不可用")
+    st.caption("所有模块统一从环境变量读取；Webhook 属于密钥，不要公开或提交到 Git。")
 st.divider()
 
 

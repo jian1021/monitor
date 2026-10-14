@@ -119,3 +119,19 @@ def evaluate_after_scan(
                     stats["skipped_duplicate"] += 1
 
     return stats
+
+
+def evaluate_saved_scan(db: Database, alerter: FeishuAlerter) -> dict:
+    """Apply the persisted scanner filters and alert on a completed background scan."""
+    from . import config
+    from .filters import apply_filters
+
+    filters = {**config.DEFAULT_FILTERS, **(db.get_setting("filters") or {})}
+    rows = apply_filters(db.load_pools(config.SUPPORTED_POOL_TYPES), filters)
+    return evaluate_after_scan(
+        db,
+        alerter,
+        rows,
+        volume_threshold=filters.get("min_volume_24h"),
+        fee_tvl_threshold=filters.get("min_fee_tvl_ratio"),
+    )

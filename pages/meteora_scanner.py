@@ -1,10 +1,8 @@
 """
 Meteora 全池扫描与筛选器 V3.1 - Streamlit 主程序。
 
-页面（文档 11.）：
-  1. 全池扫描  2. 筛选条件  3. 筛选结果  4. 重点池监控
-  5. 历史数据  6. 飞书报警设置  7. API 状态与错误日志  8. 使用说明
-  9. 价格区间计算（输入池地址，实时获取当前价格与 ATR，按倍数计算上下价）
+页面：
+  1. 全池扫描  2. 筛选条件  3. 筛选结果  4. API 状态与错误日志  5. 使用说明
 
 数据全部来自 Meteora 官方 DLMM API，绝不生成模拟数据。
 """
@@ -20,10 +18,8 @@ import pandas as pd
 import streamlit as st
 
 from app.application.meteora_scanner import config
-from app.application.meteora_scanner.alerts import evaluate_after_scan
 from app.application.meteora_scanner.db import Database
 from app.application.meteora_scanner.filters import apply_filters, to_bool
-from app.application.meteora_scanner.monitor import Monitor
 from app.application.meteora_scanner.price_range import (DEFAULT_ATR_PERIOD, DEFAULT_MULTIPLIER, DEFAULT_POOL_TIMEFRAME,
                              DEFAULT_TIMEFRAME, POOL_TIMEFRAMES, TIMEFRAMES, compute_range,
                              fetch_market, fetch_pool_market, resolve_coin, resolve_pool)
@@ -31,7 +27,6 @@ from app.application.meteora_scanner.providers import coingecko, dexpaprika
 from app.application.meteora_scanner.scanner import Scanner
 from app.application.meteora_scanner.scoring import (COMPONENT_LABELS, DEFAULT_WEIGHTS, compute_score,
                          formula_text, stability_score, volatility_score_fallback)
-from app.application.meteora_scanner.feishu import FeishuAlerter
 from app.interfaces.monitor_controls import render_monitor_controls
 
 if __name__ == "__main__":
@@ -107,13 +102,6 @@ def get_evaluated() -> list[dict]:
         cache = {"key": key, "rows": apply_filters(load_pools(data_signature()), filters)}
         st.session_state["_eval_cache"] = cache
     return cache["rows"]
-
-
-def get_alerter() -> FeishuAlerter:
-    if "alerter" not in st.session_state:
-        st.session_state.alerter = FeishuAlerter(
-            get_db(), config.FEISHU_WEBHOOK_URL, config.FEISHU_WEBHOOK_SECRET)
-    return st.session_state.alerter
 
 
 # ===========================================================================
@@ -275,16 +263,7 @@ def page_scan() -> None:
     else:
         st.caption("尚无扫描记录。")
 
-    st.subheader("扫描后报警评估")
-    feishu_on = st.checkbox("扫描完成后评估并发送报警", value=False, disabled=not get_alerter().configured)
-    if not get_alerter().configured:
-        st.caption("未配置飞书 Webhook，报警不可用（见“飞书报警设置”页）。")
-    if feishu_on and st.button("立即对当前结果评估报警"):
-        evald = get_evaluated()
-        stats = evaluate_after_scan(db, get_alerter(), evald,
-                                    volume_threshold=get_filters().get("min_volume_24h"),
-                                    fee_tvl_threshold=get_filters().get("min_fee_tvl_ratio"))
-        st.json(stats)
+    st.caption("后台扫描完整结束后，会按已保存的筛选条件自动评估结果并发送飞书报警。")
 
 
 # ===========================================================================
@@ -479,8 +458,7 @@ def page_results() -> None:
                f"市值缺失（默认不通过）需在排查模式查看。")
     st.caption("数据来源：池行情与代币指标（持仓数 / 前10持仓占比 / 开发方持仓占比 / 冻结与铸币授权 / "
                "开仓人数）均来自 Meteora 官方池发现接口，随扫描一并获取；缺失字段标记为「数据不足（已跳过）」。")
-    st.caption("行情为上次扫描时的快照；如需最新市值/价格，请选中行后点击下方「🔄 刷新选中池实时数据」"
-               "（按池地址实时重取，无需整池重扫）。")
+    st.caption("行情为上次扫描时的快照。可勾选通过筛选的结果，并在下方导入 Meme 超买超卖监控列表。")
 
     sort_col = st.selectbox("排序字段", ["评分", "代币X市值", "代币Y市值", "24h成交量", "TVL",
                                           "24h手续费收入", "24hFeesTVL%"])
@@ -513,192 +491,47 @@ def page_results() -> None:
     )
 
     selected = event.selection.rows if event and event.selection else []
-    add_col, meme_col, refresh_col, exp_col = st.columns(4)
-    with add_col:
-        if st.button("➕ 加入重点池监控（选中行）", disabled=not selected):
-            n = 0
-            for idx in selected:
-                addr = view.iloc[idx]["池地址"]
-                ptype = view.iloc[idx]["池类型"]
-                get_db().add_watch(addr, ptype)
-                n += 1
-            st.success(f"已加入 {n} 个池到重点监控。")
-    with meme_col:
-        candidates = []
-        for idx in selected:
-            row = view.iloc[idx]
-            pool = get_db().get_pool(str(row.get("池地址", ""))) or {}
-            for side in ("x", "y"):
-                mint = pool.get(f"token_{side}_mint")
-                symbol = row.get(f"代币{side.upper()}")
-                if isinstance(mint, str) and mint.strip():
-                    label = f"{symbol} · {mint[:8]}… ({row.get('池地址', '')[:8]}…)"
-                    candidates.append((label, str(row.get("池地址", "")).strip(), str(symbol or "")))
-        labels = {label: (mint, symbol) for label, mint, symbol in candidates}
-        chosen_meme = st.multiselect(
-            "加入链上代币 / Meme 模块",
-            options=list(labels),
-            key="scanner_meme_candidates",
-            disabled=not candidates,
-            help="先勾选池子，再挑选要跟踪的代币；Meme 模块按对应 Meteora 池地址获取行情。",
+    csv = df_sorted.to_csv(index=False).encode("utf-8-sig")
+    st.download_button("⬇️ 导出 CSV", data=csv,
+                       file_name=f"meteora_filtered_{now_str().replace(':', '')}.csv",
+                       mime="text/csv")
+
+    selected_pools = {}
+    for idx in selected:
+        row = view.iloc[idx]
+        if row.get("通过") != "✅":
+            continue
+        address = str(row.get("池地址") or "").strip()
+        if not address:
+            continue
+        label = (f"{row.get('代币X') or '?'} / {row.get('代币Y') or '?'} · "
+                 f"{address[:10]}…")
+        selected_pools[label] = (address, f"{row.get('代币X') or '?'}-{row.get('代币Y') or '?'}")
+
+    with st.container(border=True):
+        st.subheader("➕ 导入到 Meme 超买超卖监控列表")
+        st.caption("先在上方结果表勾选通过筛选的池子，再选择要导入的池。")
+        labels = st.multiselect(
+            "选择导入池子", options=list(selected_pools),
+            key="scanner_meme_pools_to_import", disabled=not selected_pools,
         )
-        if st.button("➕ 添加到 Meme 监控", disabled=not chosen_meme):
+        if not selected_pools:
+            st.info("请先勾选一条或多条通过筛选的结果。")
+        if st.button("添加到 Meme 超买超卖监控", type="primary", disabled=not labels):
             from app.infrastructure.db.meme_watchlist import add_meme_pools
 
-            n = add_meme_pools([labels[label] for label in chosen_meme])
-            st.success(f"已添加/更新 {n} 个池，可在“链上代币 → 批量Meme超卖超买”管理。")
-    with refresh_col:
-        if st.button("🔄 刷新选中池实时数据", disabled=not selected,
-                     help="按池地址重新拉取 Meteora 官方最新行情并回写（市值/价格/TVL/手续费等实时更新），"
-                          "无需整池重扫。"):
-            mon = Monitor(get_db(), get_scanner(), get_alerter())
-            ok = 0
-            for idx in selected:
-                addr = view.iloc[idx]["池地址"]
-                row = get_db().get_pool(addr)
-                if row and mon.refresh_pool(row):
-                    ok += 1
-            st.session_state["_results_flash"] = f"已刷新 {ok}/{len(selected)} 个池的最新行情。"
-            st.session_state.refresh_counter = st.session_state.get("refresh_counter", 0) + 1
-            st.rerun()
-    with exp_col:
-        csv = df_sorted.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ 导出 CSV", data=csv,
-                           file_name=f"meteora_filtered_{now_str().replace(':', '')}.csv",
-                           mime="text/csv")
-
-
-# ===========================================================================
-# 页面 4：重点池监控
-# ===========================================================================
-def page_monitor() -> None:
-    st.header("④ 重点池监控")
-    db = get_db()
-    watch = db.list_watch()
-    st.caption(f"监控列表共 {len(watch)} 个池。")
-    if not watch:
-        st.info("尚未添加监控池。请在“筛选结果”页选中池后加入监控。")
-        return
-
-    df = pd.DataFrame(watch)
-    st.dataframe(df[["pool_address", "pool_type", "added_at", "enabled", "paused", "note"]],
-                 use_container_width=True, hide_index=True)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        addr = st.selectbox("选择池", [w["pool_address"] for w in watch])
-    with c2:
-        act = st.selectbox("操作", ["启用", "暂停", "删除"])
-    with c3:
-        if st.button("执行"):
-            if act == "启用":
-                db.set_watch_state(addr, enabled=True, paused=False)
-            elif act == "暂停":
-                db.set_watch_state(addr, paused=True)
+            added = add_meme_pools([selected_pools[label] for label in labels])
+            if added:
+                st.success(f"已导入 {added} 个池。可在“链上代币 → 批量 Meme 超买超卖”中查看。")
             else:
-                db.remove_watch(addr)
-            st.rerun()
-
-    st.divider()
-    if st.button("🔄 刷新监控池指标并保存快照", type="primary"):
-        monitor = Monitor(db, get_scanner(), get_alerter())
-        with st.spinner("刷新中…"):
-            summary = monitor.refresh(get_weights())
-        st.success(f"已刷新 {summary['refreshed']}/{summary['total']}，失败 {summary['failed']}，"
-                   f"触发信号 {summary['signals_found']}，报警 {summary['alerts']}")
-        st.session_state.refresh_counter = st.session_state.get("refresh_counter", 0) + 1
-
-    # 监控池快照与信号
-    for w in watch:
-        addr = w["pool_address"]
-        snaps = db.get_snapshots(addr, 60)
-        with st.expander(f"{addr}  ({w.get('pool_type')})"):
-            if not snaps:
-                st.caption("暂无快照。点击上方“刷新监控池指标”以生成。")
-                continue
-            sdf = pd.DataFrame(snaps).sort_values("ts")
-            last = sdf.iloc[-1]
-            m = st.columns(4)
-            m[0].metric("TVL", fmt_num(last.get("tvl")))
-            m[1].metric("24h 成交量", fmt_num(last.get("volume_24h")))
-            m[2].metric("24h 手续费", fmt_num(last.get("fees_24h")))
-            m[3].metric("评分", f"{last.get('score')}")
-            st.caption("反转/观察信号（与评分类别分开，不用于推算 LP 收益）：" +
-                       (", ".join(last.get("signals") or []) or "无"))
-            show = sdf[["ts", "tvl", "volume_24h", "fees_24h", "fee_tvl_ratio", "score"]]
-            st.line_chart(show.set_index("ts")[["tvl", "volume_24h", "fees_24h"]])
-            st.dataframe(show.tail(20), use_container_width=True, hide_index=True)
+                st.error("导入失败，请检查数据库配置。")
 
 
 # ===========================================================================
-# 页面 5：历史数据
-# ===========================================================================
-def page_history() -> None:
-    st.header("⑤ 历史数据")
-    db = get_db()
-    watch = db.list_watch()
-    all_pools = load_pools(data_signature())
-    options = [w["pool_address"] for w in watch] + [p["pool_address"] for p in all_pools[:500]]
-    options = list(dict.fromkeys(options))
-    if not options:
-        st.info("暂无数据。请先扫描或添加监控池。")
-        return
-    addr = st.selectbox("选择池地址", options)
-    snaps = db.get_snapshots(addr, 1000)
-    if not snaps:
-        st.info("该池暂无历史快照。快照在“重点池监控”刷新时生成。")
-        return
-    sdf = pd.DataFrame(snaps).sort_values("ts")
-    st.dataframe(sdf, use_container_width=True, hide_index=True)
-    st.download_button("⬇️ 导出该池历史 CSV",
-                       data=sdf.to_csv(index=False).encode("utf-8-sig"),
-                       file_name=f"history_{addr}.csv", mime="text/csv")
-    st.line_chart(sdf.set_index("ts")[["tvl", "volume_24h", "fees_24h", "fee_tvl_ratio", "score"]])
-
-
-# ===========================================================================
-# 页面 6：飞书报警设置
-# ===========================================================================
-def page_feishu() -> None:
-    st.header("⑥ 飞书报警设置")
-    alerter = get_alerter()
-    db = get_db()
-    if alerter.configured:
-        st.success("已从 .env 读取 FEISHU_WEBHOOK_URL。")
-    else:
-        st.warning("未配置 Webhook。请在项目根目录 .env 中填写 FEISHU_WEBHOOK_URL（参考 .env.example）。"
-                   "密钥不硬编码、不提交到 Git。")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("发送测试报警", disabled=not alerter.configured):
-            ok, msg = alerter.test()
-            (st.success if ok else st.error)(msg)
-    with c2:
-        st.caption("相同池子+事件按时间窗去重（新池/市值 24h，阈值 6h，监控变化 3h）。")
-
-    st.divider()
-    st.subheader("阈值报警配置（用于扫描后评估）")
-    th1, th2 = st.columns(2)
-    th1.number_input("成交量报警阈值（USD）", min_value=0.0,
-                     value=float(get_filters().get("min_volume_24h", 100000.0)), key="alert_vol")
-    th2.number_input("Fees/TVL 报警阈值（%）", min_value=0.0,
-                     value=float(get_filters().get("min_fee_tvl_ratio", 0.5)), key="alert_ftr")
-
-    st.divider()
-    st.subheader("发送记录（含失败原因）")
-    alerts = db.get_alerts(200)
-    if alerts:
-        st.dataframe(pd.DataFrame(alerts), use_container_width=True, hide_index=True)
-    else:
-        st.caption("暂无报警记录。")
-
-
-# ===========================================================================
-# 页面 7：API 状态与错误日志
+# 页面 4：API 状态与错误日志
 # ===========================================================================
 def page_api_status() -> None:
-    st.header("⑦ API 状态与错误日志")
+    st.header("④ API 状态与错误日志")
     db = get_db()
     st.subheader("接口信息（已实测验证）")
     st.markdown(f"""
@@ -721,17 +554,18 @@ def page_api_status() -> None:
 
 
 # ===========================================================================
-# 页面 8：使用说明
+# 页面 5：使用说明
 # ===========================================================================
 def page_help() -> None:
-    st.header("⑧ 使用说明")
+    st.header("⑤ 使用说明")
     st.markdown("""
 ### 快速开始
-1. 按项目 README 配置环境变量；飞书 Webhook 为可选项。
-2. 在主项目根目录运行 `streamlit run index.py`。
+1. 按项目 README 配置环境变量；飞书 Webhook 全项目统一使用 `FEISHU_WEBHOOK`，Meteora 可选签名密钥为 `FEISHU_WEBHOOK_SECRET`。
+2. 在主项目根目录运行 `streamlit run index.py`；需要后台扫描时同时运行 `python main.py`。
 3. 进入「全池扫描」，点击「开始扫描」。首次为全量扫描，耗时较长，可随时停止并断点续扫。
 4. 在「筛选条件」调整市值/成交量/TVL/Fees-TVL 与评分权重并保存。
-5. 在「筛选结果」查看、排序、导出 CSV，选中行加入「重点池监控」。
+5. 后台扫描完整结束后，会按已保存筛选条件评估结果并通过飞书报警（需要后台进程及 Webhook 配置）。
+6. 在「筛选结果」查看、排序、导出 CSV；勾选通过筛选的池后，可导入「链上代币 → 批量 Meme 超买超卖」监控列表。
 
 ### 数据说明与口径
 - 市值：DLMM 直接使用官方 `market_cap`，缺失时保留为空。
@@ -754,7 +588,7 @@ def page_help() -> None:
 
 
 # ===========================================================================
-# 页面 9：价格区间计算（ATR）
+# 价格区间计算（ATR）；由全链扫描工作区作为独立标签页呈现
 # ===========================================================================
 def _fmt_price(v) -> str:
     """价格显示：保留 8 位有效数字，适配大价格与极小价格。"""
@@ -763,8 +597,8 @@ def _fmt_price(v) -> str:
     return f"{float(v):,.8g}"
 
 
-def page_price_range() -> None:
-    st.header("⑨ 价格区间计算（ATR）")
+def render_price_range() -> None:
+    st.header("📐 价格区间计算（ATR）")
     st.caption("输入 **池地址**（DEX Paprika **池级 K 线**）或 **代币**（CoinGecko 代币 K 线），"
                "实时获取美元价格与 K 线，用 **ta 库**计算 ATR，按倍数（默认 1.5）计算上下价格区间：")
     st.markdown("**上价 = 当前价格 + 倍数 × ATR**　｜　**下价 = 当前价格 − 倍数 × ATR**")
@@ -872,24 +706,16 @@ PAGES = {
     "① 全池扫描": page_scan,
     "② 筛选条件": page_filters,
     "③ 筛选结果": page_results,
-    "④ 重点池监控": page_monitor,
-    "⑤ 历史数据": page_history,
-    "⑥ 飞书报警设置": page_feishu,
-    "⑦ API 状态与错误日志": page_api_status,
-    "⑧ 使用说明": page_help,
-    "⑨ 价格区间计算": page_price_range,
+    "④ API 状态与错误日志": page_api_status,
+    "⑤ 使用说明": page_help,
 }
 
 PAGE_DESCRIPTIONS = {
     "① 全池扫描": "启动 DLMM 池扫描并查看实时进度。",
     "② 筛选条件": "配置市值、成交量、持有人和风险规则。",
     "③ 筛选结果": "查看通过筛选的池及评分详情。",
-    "④ 重点池监控": "管理重点池并查看监控信号。",
-    "⑤ 历史数据": "查询历史扫描结果和池数据。",
-    "⑥ 飞书报警设置": "配置报警规则和飞书通知。",
-    "⑦ API 状态与错误日志": "查看数据源状态、请求统计和错误记录。",
-    "⑧ 使用说明": "查看扫描器功能与使用帮助。",
-    "⑨ 价格区间计算": "按池子行情和 ATR 计算价格区间。",
+    "④ API 状态与错误日志": "查看数据源状态、请求统计和错误记录。",
+    "⑤ 使用说明": "查看扫描器功能与使用帮助。",
 }
 
 

@@ -93,7 +93,7 @@ python main.py --loop       # 常驻，按 RADAR_POLL_INTERVAL_SECONDS 轮询
 ## 配置
 
 所有阈值集中在 `config.py` 的 `RadarConfig`，并可用环境变量覆盖
-（`RADAR_` + 字段名大写；飞书 Webhook 例外，用 `FEISHU_WEBHOOK`）。常用项：
+（`RADAR_` + 字段名大写；飞书 Webhook 统一使用 `FEISHU_WEBHOOK`）。常用项：
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
