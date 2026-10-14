@@ -4,8 +4,6 @@
 1. Robinhood Chain 官方 RPC（链验证）
 2. rhpools 索引服务（链 4663 池子/成交量/手续费/流动性，链上事件索引）
 3. DexScreener（chainId=robinhood，涨跌幅/创建时间/流动性补充）
-
-Meteora 未在 Robinhood Chain 部署（Solana 专属），启动时执行部署检查并拦截。
 """
 
 from __future__ import annotations
@@ -21,7 +19,6 @@ from app.infrastructure.rhpools import client as rhpools_client
 ROBINHOOD_CHAIN_ID = 4663
 DEFAULT_RPC = "https://rpc.mainnet.chain.robinhood.com/"
 DEXSCREENER_BASE = "https://api.dexscreener.com"
-METEORA_API_BASE = "https://dlmm.datapi.meteora.ag"
 
 # rhpools 索引冷启动回填期（实测约 38h）内窗口数据为部分历史
 INDEX_BACKFILL_LAG_S = 600.0   # lag 超过该值在界面提示"索引追赶中"
@@ -65,58 +62,6 @@ def verify_chain(rpc_url: str | None = None) -> dict:
     result["ok"] = True
     result["reason"] = "已验证：Robinhood Chain 主网（Chain ID 4663）"
     return result
-
-
-# ---------------------------------------------------------------- Meteora 部署检查
-def check_meteora_deployment(timeout: int = 10) -> dict:
-    """Meteora 是否部署在 Robinhood Chain。
-
-    结论（固定事实，附带实时探针证据）：Meteora 是 Solana 原生协议，
-    其官方 API 无链参数、只返回 Solana mint 地址的池子；rhpools 已审核
-    部署注册表仅含 V2/V3/Slipstream/V4。因此 Robinhood Chain 上
-    不存在 Meteora 流动池，筛选宇宙为 Uniswap V2/V3/V4/Slipstream。
-    """
-    evidence = [
-        "Meteora 官方 API（dlmm.datapi.meteora.ag）无 chain 参数，只服务 Solana",
-        "Meteora 文档（docs.meteora.ag）全部为 Solana DLMM/DAMM",
-        "rhpools 已审核部署注册表（rhpools.lp_chain）仅含 V2/V3/Slipstream/V4，无 Meteora 程序 ID",
-        "搜索到的「Robinhood/SOL」Meteora 池是 Solana 链上 ROBINHOOD 代币池"
-        "（dexpaprika.com/solana/pool/...），不是 Robinhood Chain 的池子",
-    ]
-    probe = {"performed": False, "detail": ""}
-    try:
-        import requests
-        resp = requests.get(
-            f"{METEORA_API_BASE}/pools",
-            params={"page": 1, "page_size": 3},
-            timeout=timeout,
-        )
-        if resp.status_code == 200:
-            data = resp.json().get("data") or []
-            addrs = []
-            for pool in data[:3]:
-                for side in (pool.get("token_x") or {}, pool.get("token_y") or {}):
-                    addr = str(side.get("address") or "")
-                    if addr:
-                        addrs.append(addr)
-            evm_style = [a for a in addrs if a.startswith("0x")]
-            probe = {
-                "performed": True,
-                "detail": (
-                    f"实时探针：Meteora API 返回 {len(addrs)} 个代币地址，"
-                    f"其中 EVM 格式（0x 前缀）{len(evm_style)} 个"
-                    + ("——全部为 Solana mint 地址，确认无 EVM/Robinhood Chain 池"
-                       if not evm_style else "——出现 EVM 地址，需人工复核")
-                ),
-            }
-            evidence.append(probe["detail"])
-    except Exception as e:
-        probe = {"performed": True, "detail": f"实时探针失败：{e}"}
-    return {
-        "deployed_on_robinhood_chain": False,
-        "evidence": evidence,
-        "probe": probe,
-    }
 
 
 # ---------------------------------------------------------------- rhpools
@@ -240,7 +185,7 @@ def to_float_or_none(value) -> float | None:
 
 __all__ = [
     "ROBINHOOD_CHAIN_ID", "DEFAULT_RPC", "INDEX_BACKFILL_LAG_S",
-    "verify_chain", "check_meteora_deployment",
+    "verify_chain",
     "fetch_pools", "fetch_status", "fetch_pool_events",
     "fetch_pair_market", "search_pairs", "build_candles_5m",
 ]

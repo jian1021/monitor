@@ -82,4 +82,4 @@ Meteora 扫描器仅支持 DLMM，数据源与飞书配置可放在 `app/applica
 - [Meteora 扫描器说明](docs/meteora_scanner/README.md)
 - [Robinhood Chain 池筛选](docs/fee_screen.md)
 - [Robinhood LP 模块](docs/robinhood_lp_modules.md)
-- [链与行情 API 验证](docs/verification_robinhood_chain_meteora.md)
+- [Robinhood Chain 池与行情 API 验证](docs/verification_robinhood_chain.md)

@@ -2,6 +2,18 @@ import os
 import streamlit as st
 from app.core.settings import ADMIN_PASS, ADMIN_USER
 
+# Preload the exit-strategy page's package tree before Streamlit begins routing
+# page scripts. This avoids intermittent import-cache KeyErrors during a hot
+# app update when the multipage runner imports that page on demand.
+from app.application.meteora_scanner import config as _scanner_config
+from app.application.meteora_scanner.db import Database as _ScannerDatabase
+from app.application.meteora_scanner.filters import apply_filters as _apply_scanner_filters
+from app.infrastructure.db.exit_strategy import (
+    load_exit_strategy as _load_exit_strategy,
+    save_exit_strategy as _save_exit_strategy,
+)
+from app.infrastructure.db.navigation import NAVIGATION_GROUPS, get_navigation_order
+
 
 # ================= 1. 初始化 Session 状态 =================
 if "logged_in" not in st.session_state:
@@ -64,15 +76,31 @@ monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设�
 
 # ================= 4. 路由守卫与导航挂载 =================
 if st.session_state.logged_in:
-    # 登录成功：挂载所有监控业务模块与退出页面
-    pg = st.navigation(
-        {
-            "全链扫描": [meteora_scanner, fee_screen],
-            "策略与数据": [dashboard, mainstream_crypto, discover_lp, lp_bands, price_monitor, pool_simulator, token_distribution, lp_position_alert_page, robinhood_pools, lp_apr, exit_strategy],
-            "链上代币": [onchain_token, meme_rsi_batch],
-            "系统管理": [monitor_settings, logout_page],
-        }
-    )
+    page_by_id = {
+        "meteora_scanner": meteora_scanner,
+        "fee_screen": fee_screen,
+        "dashboard": dashboard,
+        "mainstream_crypto": mainstream_crypto,
+        "discover_lp": discover_lp,
+        "lp_bands": lp_bands,
+        "price_monitor": price_monitor,
+        "pool_simulator": pool_simulator,
+        "token_distribution": token_distribution,
+        "lp_position_alert": lp_position_alert_page,
+        "robinhood_pools": robinhood_pools,
+        "lp_apr": lp_apr,
+        "exit_strategy": exit_strategy,
+        "onchain_token": onchain_token,
+        "meme_rsi_batch": meme_rsi_batch,
+        "monitor_settings": monitor_settings,
+        "logout": logout_page,
+    }
+    saved_order = get_navigation_order()
+    navigation = {
+        group: [page_by_id[key] for key in saved_order.get(group, NAVIGATION_GROUPS[group])]
+        for group in NAVIGATION_GROUPS
+    }
+    pg = st.navigation(navigation)
 else:
     # 未登录：隐藏所有业务页面，仅挂载登录页
     pg = st.navigation([login_page])

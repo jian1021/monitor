@@ -57,7 +57,10 @@ with p3:
         ok = update_meme_rsi_params({"timeframe": timeframe,
                                      "rsi_low": float(rsi_low),
                                      "rsi_high": float(rsi_high)})
-        st.success("✅ 周期和阈值已保存；后台监控将在下一轮使用新设置") if ok else st.error("❌ 保存失败（数据库不可用）")
+        if ok:
+            st.success("✅ 周期和阈值已保存；后台监控将在下一轮使用新设置")
+        else:
+            st.error("❌ 保存失败（数据库不可用）")
 
 st.divider()
 st.markdown("##### ➕ 导入池子地址")

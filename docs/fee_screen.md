@@ -1,15 +1,14 @@
 # fee-screen：Robinhood Chain 高手续费流动池筛选监控模块
 
-> 开发前置验证结论见 [`docs/verification_robinhood_chain_meteora.md`](verification_robinhood_chain_meteora.md)。
-> **Meteora 未在 Robinhood Chain 部署**（Solana 专属），本模块的筛选宇宙为
-> Robinhood Chain（链 4663）上真实存在的 **Uniswap V2 / V3 / V4 / Slipstream** 流动池。
+> Robinhood Chain 与数据源验证见 [`docs/verification_robinhood_chain.md`](verification_robinhood_chain.md)。
+> 本模块扫描 Robinhood Chain（链 4663）上的 **Uniswap V2 / V3 / V4 / Slipstream** 流动池；Solana Meteora DLMM 使用独立扫描器。
 
 ## 功能（对应需求书四个页面）
 
 | 页面 | 文件 | 功能 |
 |---|---|---|
 | 单页四 Tab | `pages/fee_screen.py` | 同一模块四个功能合并一页，Tab 切换： |
-| ├ 筛选参数 | 〃 | 链验证、Meteora 部署提示、全部初筛参数/权重（写库，监控共用） |
+| ├ 筛选参数 | 〃 | Robinhood Chain 链验证、全部初筛参数/权重（写库，监控共用） |
 | ├ 流动池列表 | 〃 | 排名表（24h 量/费、实际费率、TVL、Active TVL、Fees/ActiveTVL、持续性、1h/6h/24h 涨跌、风险、评分）、排序搜索筛选、未通过原因 |
 | ├ 单池详情 | 〃 | 5 分钟 K 线（链上事件重建）、量/费 5 分钟序列、窗口聚合对比、风险事件、手续费收入估算、LP 相对净收益 |
 | └ 监控报警 | 〃 | 启停、轮询间隔、飞书 Webhook、下降阈值、立即执行、告警记录 |

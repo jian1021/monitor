@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""fee-screen 单页：筛选参数 / 流动池列表 / 单池详情 / 监控报警（四合一）。
+"""Robinhood Chain Uniswap 池：筛选参数 / 流动池列表 / 单池详情 / 监控报警。
 
 同一模块的功能合并到一个页面：
-- 顶部一次性完成链验证 + Meteora 部署提示（session 内缓存）；
+- 顶部完成 Robinhood Chain 链验证；
 - 四个 Tab 分别对应需求书的页面一~四；
 - 筛选结果 300s 缓存全页共享，参数保存后立即按新参数重算。
 """
@@ -51,17 +51,13 @@ from app.infrastructure.db.module_settings import (
 
 st.set_page_config(page_title="高手续费池筛选监控", page_icon="💰", layout="wide")
 st.title("💰 Robinhood Chain 高手续费流动池筛选监控")
-st.caption("筛选宇宙：Robinhood Chain（4663）真实存在的 Uniswap V2/V3/V4/Slipstream 池。"
-           "**Meteora 未在该链部署**（Solana 专属协议），不存在 Robinhood 链 Meteora 池，"
-           "相关数据一律标记不可用。")
+st.caption("本页筛选 Robinhood Chain（4663）上的 Uniswap V2/V3/V4/Slipstream 流动池。"
+           "Solana 的 Meteora DLMM 池请前往「Meteora 全池扫描」页面。")
 
-# ================= 链验证 + Meteora 部署提示（共享，session 缓存） =================
+# ================= Robinhood Chain 验证（session 缓存） =================
 if "fee_screen_chain" not in st.session_state:
     st.session_state.fee_screen_chain = src.verify_chain()
 chain = st.session_state.fee_screen_chain
-if "fee_screen_meteora" not in st.session_state:
-    st.session_state.fee_screen_meteora = src.check_meteora_deployment()
-meteora = st.session_state.fee_screen_meteora
 
 banner = st.columns([3, 1])
 with banner[0]:
@@ -73,15 +69,7 @@ with banner[0]:
 with banner[1]:
     if st.button("🔄 重新验证", use_container_width=True):
         st.session_state.pop("fee_screen_chain", None)
-        st.session_state.pop("fee_screen_meteora", None)
         st.rerun()
-
-with st.expander("⚠️ Meteora 部署检查证据（为什么筛不到 Meteora 池）", expanded=False):
-    for item in meteora.get("evidence", []):
-        st.markdown(f"- {item}")
-    st.info("📌 本工具以赚取手续费为目标，筛选 **Robinhood Chain 上真实存在的流动池**；"
-            "网上能搜到的「Robinhood/SOL」Meteora 池是 Solana 链上的 ROBINHOOD 代币池，"
-            "不是 Robinhood Chain 的池子。")
 
 st.divider()
 

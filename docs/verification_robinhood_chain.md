@@ -1,10 +1,9 @@
-# 链验证 + 数据 API 验证报告（Robinhood Chain / Meteora）
+# Robinhood Chain 池与数据 API 验证报告
 
-> 本报告是开发前的强制验证步骤（需求书 §三、§十）。结论先行：
+> 本报告记录 Robinhood Chain 全池筛选器使用的链与数据源。结论先行：
 >
 > 1. **Robinhood Chain 主网真实存在**：Chain ID **4663**，EVM（Arbitrum Orbit）L2，gas 为 ETH，官方 RPC `https://rpc.mainnet.chain.robinhood.com/`，主网 2026-07-01 上线。已通过 `eth_chainId` 实测返回 `0x1237`（=4663）。
-> 2. **Meteora 没有在 Robinhood Chain 部署任何流动池协议。** Meteora 是 Solana 原生协议（DLMM/DAMM/Vaults），其官方 API 与文档只服务 Solana。因此**不存在"Robinhood 链 Meteora 池"可供筛选**；搜索到的"Robinhood/SOL Meteora 池"是 **Solana 链上交易的 ROBINHOOD 代币池**（dexpaprika.com/solana/pool/...），按需求书要求不得混入 Robinhood Chain 结果。
-> 3. Robinhood Chain 上真实存在、且有真实链上数据可筛的流动池协议是 **Uniswap V2 / V3 / V4 与 Slipstream**（rhpools 索引的已审核部署）。本项目的筛选监控程序 therefore 以这些**真实存在的 Robinhood Chain 池**为筛选宇宙；Meteora 相关指标一律标记"数据不可用：Meteora 未部署在 Robinhood Chain"。
+> 2. Robinhood Chain 全池筛选使用 **Uniswap V2 / V3 / V4 与 Slipstream**（rhpools 索引的已审核部署）。Solana Meteora DLMM 由独立扫描器处理，与本模块分开。
 
 ## 一、链验证（启动时执行，已实测）
 
@@ -15,7 +14,6 @@
 | 链类型 | EVM 兼容，Arbitrum Orbit L2，ETH 为 gas 代币 | 官方文档 / Arbitrum Foundation |
 | 主网时间 | 2026-07-01（测试网 2026-02-10） | Robinhood newsroom / 多家媒体 |
 | 浏览器 | robinhoodchain.blockscout.com | 官方文档 |
-| Meteora 是否部署 | **否** | Meteora 官方 API（`dlmm.datapi.meteora.ag`）只返回 Solana mint 地址的池子；Meteora 文档全为 Solana；rhpools 已审核部署注册表（`rhpools.lp_chain`）仅含 V2/V3/Slipstream/V4，无 Meteora 程序 ID |
 
 ## 二、数据 API 验证（全部真实可用，已实测）
 
@@ -49,11 +47,7 @@
 
 - `GET /api/v2/networks` 返回的 100 个网络中无 robinhood（实测）→ 不用作 Robinhood 数据源
 
-### 4. Meteora 官方 API — 仅 Solana
-
-- `https://dlmm.datapi.meteora.ag`（本仓库 `modules/meteora-lp/meteora-radar` 已在用）只返回 Solana 池子（mint 为 Solana pubkey）→ 与 Robinhood Chain 无关
-
-### 5. robinhood-chain-lp-tools（区间 APR 工具，Node/TS 子模块）
+### 4. robinhood-chain-lp-tools（区间 APR 工具，Node/TS 子模块）
 
 - `uni-range-apr`：基于当前流动性 + 24h 成交量 feed 估算指定区间 APR（秒级，近似）
 - `uni-range-replay`：逐笔回放 Swap 事件实测区间收益（1–4 分钟，精确），`--validate` 可对账 feeGrowthGlobal
@@ -82,7 +76,6 @@
 
 ## 四、结论与开发边界
 
-1. **Meteora 池筛选：停止。** 程序启动时执行链验证，若 Meteora 未部署（当前事实），在界面明确提示"Meteora 未在 Robinhood Chain 部署，无可筛选池子；以下为 Robinhood Chain 上真实存在的 Uniswap V2/V3/V4/Slipstream 池"，绝不混入 Solana 数据。
-2. 筛选宇宙 = rhpools 索引的 Robinhood Chain 已审核池子（链 4663），市场数据用 DexScreener `robinhood` 网络补充。
-3. 所有"不可用"指标在界面标记"数据不可用"，不编造。
-4. 第一阶段只做监控、筛选、排名、收益分析；不自动交易、不自动加减流动性（rhpools 服务本身也默认禁止交易准备）。
+1. Robinhood Chain 筛选宇宙 = rhpools 索引的已审核 Uniswap V2/V3/V4/Slipstream 池（链 4663），市场数据用 DexScreener `robinhood` 网络补充。
+2. 所有"不可用"指标在界面标记"数据不可用"，不编造。
+3. 第一阶段只做监控、筛选、排名、收益分析；不自动交易、不自动加减流动性（rhpools 服务本身也默认禁止交易准备）。

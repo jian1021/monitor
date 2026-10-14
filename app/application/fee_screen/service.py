@@ -27,7 +27,6 @@ class ScreenResult:
     ok: bool = False
     reason: str = ""
     chain: dict = field(default_factory=dict)
-    meteora: dict = field(default_factory=dict)
     index_status: dict | None = None
     evaluations: list = field(default_factory=list)   # 已排名（通过的）
     all_evaluations: list = field(default_factory=list)  # 全部（含未通过）
@@ -159,7 +158,7 @@ def collect_snapshots(cfg: ScreenConfig,
 
 
 def run_screening(cfg: ScreenConfig | None = None) -> ScreenResult:
-    """完整筛选流程：链验证 → Meteora 部署拦截 → 拉取 → 筛选 → 排名。"""
+    """完整筛选流程：Robinhood Chain 验证 → Uniswap 池数据拉取 → 筛选 → 排名。"""
     result = ScreenResult(fetched_at=time.time())
 
     # 1. 链验证（失败则停止筛选，不得混入其他链数据）
@@ -170,13 +169,7 @@ def run_screening(cfg: ScreenConfig | None = None) -> ScreenResult:
         result.data_warnings.append(result.reason)
         return result
 
-    # 2. Meteora 部署检查（未部署则明确提示，筛选宇宙为真实存在的池）
-    result.meteora = src.check_meteora_deployment()
-    if result.meteora.get("deployed_on_robinhood_chain"):
-        result.data_warnings.append(
-            "Meteora 部署状态异常：检测到部署，请人工复核筛选宇宙")
-
-    # 3. 拉取 + 归一化 + 补充
+    # 2. 拉取 Uniswap V2/V3/V4/Slipstream 池并补充市场数据。
     if cfg is None:
         cfg = load_screening_config()
     snapshots, warnings, index_status = collect_snapshots(cfg)

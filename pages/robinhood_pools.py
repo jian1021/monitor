@@ -48,10 +48,12 @@ with st.sidebar:
     st.markdown(
         f"[打开观测站终端 UI]({client.base_url()}/)（服务已启动时可用）"
     )
-    st.divider()
-    st.header("价差参数")
-    min_bps = st.number_input("价差阈值 (bps)", 0.0, 10000.0, 50.0, 10.0)
-    min_depth = st.number_input("浅边深度下限 ($)", 0.0, 1e6, 300.0, 100.0)
+
+with st.container(border=True):
+    st.subheader("⚙️ 观测参数")
+    c1, c2 = st.columns(2)
+    min_bps = c1.number_input("价差阈值 (bps)", 0.0, 10000.0, 50.0, 10.0)
+    min_depth = c2.number_input("浅边深度下限 ($)", 0.0, 1e6, 300.0, 100.0)
 
 status = client.health()
 if status is None:

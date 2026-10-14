@@ -20,7 +20,6 @@ def run_screening_cached(cfg_dict: str) -> dict:
         "ok": result.ok,
         "reason": result.reason,
         "chain": result.chain,
-        "meteora": result.meteora,
         "warnings": result.data_warnings,
         "fetched_at": result.fetched_at,
         "evaluations": result.evaluations,

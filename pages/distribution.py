@@ -608,46 +608,53 @@ st.caption(
     "数据源：直接读取链上合约 (公开 RPC，无需 API Key)。"
 )
 
-with st.sidebar:
-    st.header("参数")
-    protocol = st.radio(
-        "协议版本",
-        options=["V3", "V4"],
-        horizontal=True,
-        help="V3 输入池子合约地址；V4 输入 poolId (可从 Uniswap 池子页面复制)，支持本地计算 PoolKey 验证",
-    )
-    chain = st.selectbox(
-        "所属公链",
-        options=list(CHAIN_RPCS.keys()),
-        format_func=lambda c: CHAIN_RPCS[c][0],
-    )
+with st.container(border=True):
+    st.subheader("⚙️ 分析参数")
+    p1, p2, p3 = st.columns([1, 1, 2])
+    with p1:
+        protocol = st.radio(
+            "协议版本",
+            options=["V3", "V4"],
+            horizontal=True,
+            help="V3 输入池子合约地址；V4 输入 poolId (可从 Uniswap 池子页面复制)，支持本地计算 PoolKey 验证",
+        )
+    with p2:
+        chain = st.selectbox(
+            "所属公链",
+            options=list(CHAIN_RPCS.keys()),
+            format_func=lambda c: CHAIN_RPCS[c][0],
+        )
     pool_address = ""
     pool_id = ""
     c0, c1, hooks = "", "", ""
     fee, tick_spacing = 3000, 200
-    if protocol == "V3":
-        pool_address = st.text_input(
-            "池子地址",
-            placeholder="0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
-        )
-    else:
-        pool_id = st.text_input(
-            "池子 ID (poolId)",
-            placeholder="0x" + "a" * 64,
-            help="V4 poolId。输入后自动从链上 Initialize 事件恢复 PoolKey；若 RPC 不支持历史日志，请展开下方表单手动填写",
-        )
-        with st.expander("无法自动解析？手动填写 PoolKey"):
-            st.caption("PoolKey = (currency0, currency1, fee, tickSpacing, hooks)")
-            c0 = st.text_input("currency0 (Token0 地址)", placeholder="0x...")
-            c1 = st.text_input("currency1 (Token1 地址)", placeholder="0x...")
-            fee = st.number_input("fee", min_value=0, value=3000, step=100)
-            tick_spacing = st.number_input("tickSpacing", min_value=1, value=200, step=10)
-            hooks = st.text_input("hooks (可选，默认空)", placeholder="0x0000...0000")
-    range_pct = st.slider("价格显示范围 (%)", min_value=5, max_value=200, value=50, step=5)
-    run = st.button("生成分布图", type="primary", use_container_width=True)
+    with p3:
+        if protocol == "V3":
+            pool_address = st.text_input(
+                "池子地址",
+                placeholder="0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+            )
+        else:
+            pool_id = st.text_input(
+                "池子 ID (poolId)",
+                placeholder="0x" + "a" * 64,
+                help="V4 poolId。输入后自动从链上 Initialize 事件恢复 PoolKey；若 RPC 不支持历史日志，请展开下方表单手动填写",
+            )
+            with st.expander("无法自动解析？手动填写 PoolKey"):
+                st.caption("PoolKey = (currency0, currency1, fee, tickSpacing, hooks)")
+                c0 = st.text_input("currency0 (Token0 地址)", placeholder="0x...")
+                c1 = st.text_input("currency1 (Token1 地址)", placeholder="0x...")
+                fee = st.number_input("fee", min_value=0, value=3000, step=100)
+                tick_spacing = st.number_input("tickSpacing", min_value=1, value=200, step=10)
+                hooks = st.text_input("hooks (可选，默认空)", placeholder="0x0000...0000")
+    r1, r2 = st.columns([3, 1])
+    with r1:
+        range_pct = st.slider("价格显示范围 (%)", min_value=5, max_value=200, value=50, step=5)
+    with r2:
+        run = st.button("生成分布图", type="primary", use_container_width=True)
 
 if not run:
-    st.info("👈 左侧选择协议版本并填写池子信息，点击「生成分布图」")
+    st.info("请在上方填写池子信息并点击「生成分布图」")
     st.stop()
 
 url = rpc_url(chain)
