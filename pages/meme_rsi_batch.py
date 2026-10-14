@@ -15,6 +15,8 @@ from app.infrastructure.db.module_settings import (
     update_module_setting,
 )
 st.set_page_config(page_title="批量 Meme 超卖超买监控", layout="wide")
+if st.button("← 返回链上代币工具", key="back_to_onchain_hub"):
+    st.switch_page("pages/onchain_hub.py")
 st.title("📡 批量 Meme 超卖超买监控")
 st.caption("粘贴 Solana(Meteora) 池子地址生成监控列表；常驻进程按所选周期的 RSI(3) 越界合并推送飞书。")
 

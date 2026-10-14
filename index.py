@@ -74,23 +74,7 @@ exit_strategy = st.Page("pages/exit_strategy.py", title="退出策略", icon=":m
 monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设置", icon=":material/tune:")
 
 
-def onchain_hub():
-    st.title("🔗 链上代币")
-    st.caption("选择要使用的链上代币工具。")
-    token_col, meme_col = st.columns(2)
-    with token_col:
-        with st.container(border=True):
-            st.markdown("### 🪙 链上代币管理")
-            st.caption("按公链添加、搜索和管理需要监控的代币地址。")
-            st.page_link(onchain_token, label="打开代币管理", icon=":material/arrow_forward:", width="stretch")
-    with meme_col:
-        with st.container(border=True):
-            st.markdown("### 📡 批量 Meme 超买超卖")
-            st.caption("批量监控 Meme 代币 RSI，支持 15 分钟和 1 小时周期。")
-            st.page_link(meme_rsi_batch, label="打开 Meme 监控", icon=":material/arrow_forward:", width="stretch")
-
-
-onchain_hub_page = st.Page(onchain_hub, title="链上代币", icon=":material/link:")
+onchain_hub_page = st.Page("pages/onchain_hub.py", title="链上代币", icon=":material/link:")
 
 
 # ================= 4. 路由守卫与导航挂载 =================

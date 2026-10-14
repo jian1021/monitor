@@ -163,7 +163,7 @@ def render_status_bar() -> None:
     mcap_missing = sum(1 for r in rows if r.get("token_x_market_cap") in (None, 0)
                        and r.get("token_y_market_cap") in (None, 0))
 
-    st.markdown("### 📈 Meteora 全池扫描与筛选器")
+    st.markdown(f"### 📈 {config.APP_TITLE} {config.APP_VERSION}")
     c = st.columns(7)
     c[0].metric("当前扫描类型", current)
     c[1].metric("DLMM 已发现", f"{dlmm_found:,}")
@@ -892,11 +892,44 @@ PAGES = {
     "⑨ 价格区间计算": page_price_range,
 }
 
+PAGE_DESCRIPTIONS = {
+    "① 全池扫描": "启动 DLMM 池扫描并查看实时进度。",
+    "② 筛选条件": "配置市值、成交量、持有人和风险规则。",
+    "③ 筛选结果": "查看通过筛选的池及评分详情。",
+    "④ 重点池监控": "管理重点池并查看监控信号。",
+    "⑤ 历史数据": "查询历史扫描结果和池数据。",
+    "⑥ 飞书报警设置": "配置报警规则和飞书通知。",
+    "⑦ API 状态与错误日志": "查看数据源状态、请求统计和错误记录。",
+    "⑧ 使用说明": "查看扫描器功能与使用帮助。",
+    "⑨ 价格区间计算": "按池子行情和 ATR 计算价格区间。",
+}
+
 
 def main() -> None:
     render_status_bar()
-    choice = st.sidebar.radio("导航", list(PAGES.keys()))
-    st.sidebar.caption(f"{config.APP_TITLE} {config.APP_VERSION}")
+    choice = st.session_state.get("meteora_scanner_choice", next(iter(PAGES)))
+    if choice not in PAGES:
+        choice = next(iter(PAGES))
+    st.markdown("#### 🧭 功能导航")
+    page_items = list(PAGES.items())
+    for row_start in range(0, len(page_items), 3):
+        cols = st.columns(3)
+        for col, (label, _) in zip(cols, page_items[row_start:row_start + 3]):
+            with col:
+                with st.container(border=True):
+                    st.caption(label[:2])
+                    st.markdown(f"**{label[3:]}**")
+                    st.caption(PAGE_DESCRIPTIONS[label])
+                    button_label = "当前页面" if label == choice else "切换到此模块"
+                    if st.button(
+                        button_label,
+                        key=f"meteora_nav_{label}",
+                        type="primary" if label == choice else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["meteora_scanner_choice"] = label
+                        st.rerun()
+    st.divider()
     PAGES[choice]()
 
 

@@ -29,6 +29,9 @@ st.set_page_config(
     layout="wide",
 )
 
+if st.button("← 返回链上代币工具", key="back_to_onchain_hub"):
+    st.switch_page("pages/onchain_hub.py")
+
 FOCUS_TYPES = ["token"]
 
 st.title("⚙️ 监控标的配置管理")
