@@ -10,11 +10,11 @@ import os
 import streamlit as st
 import pandas as pd
 
-from config import FEISHU_WEBHOOK
-from db import get_db_client
-from monitor_price import CREATE_INDEX_SQL, CREATE_TABLE_SQL
-from send_feishu_msg import send_feishu_msg
-from dex_client import fetch_token_info
+from app.core.settings import FEISHU_WEBHOOK
+from app.infrastructure.db.client import get_db_client
+from app.application.monitors.price import CREATE_INDEX_SQL, CREATE_TABLE_SQL
+from app.infrastructure.notifications.sender import send_feishu_msg
+from app.infrastructure.market_data.dexscreener import fetch_token_info
 
 CHAIN_OPTIONS = ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"]
 CHAIN_LABELS = {
@@ -352,12 +352,12 @@ with st.expander("📖 运行说明"):
 **后台监控脚本 (独立运行):**
 
 ```bash
-# GitHub Actions 定时任务 (每小时, 见 .github/workflows) 或手动单轮:
-python monitor_price.py
+# 手动执行一轮检查:
+python -m scripts.monitor_price
 
 # 本地常驻轮询 (每 60 秒):
-python monitor_price.py --loop
-python monitor_price.py --loop --interval 300   # 自定义间隔(秒)
+python -m scripts.monitor_price --loop
+python -m scripts.monitor_price --loop --interval 300   # 自定义间隔(秒)
 ```
 
 **告警去重**：同一规则达标后标记为「已触发」，避免重复轰炸；

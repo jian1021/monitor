@@ -1,26 +1,31 @@
-"""main.py — 监控主循环入口（GitHub Actions / 本地常驻）.
+"""main.py — 监控主循环入口（支持单轮与本地常驻）.
 
 各子程序注册进 MonitorRegistry，由 MonitoringScheduler 统一计算到期与睡眠；
 执行间隔与启停由数据库 module_settings / module_intervals 控制（界面可改）。
 """
 
+import argparse
 import random
 import time
 import traceback
 
 import baostock as bs
 
-import lp_position_alert
-import monitor_rsi
-from config import FEISHU_WEBHOOK
-from db import DEFAULT_INTERVALS, get_module_intervals, get_module_settings
-from db import load_instruments, update_asset_alert_state
-from monitor_meme_underval import run_meme_underval_monitor
-from monitor_meme_rsi_batch import run_batch_meme_rsi_monitor
-from monitor_robinhood_pump import run_monitor
-from monitor_rhpools import run_monitor as run_rhpools_monitor
-from monitor_lp_apr import run_monitor as run_lp_apr_monitor
-from send_feishu_msg import send_feishu_msg
+from app.application.monitors import rsi as monitor_rsi
+from app.core.settings import FEISHU_WEBHOOK
+from app.infrastructure.db.assets import load_instruments, update_asset_alert_state
+from app.infrastructure.db.intervals import DEFAULT_INTERVALS, get_module_intervals
+from app.infrastructure.db.module_settings import get_module_settings
+from app.application.monitors.meme_underval import run_meme_underval_monitor
+from app.application.monitors.meme_rsi_batch import run_batch_meme_rsi_monitor
+from app.application.monitors.robinhood_pump import run_monitor
+from app.application.rhpools.monitor import run_rhpools_monitor
+from app.application.lp_tools.monitor import run_lp_apr_monitor
+from app.application.fee_screen.monitor import run_fee_screen_monitor
+from app.application.exit_strategy.monitor import run_monitor as run_exit_strategy_monitor
+from app.application.lp_alert.service import run_once as run_lp_alert_once
+from app.infrastructure.db.lp_alert import ensure_table as ensure_lp_alert_table
+from app.infrastructure.notifications.sender import send_feishu_msg
 
 from app.application.monitoring.scheduler import MonitoringScheduler
 from app.core.contracts import MonitorSpec
@@ -280,8 +285,8 @@ def _run_lp_alert():
     print(f"\n{'='*50}")
     print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 LP 仓位 / 池子价格告警")
     try:
-        lp_position_alert.ensure_table()
-        lp_position_alert.run_once()
+        ensure_lp_alert_table()
+        run_lp_alert_once()
     except Exception as e:
         print(f"❌ lp_position_alert 发生异常：{e}")
         traceback.print_exc()
@@ -307,6 +312,26 @@ def _run_lp_apr():
         traceback.print_exc()
 
 
+def _run_fee_screen():
+    print(f"\n{'='*50}")
+    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 Robinhood 高手续费池筛选监控")
+    try:
+        run_fee_screen_monitor()
+    except Exception as e:
+        print(f"❌ run_fee_screen_monitor 发生异常：{e}")
+        traceback.print_exc()
+
+
+def _run_exit_strategy():
+    print(f"\n{'='*50}")
+    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行退出策略监控")
+    try:
+        run_exit_strategy_monitor()
+    except Exception as e:
+        print(f"❌ 退出策略监控发生异常：{e}")
+        traceback.print_exc()
+
+
 def build_scheduler() -> MonitoringScheduler:
     registry = MonitorRegistry()
     registry.register(MonitorSpec("rsi", "rsi", _run_rsi))
@@ -318,11 +343,20 @@ def build_scheduler() -> MonitoringScheduler:
     registry.register(MonitorSpec("lp_alert", "lp_alert", _run_lp_alert))
     registry.register(MonitorSpec("rhpools", "rhpools", _run_rhpools))
     registry.register(MonitorSpec("lp_apr", "lp_apr", _run_lp_apr))
+    registry.register(MonitorSpec("fee_screen", "fee_screen", _run_fee_screen))
+    registry.register(MonitorSpec("exit_strategy", "exit_strategy", _run_exit_strategy))
     return MonitoringScheduler(registry, poll_interval=POLL_INTERVAL)
 
 
 # ================= 主程序逻辑 =================
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description="市场与链上资产监控调度器")
+    parser.add_argument(
+        "--once", action="store_true",
+        help="每个已启用模块立即执行一轮后退出",
+    )
+    args = parser.parse_args()
 
     config = load_instruments()
     if not config:
@@ -338,7 +372,7 @@ if __name__ == "__main__":
 
     intervals = refresh_intervals(force=True)
 
-    print("🚀 主循环启动，各子程序独立间隔：")
+    print("🚀 启动监控调度器" + ("（单轮模式）" if args.once else "（常驻模式）") + "，各子程序间隔：")
     for name in DEFAULT_INTERVALS:
         print(f"   {name}: 每 {intervals[name] // 60} 分钟执行一次")
 
@@ -361,6 +395,10 @@ if __name__ == "__main__":
         for spec in scheduler.due(last_run, module_settings, intervals, now):
             spec.runner()
             last_run[spec.interval_key] = time.time()
+
+        if args.once:
+            print("✅ 单轮监控完成，退出。")
+            break
 
         # 计算距离下一个最近到期任务还有多少秒，精准 sleep
         sleep_secs = scheduler.sleep_seconds(intervals, module_settings, last_run, now)

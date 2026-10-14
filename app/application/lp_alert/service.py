@@ -2,7 +2,7 @@
 
 import traceback
 
-from send_feishu_msg import send_feishu_msg
+from app.infrastructure.notifications.sender import send_feishu_msg
 
 from app.core.settings import FEISHU_WEBHOOK
 from app.domain.lp_alert.evaluator import (

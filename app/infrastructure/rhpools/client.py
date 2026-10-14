@@ -60,6 +60,12 @@ def _log_tail(lines: int = 12) -> str:
 
 
 def base_url() -> str:
+    # RHP_BASE_URL：完整远程地址覆盖（如 https://rhpools.lol）。
+    # 云上无持久盘的场景（Cloud Run 冷启动会丢 SQLite 索引）可指向托管实例，
+    # 避免每次冷启动都从零回填几十小时历史。
+    override = os.getenv("RHP_BASE_URL", "").strip().rstrip("/")
+    if override:
+        return override
     host = os.getenv("RHP_HOST", "127.0.0.1")
     port = os.getenv("RHP_PORT", "8196")
     return f"http://{host}:{port}"
@@ -162,6 +168,10 @@ def ensure_running(wait_s: float = _START_TIMEOUT_S) -> dict | None:
     if status is not None:
         _last_error = None
         return status
+    if os.getenv("RHP_BASE_URL", "").strip():
+        # 已配置远程实例：本地进程无法接管远程地址，不自动拉起，如实报告
+        _last_error = "RHP_BASE_URL 指向的远程 rhpools 实例不可达（不自动拉起本地服务）"
+        return None
     if not auto_start_enabled():
         _last_error = "RHP_AUTO_START 已关闭，不自动拉起服务"
         return None       # CI 等环境显式关闭自启：不拉子模块（此行不打印，保持 CI 日志安静）

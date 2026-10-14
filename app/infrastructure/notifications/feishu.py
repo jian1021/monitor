@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from send_feishu_msg import send_feishu_msg
+from app.infrastructure.notifications.sender import send_feishu_msg
 
 
 @dataclass(frozen=True)

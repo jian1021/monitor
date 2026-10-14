@@ -16,7 +16,7 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dex_client import fetch_token_info
+from app.infrastructure.market_data.dexscreener import fetch_token_info
 
 # Windows 控制台默认 cp1252 无法打印中文/emoji，强制 UTF-8 输出
 if os.name == "nt":

@@ -1,3 +1,4 @@
+streamlit>=1.30
 requests
 pandas
 ta
@@ -16,3 +17,5 @@ eth-abi>=5,<6
 eth-hash[pycryptodome]>=0.7,<1
 eth-utils>=5,<6
 websockets>=12,<16
+numpy>=1.24
+altair>=5.0

@@ -13,6 +13,8 @@ DEFAULT_INTERVALS = {
     "lp_alert":            5,   # LP 仓位 / 池子价格告警：5 分钟
     "rhpools":             5,   # Robinhood Pools 观测站（服务健康 / 池间价差）：5 分钟
     "lp_apr":             60,   # LP 区间 APR 估算（robinhood-chain-lp-tools）：60 分钟
+    "fee_screen":         30,   # Robinhood 高手续费池筛选监控：30 分钟
+    "exit_strategy": 1,
 }
 
 

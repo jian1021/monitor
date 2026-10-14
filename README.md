@@ -1,0 +1,86 @@
+# Monitor — 链上与市场监控看板
+
+这是统一的 Streamlit 监控项目，包含 Meteora 全池扫描、Robinhood Chain 全池筛选、Meme 代币监控、LP 与退出策略告警，以及股票和加密货币监控。
+
+## 项目结构
+
+```text
+index.py                         Streamlit 看板入口
+main.py                          后台监控循环入口
+app/
+  core/                           配置与模块契约
+  domain/                         纯业务规则
+  application/                    业务模块与用例编排
+    meteora_scanner/               Meteora API、扫描、筛选、评分与数据
+    fee_screen/                    Robinhood Chain 全池筛选
+    exit_strategy/                 人工选池与退出告警
+    monitors/                      RSI、Meme、价格等监控
+  infrastructure/                 数据库、行情 API 与飞书通知适配
+  interfaces/                      页面共用组件
+pages/                             Streamlit 页面
+scripts/                           CLI 与兼容入口
+modules/                           robinhoodpools 与 LP 工具 Git 子模块
+tests/                             主项目及 Meteora 扫描器测试
+docs/                              架构、功能与 API 说明
+```
+
+页面、应用逻辑、基础设施和外部适配各有明确位置。Meteora 页面入口是 `pages/meteora_scanner.py`，扫描器实现位于 `app/application/meteora_scanner/`；Robinhood 全池扫描页面是 `pages/fee_screen.py`。
+
+仓库根目录下的 `meteora-lp/` 与 `token-reversal-monitor/` 是被 `.gitignore` 排除的本地独立项目，不属于此统一看板。`modules/` 中的两个目录是 Git 子模块，更新时按各自上游仓库维护。
+
+## 本地运行
+
+需要 Python 3.12。克隆后初始化子模块并安装项目依赖：
+
+```bash
+git submodule update --init --recursive
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+启动网页看板：
+
+```bash
+streamlit run index.py
+```
+
+需要后台定时监控时，在另一个终端启动主循环；保持进程运行：
+
+```bash
+python main.py
+```
+
+运行测试：
+
+```bash
+python -m pip install pytest
+python -m pytest -q
+```
+
+## 配置
+
+主应用配置由 `app/core/config.py` 加载，可将 `.env` 放在 `app/core/.env`。例如：
+
+```dotenv
+ADMIN_USER=admin
+ADMIN_PASS=请替换为安全密码
+FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
+LIBSQL_URL=
+LIBSQL_TOKEN=
+ROBINHOOD_RPC=
+```
+
+Meteora 扫描器仅支持 DLMM，数据源与飞书配置可放在 `app/application/meteora_scanner/.env`。本地 `.env` 和数据库文件不会提交到仓库。
+
+## 功能说明
+
+统一看板在左侧导航中提供全链扫描、策略与数据、链上代币和系统管理模块。全链扫描包含 Solana 的 Meteora DLMM，以及 Robinhood Chain 池筛选。Meteora 扫描结果可人工挑选并加入链上 Meme 监控；退出策略可人工选池，并按价格下限、RSI(3) 或布林带条件发送飞书告警。后台 `main.py` 负责按模块设置的间隔执行监控。
+
+## 文档
+
+- [架构与模块边界](docs/architecture.md)
+- [Meteora 扫描器说明](docs/meteora_scanner/README.md)
+- [Robinhood Chain 池筛选](docs/fee_screen.md)
+- [Robinhood LP 模块](docs/robinhood_lp_modules.md)
+- [链与行情 API 验证](docs/verification_robinhood_chain_meteora.md)

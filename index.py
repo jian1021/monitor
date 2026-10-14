@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from config import  ADMIN_PASS , ADMIN_USER
+from app.core.settings import ADMIN_PASS, ADMIN_USER
 
 
 # ================= 1. 初始化 Session 状态 =================
@@ -56,6 +56,9 @@ token_distribution = st.Page("pages/distribution.py", title="代币分布图", i
 lp_position_alert_page = st.Page("pages/lp_position_alert.py", title="LP 仓位告警", icon=":material/notifications_active:")
 robinhood_pools = st.Page("pages/robinhood_pools.py", title="Robinhood Pools 观测站", icon=":material/satellite_alt:")
 lp_apr = st.Page("pages/lp_apr.py", title="LP 区间 APR", icon=":material/function:")
+fee_screen = st.Page("pages/fee_screen.py", title="Robinhood 全池扫描", icon=":material/stacked_line_chart:")
+meteora_scanner = st.Page("pages/meteora_scanner.py", title="Meteora 全池扫描", icon=":material/radar:")
+exit_strategy = st.Page("pages/exit_strategy.py", title="退出策略", icon=":material/notifications_active:")
 monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设置", icon=":material/tune:")
 
 
@@ -64,7 +67,9 @@ if st.session_state.logged_in:
     # 登录成功：挂载所有监控业务模块与退出页面
     pg = st.navigation(
         {
-            "策略与数据": [dashboard, mainstream_crypto, onchain_token, discover_lp, meme_rsi_batch, lp_bands, price_monitor, pool_simulator, token_distribution, lp_position_alert_page, robinhood_pools, lp_apr],
+            "全链扫描": [meteora_scanner, fee_screen],
+            "策略与数据": [dashboard, mainstream_crypto, discover_lp, lp_bands, price_monitor, pool_simulator, token_distribution, lp_position_alert_page, robinhood_pools, lp_apr, exit_strategy],
+            "链上代币": [onchain_token, meme_rsi_batch],
             "系统管理": [monitor_settings, logout_page],
         }
     )

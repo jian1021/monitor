@@ -2,7 +2,7 @@
 
 import time
 
-from keccak_pure import keccak256
+from app.infrastructure.market_data.keccak_pure import keccak256
 
 from app.core.settings import ROBINHOOD_RPC
 from app.infrastructure.market_data.http import HEADERS, requests

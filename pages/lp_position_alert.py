@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import streamlit as st
 
-from config import FEISHU_WEBHOOK
-import lp_position_alert as lpa
+from app.core.settings import FEISHU_WEBHOOK
+from scripts import lp_position_alert as lpa
 
 st.set_page_config(page_title="LP 仓位告警", page_icon="📌", layout="wide")
 st.title("📌 LP 仓位 / 池子价格告警")
@@ -20,7 +20,7 @@ else:
     st.warning("⚠️ 未配置 FEISHU_WEBHOOK，告警仅打印到控制台")
 
 with st.expander("🔍 配置诊断（部署排查用，只显示键名与来源，不显示任何值）"):
-    import config as _cfg
+    import app.core.config as _cfg
     for _name in ("FEISHU_WEBHOOK", "LIBSQL_URL", "LIBSQL_TOKEN", "ADMIN_USER", "ROBINHOOD_RPC"):
         st.write(f"`{_name}` → {_cfg.setting_source(_name)}")
     st.write("st.secrets 中的键名：", _cfg.streamlit_secret_keys())

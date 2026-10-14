@@ -8,10 +8,12 @@ if __package__ in (None, ""):
 
 import streamlit as st
 
-from asset_config import ASSET_TYPE_MAP
-from asset_config import add_new_asset, batch_update_status_by_type, delete_asset
-from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_status
-from asset_grid import render_asset_grid
+from app.interfaces.asset_config import ASSET_TYPE_MAP
+from app.interfaces.asset_config import (
+    add_new_asset, batch_update_status_by_type, delete_asset,
+    ensure_asset_schema, fetch_all_assets, update_asset_status,
+)
+from app.interfaces.asset_grid import render_asset_grid
 try:
     from dex_client import search_okx_symbols
 except ImportError:

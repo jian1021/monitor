@@ -24,3 +24,23 @@ logs/
 
 # Streamlit缓存
 .streamlit/cache/
+
+# AI 工具本地状态（不属于项目代码，部署镜像/仓库不包含）
+.agents/
+.claude/
+skills-lock.json
+.playwright-mcp/
+.sisyphus/
+
+# 本机独立小项目（未纳入本仓库，防止误提交）
+token-reversal-monitor/
+meteora-lp/
+
+# Node（lp-tools 子模块的依赖在部署镜像内安装）
+node_modules/
+
+# Local SQLite data
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*

@@ -2,11 +2,13 @@
 """监控模块启停与执行间隔设置。"""
 import streamlit as st
 
-from db import (
+from app.infrastructure.db.intervals import (
     DEFAULT_INTERVALS,
     get_module_intervals,
-    get_module_settings,
     update_module_interval,
+)
+from app.infrastructure.db.module_settings import (
+    get_module_settings,
     update_module_setting,
 )
 
@@ -21,6 +23,7 @@ MODULE_LABELS = {
     "lp_alert": "💧 LP 仓位 / 池子价格告警",
     "rhpools": "🛰️ Robinhood Pools 观测站",
     "lp_apr": "📐 LP 区间 APR",
+    "fee_screen": "💰 高手续费池筛选",
 }
 
 st.set_page_config(page_title="监控模块设置", page_icon="🎛️", layout="wide")

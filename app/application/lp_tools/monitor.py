@@ -2,7 +2,7 @@
 
 每次运行是秒级的估算（volume feed + 当前流动性），不是分钟级的 replay；
 replay 走 Streamlit 页面手动触发。工具链（Node / 子模块）缺失时静默跳过——
-CI 环境既没有子模块也没有 node_modules，属预期而不是故障。
+未安装 Node 或子模块时跳过，不将缺失依赖作为运行错误。
 """
 
 from app.core.settings import FEISHU_WEBHOOK

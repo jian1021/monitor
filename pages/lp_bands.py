@@ -10,8 +10,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-import lp_bands_tool as tool
-from lp_bands_chart import build_chart_df
+from app.application.lp_bands import tool
+from app.application.lp_bands.chart import build_chart_df
 
 CHAIN_OPTS = ['sol', 'bsc', 'base', 'eth', 'robinhood', 'arc', 'stable']
 RES_OPTS = ['30s', '1m', '5m', '15m', '1h', '4h', '1d']

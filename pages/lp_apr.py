@@ -21,7 +21,8 @@ from app.infrastructure.db.apr_watchlist import (
     set_apr_pool_enabled,
 )
 from app.infrastructure.lp_tools import runner
-from db import get_module_settings, update_module_setting
+from app.infrastructure.db.module_settings import (
+    get_module_settings, update_module_setting)
 
 st.set_page_config(page_title="LP 区间 APR", page_icon="📐", layout="wide")
 st.title("📐 LP 区间 APR（Uniswap v3/v4 · Robinhood Chain）")

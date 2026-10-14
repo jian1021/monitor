@@ -25,11 +25,16 @@ def format_candidate(c: dict) -> str:
     return " · ".join(parts)
 
 
+# asset_config 表的标准列；空结果也返回带列结构的空表，避免页面 df["列名"] KeyError
+ASSET_COLUMNS = ["id", "asset_type", "code", "name", "enabled", "created_at",
+                 "chain", "timeframe", "alarm_active", "last_alert_at"]
+
+
 def fetch_all_assets():
-    """读取所有标的资产"""
+    """读取所有标的资产（无数据库/空表时返回带列结构的空 DataFrame）"""
     client = get_db_client()
     if not client:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=ASSET_COLUMNS)
     try:
         try:
             rs = client.execute('SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe, alarm_active, last_alert_at FROM asset_config ORDER BY id ASC')
@@ -42,7 +47,7 @@ def fetch_all_assets():
         data = []
         for row in rs.rows:
             data.append({'id': row[0], 'asset_type': row[1], 'code': row[2], 'name': row[3], 'enabled': bool(row[4]), 'created_at': row[5], 'chain': (row[6] if has_chain and len(row) > 6 else None) or 'sol', 'timeframe': (row[7] if has_timeframe and len(row) > 7 else None) or '1d', 'alarm_active': bool(row[8]) if len(row) > 8 else False, 'last_alert_at': row[9] if len(row) > 9 else None})
-        return pd.DataFrame(data)
+        return pd.DataFrame(data, columns=ASSET_COLUMNS)
     finally:
         client.close()
 

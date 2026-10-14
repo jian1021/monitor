@@ -2,9 +2,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-import monitor_meme_underval as mu
-from db import get_meme_underval_params, update_meme_underval_params
-from monitor_rsi import get_meteora_native_rsi
+from app.application.monitors import meme_underval as mu
+from app.infrastructure.db.meme_config import (
+    get_meme_underval_params, update_meme_underval_params)
+from app.application.monitors.rsi import get_meteora_native_rsi
 
 st.set_page_config(page_title="Meme 低估监控", layout="wide")
 st.title("🧲 Meme 低估监控")

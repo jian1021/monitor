@@ -1,6 +1,6 @@
 """Stable settings access for new modules; legacy config remains the source."""
 
-from config import (
+from app.core.config import (
     ADMIN_PASS,
     ADMIN_USER,
     FEISHU_WEBHOOK,

@@ -8,13 +8,17 @@ if __package__ in (None, ""):
 
 import streamlit as st
 
-from asset_config import ASSET_TYPE_MAP
-from asset_config import add_new_asset, batch_update_status_by_type, delete_asset
-from asset_config import ensure_asset_schema, fetch_all_assets, update_asset_status
-from asset_config import stale_module_names, token_candidates, format_candidate
-from asset_config import TOKEN_CHAINS, CHAIN_LABELS
-from db import get_db_client
-from asset_grid import render_asset_grid
+from app.interfaces.asset_config import ASSET_TYPE_MAP
+from app.interfaces.asset_config import (
+    add_new_asset, batch_update_status_by_type, delete_asset,
+    ensure_asset_schema, fetch_all_assets, update_asset_status,
+)
+from app.interfaces.asset_config import (
+    stale_module_names, token_candidates, format_candidate,
+    TOKEN_CHAINS, CHAIN_LABELS,
+)
+from app.infrastructure.db.client import get_db_client
+from app.interfaces.asset_grid import render_asset_grid
 
 TOKEN_TIMEFRAMES = {"1d": "日线", "4h": "4H", "1h": "1H"}
 TIMEFRAME_LABELS = {v: k for k, v in TOKEN_TIMEFRAMES.items()}

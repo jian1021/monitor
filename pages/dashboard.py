@@ -5,7 +5,7 @@
 
 import streamlit as st
 
-from asset_config import (
+from app.interfaces.asset_config import (
     add_new_asset,
     batch_update_status_by_type,
     delete_asset,
@@ -14,7 +14,7 @@ from asset_config import (
     stale_module_names,
     update_asset_status,
 )
-from asset_grid import render_asset_grid
+from app.interfaces.asset_grid import render_asset_grid
 
 
 # =============================================================================
