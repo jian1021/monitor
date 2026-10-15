@@ -27,7 +27,7 @@ TIMEFRAME_LABELS = {v: k for k, v in TOKEN_TIMEFRAMES.items()}
 def render_page() -> None:
     FOCUS_TYPES = ["token"]
 
-    st.title("⚙️ 监控标的配置管理")
+    st.title("🔗 链上代币 · 标的管理")
     st.caption("🔎 当前页面专注 **链上代币** 的添加与管理（按公链搜索或直接粘合约地址）；其他资产类别请前往对应页面配置。")
     render_monitor_controls("onchain_token", "链上代币")
 
@@ -138,5 +138,5 @@ def render_page() -> None:
                           update_asset_status=update_asset_status)
 
 if __name__ == "__main__":
-    st.set_page_config(page_title="链上代币 · 监控标的", page_icon="🔗", layout="wide")
+    st.set_page_config(page_title="链上代币 · 标的管理", page_icon="🔗", layout="wide")
     render_page()

@@ -1,6 +1,6 @@
 """lp_position_alert 表：建表、迁移与 CRUD。"""
 
-from app.domain.lp_alert.models import STATUS_OPEN
+from app.domain.lp_alert.models import STATUS_ERROR, STATUS_OPEN
 from app.infrastructure.db.client import get_db_client
 
 
@@ -138,8 +138,12 @@ def load_rules(enabled_only=True, kind=None):
     where, params = [], []
     if enabled_only:
         where.append("enabled = 1")
-        where.append("status = ?")
+        # status 存的是「上次检查结果」，error 表示上一次取数失败。
+        # 这里必须把 error 也算作待检查，否则一次网络抖动就会让规则
+        # 永远不会再被 load 出来，规则从此静默失效。
+        where.append("status IN (?, ?)")
         params.append(STATUS_OPEN)
+        params.append(STATUS_ERROR)
     if kind:
         where.append("kind = ?")
         params.append(kind)

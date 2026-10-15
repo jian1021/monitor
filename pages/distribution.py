@@ -600,7 +600,7 @@ def build_depth_chart(df, pool_info, current_tick, range_pct=50.0):
 
 
 # ================= 5. Streamlit 界面 =================
-st.set_page_config(page_title="代币分布图", page_icon="📊", layout="wide")
+st.set_page_config(page_title="池内代币分布图", page_icon="📊", layout="wide")
 st.title("📊 池内代币分布图")
 st.caption(
     "输入 Uniswap V3 池子合约地址或 V4 poolId，按 Tick 还原各价格区间的代币数量分布。"

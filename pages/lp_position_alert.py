@@ -12,7 +12,7 @@ from app.interfaces.monitor_controls import render_monitor_controls
 from app.core.settings import FEISHU_WEBHOOK
 from scripts import lp_position_alert as lpa
 
-st.set_page_config(page_title="LP 仓位告警", page_icon="📌", layout="wide")
+st.set_page_config(page_title="LP 仓位 / 池子价格告警", page_icon="📌", layout="wide")
 st.title("📌 LP 仓位 / 池子价格告警")
 render_monitor_controls("lp_alert", "LP 仓位 / 池子价格告警")
 
@@ -308,8 +308,9 @@ head_left.subheader("现有规则")
 if head_right.button("🔄 立即检查一次", key="run_now", width="stretch"):
     with st.spinner("正在检查全部启用规则（触发的规则会发飞书）..."):
         lpa.run_once()
-    st.success("检查完成，已刷新下方「当前值 / 盈亏% / 状态」")
-    st.rerun()
+    # 不调用 st.rerun()：本轮结果已写库，下方的规则表在这之后才读取，
+    # rerun 反而会把这条提示立刻冲掉，让用户以为按钮没生效。
+    st.success("检查完成，下方「当前值 / 盈亏% / 状态」已刷新")
 
 rules = lpa.load_rules(enabled_only=False)
 if not rules:

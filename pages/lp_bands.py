@@ -16,10 +16,10 @@ from app.application.lp_bands.chart import build_chart_df
 CHAIN_OPTS = ['sol', 'bsc', 'base', 'eth', 'robinhood', 'arc', 'stable']
 RES_OPTS = ['30s', '1m', '5m', '15m', '1h', '4h', '1d']
 
-st.set_page_config(page_title='LP 区间可视化', layout='wide')
+st.set_page_config(page_title="LP 区间可视化", page_icon="📶", layout="wide")
 
-st.title('LP 自适应区间可视化')
-st.caption('配置代币与 K 线参数后生成自适应价格区间。')
+st.title("📶 LP 区间可视化")
+st.caption("配置代币与 K 线参数后生成自适应价格区间。")
 with st.container(border=True):
     st.subheader('⚙️ 分析参数')
     c1, c2, c3 = st.columns(3)

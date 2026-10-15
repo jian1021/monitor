@@ -455,7 +455,7 @@ def page_results() -> None:
                f"市值缺失（默认不通过）需在排查模式查看。")
     st.caption("数据来源：池行情与代币指标（持仓数 / 前10持仓占比 / 开发方持仓占比 / 冻结与铸币授权 / "
                "开仓人数）均来自 Meteora 官方池发现接口，随扫描一并获取；缺失字段标记为「数据不足（已跳过）」。")
-    st.caption("行情为上次扫描时的快照。可勾选通过筛选的结果，并在下方导入 Meme 超买超卖监控列表。")
+    st.caption("行情为上次扫描时的快照。可勾选通过筛选的结果，并在下方导入 Meme 超卖超买监控列表。")
 
     sort_col = st.selectbox("排序字段", ["评分", "代币X市值", "代币Y市值", "24h成交量", "TVL",
                                           "24h手续费收入", "24hFeesTVL%"])
@@ -506,7 +506,7 @@ def page_results() -> None:
         selected_pools[label] = (address, f"{row.get('代币X') or '?'}-{row.get('代币Y') or '?'}")
 
     with st.container(border=True):
-        st.subheader("➕ 导入到 Meme 超买超卖监控列表")
+        st.subheader("➕ 导入到 Meme 超卖超买监控列表")
         st.caption("先在上方结果表勾选通过筛选的池子，再选择要导入的池。")
         labels = st.multiselect(
             "选择导入池子", options=list(selected_pools),
@@ -514,12 +514,12 @@ def page_results() -> None:
         )
         if not selected_pools:
             st.info("请先勾选一条或多条通过筛选的结果。")
-        if st.button("添加到 Meme 超买超卖监控", type="primary", disabled=not labels):
+        if st.button("添加到 Meme 超卖超买监控", type="primary", disabled=not labels):
             from app.infrastructure.db.meme_watchlist import add_meme_pools
 
             added = add_meme_pools([selected_pools[label] for label in labels])
             if added:
-                st.success(f"已导入 {added} 个池。可在“链上代币 → 批量 Meme 超买超卖”中查看。")
+                st.success(f"已导入 {added} 个池。可在“链上代币 → 批量 Meme 超卖超买”中查看。")
             else:
                 st.error("导入失败，请检查数据库配置。")
 
@@ -562,7 +562,7 @@ def page_help() -> None:
 3. 进入「全池扫描」，点击「开始扫描」。首次为全量扫描，耗时较长，可随时停止并断点续扫。
 4. 在「筛选条件」调整市值/成交量/TVL/Fees-TVL 与评分权重并保存。
 5. 后台扫描完整结束后，会按已保存筛选条件评估结果并通过飞书报警（需要后台进程及 Webhook 配置）。
-6. 在「筛选结果」查看、排序、导出 CSV；勾选通过筛选的池后，可导入「链上代币 → 批量 Meme 超买超卖」监控列表。
+6. 在「筛选结果」查看、排序、导出 CSV；勾选通过筛选的池后，可导入「链上代币 → 批量 Meme 超卖超买」监控列表。
 
 ### 数据说明与口径
 - 市值：DLMM 直接使用官方 `market_cap`，缺失时保留为空。

@@ -27,7 +27,8 @@ if os.name == "nt":
         if callable(_rer):
             _rer(encoding="utf-8", errors="replace")
 
-# 数据拉取逻辑 (Dexscreener, 无需 API Key) 全部在 dex_client.fetch_token_info 中统一处理
+# 数据拉取逻辑 (Dexscreener, 无需 API Key) 统一在
+# app.infrastructure.market_data.dexscreener.fetch_token_info 中处理
 CHAIN_ALIASES = {
     "sol": "SOL", "bsc": "BSC", "base": "BASE", "eth": "ETH",
     "robinhood": "ROBINHOOD", "arc": "ARC", "stable": "STABLE",

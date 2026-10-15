@@ -25,8 +25,20 @@ def search_okx_symbols(query: str, limit: int = 10) -> list:
     data = _safe_get(f"{OKX_BASE}/api/v5/public/instruments?instType=SPOT")
     instruments = (data or {}).get("data") or []
     q = query.strip().upper()
-    matches = [i for i in instruments if q in i.get("instId", "").upper()
-               or q in i.get("base", "").upper()]
+    if not q:
+        return []
+
+    def base_currency(inst: dict) -> str:
+        # OKX v5 现货的字段是 baseCcy/quoteCcy（不是 base/quote）；
+        # 两者都缺失时退回从 instId（BASE-QUOTE）里切出 base。
+        base = inst.get("baseCcy") or inst.get("base") or ""
+        if not base:
+            base = str(inst.get("instId") or "").partition("-")[0]
+        return str(base)
+
+    matches = [i for i in instruments
+               if q in str(i.get("instId") or "").upper()
+               or q in base_currency(i).upper()]
     out = []
     seen = set()
     for inst in matches[:limit * 2]:
@@ -34,7 +46,8 @@ def search_okx_symbols(query: str, limit: int = 10) -> list:
         if not symbol or symbol in seen:
             continue
         seen.add(symbol)
-        out.append({"symbol": symbol, "name": f"{inst.get('base', '')}/{inst.get('quote', '')}"})
+        quote = inst.get("quoteCcy") or inst.get("quote") or ""
+        out.append({"symbol": symbol, "name": f"{base_currency(inst)}/{quote}"})
         if len(out) >= limit:
             break
     return out

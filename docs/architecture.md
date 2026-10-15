@@ -71,3 +71,10 @@ docs/                  # 架构、功能模块与数据源说明
 9. ✅ 监控实现迁入 `application/monitors/`；兼容/CLI 入口集中到 `scripts/`，页面与主循环直接调用应用层实现；命令行入口通过 `python -m scripts.*` 启动。其他实现迁移：`keccak_pure` → `infrastructure/market_data/`、飞书发送 → `infrastructure/notifications/sender.py`、LP bands → `application/lp_bands/`。
 10. ✅ 根契约层退役：`config.py` → `core/config.py`（`settings.py` 为统一出口）；`db.py`/`dex_client.py` 转发壳删除（调用方直连 `infrastructure/db/*`、`market_data/dexscreener`）；`asset_config.py`/`asset_grid.py` → 新增 `interfaces/` 层；顺带修复 `fetch_all_assets()` 空结果无列结构导致的无数据库页面 KeyError（HEAD 上即存在的老 bug）。
 11. ✅ Robinhood 精简：`pages/fee_screen.py` 只保留 DexPaprika Uniswap 候选池扫描（`app/interfaces/dexpaprika_scan.py`）；删除 `domain/fee_screen`、`application/fee_screen`、`db/fee_screen_store`、`interfaces/robinhood_observer`、主循环 `fee_screen` 模块及 `scripts/monitor_fee_screen.py`；`market_data/rh_fee_sources` 与 `infrastructure/rhpools/client` 保留（退出策略沿用）。
+12. ✅ 第 10 条遗漏的调用方收尾 + 一批存量缺陷修复：
+    - `dex_client` 删除后仍有 3 处旧导入（`application/monitors/rsi.get_token_rsi`、`application/lp_bands/tool.load_gmgn`、`pages/st_mainstream_crypto`），分别改指 `market_data/geckoterminal.fetch_ohlcv` 与 `market_data/okx.search_okx_symbols`。修复前链上代币 RSI 监控每轮抛 `ModuleNotFoundError`（被兜底吞成 `(None, None)`，永不告警），LP 区间可视化取数必然失败。
+    - `db/lp_alert.load_rules(enabled_only=True)` 原来只取 `status='open'`，而取数失败会把 `status` 写成 `'error'`，一次网络抖动就让规则永久退出监控；改为 `status IN ('open','error')`，失败后下一轮自动重试。
+    - `application/assets/service.fetch_all_assets` 的 except 回退分支复制了主查询（列完全相同），缺列时异常直接冒到页面；改为按列数逐档真实回退。
+    - `market_data/okx.search_okx_symbols` 读的是不存在的 `base`/`quote`（OKX v5 现货为 `baseCcy`/`quoteCcy`），候选名恒为 `/`。
+    - `application/monitors/rsi` 的 A 股代码解析统一为 `_split_a_share_code`：`_to_bs_code` 支持 `sh.`/`sz.` 写法，腾讯兜底源却按首字符判市场，会拼出 `szsh.600000` 而必然失败。
+    - `pages/lp_apr`、`pages/lp_position_alert` 里无条件 `st.rerun()` 会把成功/失败提示立刻冲掉，导致「安装失败」「检查完成」等反馈用户看不到。

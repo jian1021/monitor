@@ -19,8 +19,9 @@ from app.interfaces.asset_config import (
 # =============================================================================
 # 4. Streamlit 界面构建
 # =============================================================================
-st.title("⚙️ 监控标的配置管理")
-st.caption("集中管理 Meteora 池、可转债和 ETF 监控标的。修改启用状态后保存，即同步到后台监控。")
+st.set_page_config(page_title="超卖监控 · 标的管理", page_icon="⚙️", layout="wide")
+st.title("⚙️ 超卖监控 · 标的管理")
+st.caption("🔎 当前页面专注 **Meteora 池 / 可转债 / ETF** 的添加与管理；其他资产类别请前往对应页面配置。")
 render_monitor_controls("rsi", "RSI 监控")
 
 _missing = stale_module_names()

@@ -79,7 +79,9 @@ def get_token_rsi(chain, address, resolution="1h", length=14, days=None):
     days 为取数窗口天数，直接决定 K 线根数；过小会让 RSI 的 Wilder 平滑未收敛。
     """
     try:
-        from dex_client import fetch_ohlcv
+        # dex_client 已在重构中拆分为 app/infrastructure/market_data/* 适配器；
+        # 这里保留函数内导入，让 lp_bands 等模块仍可脱离包路径单独运行。
+        from app.infrastructure.market_data.geckoterminal import fetch_ohlcv
 
         _t, _o, _h, _l, closes, _v = fetch_ohlcv(chain, address, resolution, days)
         if closes is None or len(closes) < length + RSI_BAR_OFFSET - 1:
@@ -292,14 +294,23 @@ def get_meteora_native_rsi(pool_address, timeframe="hour", aggregate=1, length=1
     return None, None
 
 
+def _split_a_share_code(code):
+    """拆出 (市场前缀, 6 位数字代码)；接受 '600000' 与 'sh.600000' / 'SZ.000001' 两种写法。
+
+    baostock 与腾讯兜底源必须使用同一套解析，否则带市场前缀的配置在
+    baostock 不可用时，兜底源会因为拼出 `szsh.600000` 这类非法代码而必然失败。
+    """
+    text = str(code).strip().lower()
+    if text.startswith(("sh.", "sz.")):
+        text = text[3:]
+    digits = text.zfill(6)
+    market = "sh" if digits[0] in ("5", "6", "9") or digits.startswith("11") else "sz"
+    return market, digits
+
+
 def _to_bs_code(code):
-    c = str(code).strip().lower()
-    if c.startswith(("sh.", "sz.")):
-        return c
-    c = c.zfill(6)
-    if c[0] in ("5", "6", "9") or c.startswith("11"):
-        return f"sh.{c}"
-    return f"sz.{c}"
+    market, digits = _split_a_share_code(code)
+    return f"{market}.{digits}"
 
 
 _TENCENT_KLINE = {
@@ -310,8 +321,7 @@ _TENCENT_KLINE = {
 
 def _get_tencent_rsi(code, length=5, frequency="d"):
     try:
-        c = str(code).strip().lower().zfill(6)
-        mkt = 'sh' if c[0] in ('5', '6', '9') or c.startswith('11') else 'sz'
+        mkt, c = _split_a_share_code(code)
         period, keys = _TENCENT_KLINE.get(str(frequency).lower(), _TENCENT_KLINE["d"])
         url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={mkt}{c},{period},,,320,qfq"
         res = requests.get(url, headers=headers, timeout=10).json()

@@ -8,7 +8,7 @@ from app.infrastructure.db.meme_config import (
     get_meme_underval_params, update_meme_underval_params)
 from app.application.monitors.rsi import get_meteora_native_rsi
 
-st.set_page_config(page_title="Meme 低估监控", layout="wide")
+st.set_page_config(page_title="Meme 低估监控", page_icon="🧲", layout="wide")
 st.title("🧲 Meme 低估监控")
 st.caption("直连 Meteora Top Performers（按 24h 费 / TVL 排序），经市值 / TVL / bin_step / 基础费率预筛后，对头部候选计算 RSI(3, 1h)，只保留超卖钝化标的。")
 render_monitor_controls("meme_underval", "Meme 低估监控")

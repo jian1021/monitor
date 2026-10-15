@@ -15,22 +15,19 @@ from app.interfaces.asset_config import (
     ensure_asset_schema, fetch_all_assets, update_asset_status,
 )
 from app.interfaces.asset_grid import render_asset_grid
-try:
-    from dex_client import search_okx_symbols
-except ImportError:
-    search_okx_symbols = None
+from app.infrastructure.market_data.okx import search_okx_symbols
 
 CRYPTO_TIMEFRAMES = {"1W": "周线", "1D": "日线", "4H": "4H", "1H": "1H", "15m": "15分钟"}
 
 st.set_page_config(
-    page_title="主流加密货币 · 监控标的",
+    page_title="主流加密货币 · 标的管理",
     page_icon="🪙",
     layout="wide",
 )
 
 FOCUS_TYPES = ["crypto"]
 
-st.title("⚙️ 监控标的配置管理")
+st.title("🪙 主流加密货币 · 标的管理")
 st.caption("🔎 当前页面专注 **主流加密货币** 的增删改查与启用/禁用控制；其他资产类别请前往对应页面配置。")
 render_monitor_controls("crypto", "主流加密货币")
 
@@ -41,13 +38,13 @@ def render_crypto_adder():
             "标的代码", placeholder="例如: BTC-USDT 或 SOL-USDT",
             help="OKX 交易对格式，例如 BTC-USDT",
         )
-        if search_okx_symbols is not None and st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
-                                   width="stretch", type="secondary"):
+        if st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
+                                 width="stretch", type="secondary"):
             with st.spinner("正在搜索 ..."):
-                st.session_state["crypto_candidates"] = search_okx_symbols(new_code or "BTC")
-        elif search_okx_symbols is None and st.form_submit_button("🔍 搜索 OKX 交易对", key="crypto_search",
-                                   width="stretch", type="secondary"):
-            st.warning("⚠️ 搜索功能暂时不可用，请直接输入交易对名称添加。")
+                found = search_okx_symbols(new_code or "BTC")
+            st.session_state["crypto_candidates"] = found
+            if not found:
+                st.warning("⚠️ 没有搜到匹配的 OKX 交易对，请检查关键词或直接输入交易对名称。")
 
         candidates = st.session_state.get("crypto_candidates") or []
         if candidates:

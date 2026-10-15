@@ -143,7 +143,7 @@ def run_streamlit():
     import streamlit as st
     import pandas as pd
 
-    st.set_page_config(page_title="池子价格模拟", page_icon="🧪", layout="wide")
+    st.set_page_config(page_title="池子价格模拟器", page_icon="🧪", layout="wide")
     st.title("🧪 池子价格模拟器")
     st.caption("输入 Token 地址 + 公链拉取池子实时数据，预设涨跌幅，结合持仓成本预估盈亏。")
 

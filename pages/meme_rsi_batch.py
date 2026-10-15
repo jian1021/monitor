@@ -122,5 +122,5 @@ def render_page() -> None:
             st.success("本轮无越界标的")
 
 if __name__ == "__main__":
-    st.set_page_config(page_title="批量 Meme 超卖超买监控", layout="wide")
+    st.set_page_config(page_title="批量 Meme 超卖超买监控", page_icon="📡", layout="wide")
     render_page()

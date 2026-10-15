@@ -52,11 +52,14 @@ if not runner.ready():
     if st.button("📦 一键安装（约 1~2 分钟）", type="primary"):
         with st.spinner("拉取代码 / 下载 Node / 安装依赖 ...（看终端日志有进度）"):
             ok = runner.ensure_installed()
-        if ok:
-            st.success("✅ 工具链已就绪")
+        # 只在真正就绪时才 rerun：无条件 rerun 会立刻丢掉下面的成功/失败提示，
+        # 安装失败时用户看不到任何报错，只能反复点同一个按钮。
+        if ok and runner.ready():
+            st.rerun()
+        elif ok:
+            st.warning("安装脚本已执行，但工具链仍未就绪，请展开下方看终端日志里的报错。")
         else:
             st.error("❌ 安装失败——展开下面看终端日志里的报错")
-        st.rerun()
     with st.expander("本机手动安装（不想点按钮的话）"):
         st.code(
             "git submodule update --init\n"

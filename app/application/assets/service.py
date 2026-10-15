@@ -31,19 +31,33 @@ ASSET_COLUMNS = ["id", "asset_type", "code", "name", "enabled", "created_at",
 
 
 def fetch_all_assets():
-    """读取所有标的资产（无数据库/空表时返回带列结构的空 DataFrame）"""
+    """读取所有标的资产（无数据库/空表时返回带列结构的空 DataFrame）
+
+    老库可能缺 chain / timeframe / alarm_active / last_alert_at 等后加列，
+    因此按列数量从多到少逐档回退；每档都真实少查一列，而不是重复同一条 SQL。
+    """
     client = get_db_client()
     if not client:
         return pd.DataFrame(columns=ASSET_COLUMNS)
+    attempts = (
+        ("SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe,"
+         " alarm_active, last_alert_at FROM asset_config ORDER BY id ASC", True, True),
+        ("SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe"
+         " FROM asset_config ORDER BY id ASC", True, True),
+        ("SELECT id, asset_type, code, name, enabled, created_at"
+         " FROM asset_config ORDER BY id ASC", False, False),
+    )
     try:
-        try:
-            rs = client.execute('SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe, alarm_active, last_alert_at FROM asset_config ORDER BY id ASC')
-            has_chain = True
-            has_timeframe = True
-        except Exception:
-            rs = client.execute('SELECT id, asset_type, code, name, enabled, created_at, chain, timeframe FROM asset_config ORDER BY id ASC')
-            has_chain = True
-            has_timeframe = True
+        rs = None
+        last_error = None
+        for sql, has_chain, has_timeframe in attempts:
+            try:
+                rs = client.execute(sql)
+                break
+            except Exception as exc:
+                last_error = exc
+        if rs is None:
+            raise last_error
         data = []
         for row in rs.rows:
             data.append({'id': row[0], 'asset_type': row[1], 'code': row[2], 'name': row[3], 'enabled': bool(row[4]), 'created_at': row[5], 'chain': (row[6] if has_chain and len(row) > 6 else None) or 'sol', 'timeframe': (row[7] if has_timeframe and len(row) > 7 else None) or '1d', 'alarm_active': bool(row[8]) if len(row) > 8 else False, 'last_alert_at': row[9] if len(row) > 9 else None})

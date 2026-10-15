@@ -103,7 +103,9 @@ def gmgn_config_check():
 
 
 def load_gmgn(chain, address, resolution, days=None):
-    from dex_client import fetch_ohlcv
+    # 函数内导入：本文件也作为独立 CLI 运行（--demo/--file），
+    # 那时仓库根目录未必在 sys.path 上，模块级导入会在启动时直接失败。
+    from app.infrastructure.market_data.geckoterminal import fetch_ohlcv
     return fetch_ohlcv(chain, address, resolution, days)
 
 # ---------------- BOCPD 分段 (numpy-only) ----------------

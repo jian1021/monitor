@@ -63,11 +63,11 @@ discover_lp = st.Page("pages/discover_lp.py", title="Meme 低估监控", icon=":
 meme_rsi_batch = st.Page("pages/meme_rsi_batch.py", title="批量 Meme 超卖超买", icon=":material/radar:", visibility="hidden")
 lp_bands = st.Page("pages/lp_bands.py", title="LP 区间可视化", icon=":material/ssid_chart:")
 price_monitor = st.Page("pages/st_monitor_price.py", title="价格监控", icon=":material/track_changes:")
-pool_simulator = st.Page("pages/st_pool_simulator.py", title="池子价格模拟", icon=":material/science:")
-token_distribution = st.Page("pages/distribution.py", title="代币分布图", icon=":material/bar_chart:")
+pool_simulator = st.Page("pages/st_pool_simulator.py", title="池子价格模拟器", icon=":material/science:")
+token_distribution = st.Page("pages/distribution.py", title="池内代币分布图", icon=":material/bar_chart:")
 lp_position_alert_page = st.Page("pages/lp_position_alert.py", title="LP 仓位告警", icon=":material/notifications_active:")
 lp_apr = st.Page("pages/lp_apr.py", title="LP 区间 APR", icon=":material/function:")
-exit_strategy = st.Page("pages/exit_strategy.py", title="退出策略", icon=":material/notifications_active:")
+exit_strategy = st.Page("pages/exit_strategy.py", title="退出策略", icon=":material/notification_important:")
 monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设置", icon=":material/tune:")
 
 

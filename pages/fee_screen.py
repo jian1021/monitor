@@ -21,5 +21,5 @@ def render_page() -> None:
 
 
 if __name__ == "__main__":
-    st.set_page_config(page_title="Robinhood 全池扫描", page_icon="🦅", layout="wide")
+    st.set_page_config(page_title="Robinhood Chain 全池扫描", page_icon="🦅", layout="wide")
     render_page()

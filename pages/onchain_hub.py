@@ -3,13 +3,13 @@
 import streamlit as st
 
 
-st.set_page_config(page_title="链上代币", page_icon="🔗", layout="wide")
-st.title("🔗 链上代币")
+st.set_page_config(page_title="全链扫描与链上代币", page_icon="🔗", layout="wide")
+st.title("🔗 全链扫描与链上代币")
 st.caption("在标签页中直接使用代币工具和链上全池扫描器。")
 
 token_tab, meme_tab, meteora_tab, robinhood_tab, price_range_tab = st.tabs([
     "🪙 链上代币管理",
-    "📡 批量 Meme 超买超卖",
+    "📡 批量 Meme 超卖超买",
     "🌊 Meteora 全池扫描",
     "🦅 Robinhood 全池扫描",
     "📐 价格区间计算",
