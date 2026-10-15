@@ -9,7 +9,7 @@ DEFAULT_INTERVALS = {
     "onchain_token":      30,   # 链上代币 RSI 监控：30 分钟
     "meme_underval":       30,   # Meme 低估监控（Top Performers）：30 分钟
     "meme_rsi_batch":      60,   # 批量 Meme 超卖超买监控：60 分钟
-    "lp_alert":            5,   # LP 仓位 / 池子价格告警：5 分钟
+    "lp_alert":           60,   # LP 仓位 / 池子价格告警：60 分钟
     "lp_apr":             60,   # LP 区间 APR 估算（robinhood-chain-lp-tools）：60 分钟
     "meteora_scan":       60,   # Meteora DLMM 全池扫描：60 分钟
     "exit_strategy": 1,
