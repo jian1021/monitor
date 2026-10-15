@@ -28,10 +28,17 @@ class TestAppRendering(unittest.TestCase):
         self.assertFalse(at.exception, f"首页异常: {at.exception}")
         labels = [tab.label for tab in at.tabs]
         self.assertEqual(len(labels), 5)
+        # 标签前缀与「全链扫描与链上代币」工作区的一级标签统一用 emoji，不用圆圈数字
         self.assertEqual(labels, [
-            "① 全池扫描", "② 筛选条件", "③ 筛选结果", "④ API 状态与错误日志",
-            "⑤ 使用说明",
+            "▶️ 全池扫描", "⚙️ 筛选条件", "📋 筛选结果", "🔌 API 状态与错误日志",
+            "📖 使用说明",
         ])
+        # 标签名即标题：子页面不得再输出同名大标题（否则同屏双标题）
+        self.assertEqual([t.value for t in at.title],
+                         ["🌊 Meteora 全池扫描与筛选器"])
+        for heading in at.header:
+            self.assertNotIn(heading.value, labels,
+                             f"子页面重复渲染了与标签名相同的标题: {heading.value}")
 
 
 if __name__ == "__main__":

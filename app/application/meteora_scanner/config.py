@@ -40,12 +40,12 @@ def _get_int(key: str, default: int) -> int:
 DLMM_BASE_URL = os.getenv("METEORA_DLMM_BASE_URL", "https://pool-discovery-api.datapi.meteora.ag").rstrip("/")
 # DLMM K 线接口（pool-discovery 不提供 OHLCV，仅此用途）。
 DLMM_KLINE_BASE_URL = os.getenv("METEORA_DLMM_KLINE_BASE_URL", "https://dlmm.datapi.meteora.ag").rstrip("/")
-# CoinGecko（页面⑨ 价格区间计算的数据源；填入 API Key 后自动切换到 pro 域名）
+# CoinGecko（价格区间计算的数据源；填入 API Key 后自动切换到 pro 域名）
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "").strip()
 COINGECKO_BASE_URL = (
     "https://pro-api.coingecko.com/api/v3" if COINGECKO_API_KEY else "https://api.coingecko.com/api/v3"
 ).rstrip("/")
-# DEX Paprika（页面⑨ 池级 K 线数据源）。
+# DEX Paprika（价格区间计算的池级 K 线数据源）。
 # 免费注册 Key（console.dexpaprika.com）解锁 10m+ 粒度 + 最近 7 天；无 Key 仅 1h+ 且最近 24h。
 DEXPAPRIKA_API_KEY = os.getenv("DEXPAPRIKA_API_KEY", "").strip()
 DEXPAPRIKA_BASE_URL = os.getenv("DEXPAPRIKA_BASE_URL", "https://api.dexpaprika.com").rstrip("/")

@@ -14,7 +14,7 @@ def render_monitor_controls(module_key: str, label: str) -> None:
     interval = int(intervals.get(module_key, DEFAULT_INTERVALS.get(module_key, 60)))
 
     with st.container(border=True):
-        st.markdown(f"##### ⚙️ {label}后台监控")
+        st.subheader(f"⚙️ {label}后台监控")
         left, right = st.columns([1, 2])
         new_enabled = left.toggle(
             "启用后台监控", value=enabled, key=f"monitor_enabled_{module_key}"

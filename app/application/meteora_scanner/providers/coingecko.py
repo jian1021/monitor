@@ -1,5 +1,5 @@
 """
-CoinGecko 数据源（页面⑨ 价格区间计算）。
+CoinGecko 数据源（价格区间计算）。
 
 接口（官方 v3，已实测）：
   - 搜索:      GET /search?query={关键字}          -> {coins:[{id,symbol,name,market_cap_rank,...}]}

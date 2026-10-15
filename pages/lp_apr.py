@@ -72,7 +72,7 @@ if not runner.ready():
 st.divider()
 
 # ------------------------- 计算器 -------------------------
-st.markdown("##### 🧮 计算器")
+st.subheader("🧮 计算器")
 mode = st.radio("模式", ["APR 估算（秒级）", "APR vs 区间宽度扫描", "精确回放（分钟级）"],
                 horizontal=True)
 
@@ -165,7 +165,7 @@ if result:
 st.divider()
 
 # ------------------------- 观察列表 -------------------------
-st.markdown("##### 👀 观察列表（主循环定时估算）")
+st.subheader("👀 观察列表（主循环定时估算）")
 st.caption("APR 越过阈值时推飞书（同池同方向 6 小时去重）；阈值留空 = 不告警。")
 
 with st.form("add_apr_pool", clear_on_submit=True):

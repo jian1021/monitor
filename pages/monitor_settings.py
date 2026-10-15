@@ -30,7 +30,7 @@ if "sidebar_order_draft" not in st.session_state:
 if st.session_state.pop("sidebar_order_saved", False):
     st.success("侧边栏顺序已保存并生效。")
 
-st.markdown("##### 🧭 侧边栏模块顺序")
+st.subheader("🧭 侧边栏模块顺序")
 st.caption("选择分组和模块后用上移、下移调整；保存后侧边栏会立即按新顺序显示。")
 group_col, module_col, up_col, down_col = st.columns([2, 3, 1, 1])
 selected_group = group_col.selectbox("导航分组", list(NAVIGATION_GROUPS), key="navigation_group")

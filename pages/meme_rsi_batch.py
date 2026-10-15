@@ -43,7 +43,7 @@ def render_page(embedded: bool = False) -> None:
                 st.error("❌ 保存失败（数据库不可用）")
 
     st.divider()
-    st.markdown("##### ➕ 导入池子地址")
+    st.subheader("➕ 导入池子地址")
     text = st.text_area("粘贴 Solana 池子地址（每行 / 逗号 / 空格分隔）",
                         height=140, key="mrb_input")
     if st.button("解析并添加", type="primary"):
@@ -60,7 +60,7 @@ def render_page(embedded: bool = False) -> None:
                        + ", ".join(invalid[:10]) + (" ..." if len(invalid) > 10 else ""))
 
     st.divider()
-    st.markdown("##### 📋 监控列表")
+    st.subheader("📋 监控列表")
 
     pools = list_meme_watchlist_pools()
     if not pools:

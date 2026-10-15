@@ -201,7 +201,7 @@ def run_streamlit():
 
     # ---- 池子关键指标卡片 ----
     st.divider()
-    st.markdown(f"#### {data['symbol'] or address[:10]} — 池子实时数据")
+    st.subheader(f"{data['symbol'] or address[:10]} — 池子实时数据")
     fee_display = f"{data['fee_ratio']}" + ("%" if data["fee_ratio"] else " (未披露)")
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("现价", f"{data['price']:.8g}" if data["price"] is not None else "-")
@@ -246,7 +246,7 @@ def run_streamlit():
 
     df = pd.DataFrame(rows)
     st.divider()
-    st.markdown(f"#### 💰 预估盈亏（持仓 {qty:g} @ 成本 {cost:.8g}，当前市值 {qty*data['price']:.4g}）")
+    st.subheader(f"💰 预估盈亏（持仓 {qty:g} @ 成本 {cost:.8g}，当前市值 {qty*data['price']:.4g}）")
 
     def color_pnl(val_str):
         try:

@@ -1,4 +1,4 @@
-"""DEX Paprika 数据源测试（页面⑨ 池级 K 线，不回放网络请求，使用伪客户端）。"""
+"""DEX Paprika 数据源测试（价格区间计算的池级 K 线，不回放网络请求，使用伪客户端）。"""
 
 import unittest
 from datetime import datetime, timezone

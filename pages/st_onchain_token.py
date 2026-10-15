@@ -86,7 +86,7 @@ def render_page(embedded: bool = False) -> None:
         sub_df = focus_df[focus_df["asset_type"] == type_key]
         type_label = ASSET_TYPE_MAP.get(type_key, type_key)
 
-        st.markdown(f"##### {type_label} 列表（{len(sub_df)} 条）")
+        st.subheader(f"{type_label} 列表（{len(sub_df)} 条）")
 
         if sub_df.empty:
             st.caption(f"该类别 [{type_label}] 下暂无标的资产。")

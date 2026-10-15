@@ -266,7 +266,7 @@ st.dataframe(
 st.divider()
 
 # ================= 管理操作 =================
-st.markdown("#### 🛠️ 规则管理")
+st.subheader("🛠️ 规则管理")
 
 # 手动触发一次查价 (Dexscreener)
 with st.expander("🔍 立即检查选中规则价格"):

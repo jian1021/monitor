@@ -1,5 +1,5 @@
 """
-DEX Paprika 数据源（页面⑨ 池级 K 线）。
+DEX Paprika 数据源（价格区间计算的池级 K 线）。
 
 接口（官方 v3，已实测）：
   - 池详情:  GET /networks/{network}/pools/{pool_address}
@@ -8,7 +8,7 @@ DEX Paprika 数据源（页面⑨ 池级 K 线）。
 鉴权：
   - 请求头 Authorization: <api_key>（原始 Key，无 Bearer 前缀）。Key 可选：
       * 无 Key   -> 仅 interval 1h/6h/12h/24h，回看最近 24 小时；
-      * 免费 Key -> 增加 10m/15m/30m，回看最近 7 天（本项目页面⑨ 使用）。
+      * 免费 Key -> 增加 10m/15m/30m，回看最近 7 天（本项目的价格区间计算使用）。
   - 注意：默认 PowerShell/无 UA 请求会被网关拦截为 402；统一 HttpClient 自带
     User-Agent=MeteoraPoolScanner/3.1，实测可正常访问。
 

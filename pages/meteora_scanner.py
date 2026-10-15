@@ -47,14 +47,14 @@ def get_scanner() -> Scanner:
 
 @st.cache_resource(show_spinner=False)
 def get_coingecko():
-    """页面⑨ 专用 CoinGecko 客户端（自动携带 COINGECKO_API_KEY 请求头）。"""
+    """价格区间计算专用 CoinGecko 客户端（自动携带 COINGECKO_API_KEY 请求头）。"""
     return coingecko.new_client(base_url=config.COINGECKO_BASE_URL,
                                 requests_per_second=config.COINGECKO_RPS)
 
 
 @st.cache_resource(show_spinner=False)
 def get_dexpaprika():
-    """页面⑨ 专用 DEX Paprika 客户端（自动携带 DEXPAPRIKA_API_KEY 请求头）。"""
+    """价格区间计算专用 DEX Paprika 客户端（自动携带 DEXPAPRIKA_API_KEY 请求头）。"""
     return dexpaprika.new_client(base_url=config.DEXPAPRIKA_BASE_URL,
                                  requests_per_second=config.DEXPAPRIKA_RPS)
 
@@ -144,7 +144,6 @@ def render_status_bar(embedded: bool = False) -> None:
     running_types = [pt for pt, p in prog.items() if p.get("state") == "running"]
     current = "、".join(running_types) if running_types else "空闲"
 
-    dlmm_found = status.get(config.POOL_TYPE_DLMM, {}).get("pools_discovered") or counts.get(config.POOL_TYPE_DLMM, 0)
     dlmm_status = status.get(config.POOL_TYPE_DLMM, {})
     dlmm_found = dlmm_status.get("pools_discovered") or counts.get(config.POOL_TYPE_DLMM, 0)
     processed = dlmm_status.get("pools_processed") or 0
@@ -152,7 +151,8 @@ def render_status_bar(embedded: bool = False) -> None:
     last_scan = dlmm_status.get("last_scan_time") or "-"
 
     if not embedded:
-        st.markdown(f"### 📈 {config.APP_TITLE} {config.APP_VERSION}")
+        st.title(f"🌊 {config.APP_TITLE}")
+        st.caption(f"版本 {config.APP_VERSION}｜扫描 Meteora DLMM 全池并按保存的筛选条件评估、报警。")
     c = st.columns(5)
     c[0].metric("当前扫描类型", current)
     c[1].metric("DLMM 已发现", f"{dlmm_found:,}")
@@ -179,8 +179,6 @@ def render_status_bar(embedded: bool = False) -> None:
 # 页面 1：全池扫描
 # ===========================================================================
 def page_scan() -> None:
-    st.header("① 全池扫描")
-    st.caption("扫描 Meteora DLMM 流动池。支持分页、去重、断点续扫。")
     render_monitor_controls("meteora_scan", "Meteora DLMM 全池扫描")
 
     scanner = get_scanner()
@@ -234,7 +232,7 @@ def page_scan() -> None:
             prog = sc.progress
             if not prog:
                 return
-            st.markdown("#### 扫描进度")
+            st.subheader("扫描进度")
             for pt, p in prog.items():
                 total_pages = p.get("total_pages") or "?"
                 st.markdown(
@@ -268,7 +266,6 @@ def page_scan() -> None:
 # 页面 2：筛选条件
 # ===========================================================================
 def page_filters() -> None:
-    st.header("② 筛选条件")
     st.caption("以下为默认值，可随时修改并保存。市值筛选为硬性条件，默认在展示前执行。")
     f = get_filters()
 
@@ -440,7 +437,6 @@ def _build_result_df(rows: list[dict], show_failed: bool) -> pd.DataFrame:
 
 
 def page_results() -> None:
-    st.header("③ 筛选结果")
     flash = st.session_state.pop("_results_flash", None)
     if flash:
         st.success(flash)
@@ -520,7 +516,7 @@ def page_results() -> None:
 
             added = add_meme_pools([selected_pools[label] for label in labels])
             if added:
-                st.success(f"已导入 {added} 个池。可在“链上代币 → 批量 Meme 超卖超买”中查看。")
+                st.success(f"已导入 {added} 个池。可在“全链扫描与链上代币 → 批量 Meme 超卖超买”中查看。")
             else:
                 st.error("导入失败，请检查数据库配置。")
 
@@ -529,7 +525,6 @@ def page_results() -> None:
 # 页面 4：API 状态与错误日志
 # ===========================================================================
 def page_api_status() -> None:
-    st.header("④ API 状态与错误日志")
     db = get_db()
     st.subheader("接口信息（已实测验证）")
     st.markdown(f"""
@@ -542,6 +537,7 @@ def page_api_status() -> None:
 """)
     if st.button("清空错误日志"):
         db.clear_api_errors()
+        st.toast("已清空 API 错误日志。", icon="🧹")
         st.rerun()
     errs = db.get_api_errors(300)
     if errs:
@@ -555,7 +551,6 @@ def page_api_status() -> None:
 # 页面 5：使用说明
 # ===========================================================================
 def page_help() -> None:
-    st.header("⑤ 使用说明")
     st.markdown("""
 ### 快速开始
 1. 按项目 README 配置环境变量；飞书 Webhook 全项目统一使用 `FEISHU_WEBHOOK`，Meteora 可选签名密钥为 `FEISHU_WEBHOOK_SECRET`。
@@ -563,7 +558,7 @@ def page_help() -> None:
 3. 进入「全池扫描」，点击「开始扫描」。首次为全量扫描，耗时较长，可随时停止并断点续扫。
 4. 在「筛选条件」调整市值/成交量/TVL/Fees-TVL 与评分权重并保存。
 5. 后台扫描完整结束后，会按已保存筛选条件评估结果并通过飞书报警（需要后台进程及 Webhook 配置）。
-6. 在「筛选结果」查看、排序、导出 CSV；勾选通过筛选的池后，可导入「链上代币 → 批量 Meme 超卖超买」监控列表。
+6. 在「筛选结果」查看、排序、导出 CSV；勾选通过筛选的池后，可导入「批量 Meme 超卖超买」监控列表。
 
 ### 数据说明与口径
 - 市值：DLMM 直接使用官方 `market_cap`，缺失时保留为空。
@@ -595,8 +590,14 @@ def _fmt_price(v) -> str:
     return f"{float(v):,.8g}"
 
 
-def render_price_range() -> None:
-    st.header("📐 价格区间计算（ATR）")
+def render_price_range(embedded: bool = False) -> None:
+    """价格区间（ATR）计算器。
+
+    由「全链扫描与链上代币」工作区作为独立标签页呈现；embedded=True 时
+    标题由外层 tab 提供，此处只保留说明。
+    """
+    if not embedded:
+        st.title("📐 价格区间计算")
     st.caption("输入 **池地址**（DEX Paprika **池级 K 线**）或 **代币**（CoinGecko 代币 K 线），"
                "实时获取美元价格与 K 线，用 **ta 库**计算 ATR，按倍数（默认 1.5）计算上下价格区间：")
     st.markdown("**上价 = 当前价格 + 倍数 × ATR**　｜　**下价 = 当前价格 − 倍数 × ATR**")
@@ -685,7 +686,7 @@ def render_price_range() -> None:
 
         price = float(market["price"])
         atr_v, upper, lower = res["atr"], res["upper"], res["lower"]
-        st.markdown("#### 计算结果")
+        st.subheader("计算结果")
         cm = st.columns(5)
         cm[0].metric("ATR", _fmt_price(atr_v))
         cm[1].metric("上价（价格+倍数×ATR）", _fmt_price(upper))
@@ -701,31 +702,39 @@ def render_price_range() -> None:
 # 主入口
 # ===========================================================================
 PAGES = {
-    "① 全池扫描": page_scan,
-    "② 筛选条件": page_filters,
-    "③ 筛选结果": page_results,
-    "④ API 状态与错误日志": page_api_status,
-    "⑤ 使用说明": page_help,
+    "▶️ 全池扫描": page_scan,
+    "⚙️ 筛选条件": page_filters,
+    "📋 筛选结果": page_results,
+    "🔌 API 状态与错误日志": page_api_status,
+    "📖 使用说明": page_help,
 }
 
 PAGE_DESCRIPTIONS = {
-    "① 全池扫描": "启动 DLMM 池扫描并查看实时进度。",
-    "② 筛选条件": "配置市值、成交量、持有人和风险规则。",
-    "③ 筛选结果": "查看通过筛选的池及评分详情。",
-    "④ API 状态与错误日志": "查看数据源状态、请求统计和错误记录。",
-    "⑤ 使用说明": "查看扫描器功能与使用帮助。",
+    "▶️ 全池扫描": "启动 Meteora DLMM 全池扫描并查看实时进度；支持分页、去重、断点续扫。",
+    "⚙️ 筛选条件": "配置市值、成交量、TVL、持有人与风险规则。",
+    "📋 筛选结果": "查看通过筛选的池与评分详情，可导出 CSV 或导入 Meme 监控列表。",
+    "🔌 API 状态与错误日志": "查看数据源地址、限频、请求统计与错误记录。",
+    "📖 使用说明": "查看扫描器功能、数据口径与使用帮助。",
 }
 
 
-def main(embedded: bool = False) -> None:
+def render_page(embedded: bool = False) -> None:
+    """标签页入口。
+
+    embedded=True（内嵌进「全链扫描与链上代币」工作区）时由外层 tab 提供标题，
+    本页不再渲染大标题，避免同屏出现两个标题。
+    """
+    if embedded:
+        st.caption("扫描 Meteora DLMM 全池、按保存的筛选条件评估并报警；下方按「扫描 → 筛选 → 结果」的顺序排列。")
     render_status_bar(embedded=embedded)
     tabs = st.tabs(list(PAGES), on_change="rerun", key="meteora_scanner_tabs")
-    for (label, render_page), tab in zip(PAGES.items(), tabs):
+    for (label, render_tab), tab in zip(PAGES.items(), tabs):
         if tab.open:
             with tab:
                 st.caption(PAGE_DESCRIPTIONS[label])
-                render_page()
+                render_tab()
 
 
 if __name__ == "__main__":
-    main()
+    st.set_page_config(page_title="Meteora 全池扫描", page_icon="🌊", layout="wide")
+    render_page()
