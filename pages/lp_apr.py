@@ -192,7 +192,7 @@ with st.form("add_apr_pool", clear_on_submit=True):
                 max_apr=new_max if new_max > 0 else None,
             )
             if ok:
-                st.success("✅ 已加入观察列表")
+                st.toast("已加入观察列表", icon="✅")
                 st.rerun()
             else:
                 st.error("❌ 加入失败（写库异常，看终端日志）")

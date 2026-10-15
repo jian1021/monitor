@@ -134,7 +134,7 @@ def now_str() -> str:
 # ===========================================================================
 # 顶部状态栏（文档 11.）
 # ===========================================================================
-def render_status_bar() -> None:
+def render_status_bar(embedded: bool = False) -> None:
     db = get_db()
     counts = db.count_pools()
     status = {r["pool_type"]: r for r in db.get_scan_status()}
@@ -151,7 +151,8 @@ def render_status_bar() -> None:
     failures = dlmm_status.get("failures") or 0
     last_scan = dlmm_status.get("last_scan_time") or "-"
 
-    st.markdown(f"### 📈 {config.APP_TITLE} {config.APP_VERSION}")
+    if not embedded:
+        st.markdown(f"### 📈 {config.APP_TITLE} {config.APP_VERSION}")
     c = st.columns(5)
     c[0].metric("当前扫描类型", current)
     c[1].metric("DLMM 已发现", f"{dlmm_found:,}")
@@ -245,7 +246,7 @@ def page_scan() -> None:
             if not sc.is_running():
                 st.session_state.scan_running = False
                 st.session_state.refresh_counter = st.session_state.get("refresh_counter", 0) + 1
-                st.success("扫描结束。")
+                st.toast("扫描结束。", icon="✅")
                 st.rerun()
 
         _progress_fragment()
@@ -716,8 +717,8 @@ PAGE_DESCRIPTIONS = {
 }
 
 
-def main() -> None:
-    render_status_bar()
+def main(embedded: bool = False) -> None:
+    render_status_bar(embedded=embedded)
     tabs = st.tabs(list(PAGES), on_change="rerun", key="meteora_scanner_tabs")
     for (label, render_page), tab in zip(PAGES.items(), tabs):
         if tab.open:

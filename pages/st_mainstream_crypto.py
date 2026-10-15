@@ -62,7 +62,7 @@ def render_crypto_adder():
         submitted = st.form_submit_button("添加主流加密货币", type="primary")
         if submitted and new_code.strip():
             if add_new_asset("crypto", new_code, new_name or new_code, timeframe=new_timeframe):
-                st.success(f"✅ 已添加主流加密货币: {new_code.strip()}")
+                st.toast(f"已添加主流加密货币: {new_code.strip()}", icon="✅")
                 st.rerun()
 
 

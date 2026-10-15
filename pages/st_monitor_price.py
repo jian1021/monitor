@@ -15,17 +15,10 @@ from app.infrastructure.db.client import get_db_client
 from app.application.monitors.price import CREATE_INDEX_SQL, CREATE_TABLE_SQL
 from app.infrastructure.notifications.sender import send_feishu_msg
 from app.infrastructure.market_data.dexscreener import fetch_token_info
+from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
 
-CHAIN_OPTIONS = ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"]
-CHAIN_LABELS = {
-    "sol": "Solana (SOL)",
-    "bsc": "BNB Chain (BSC)",
-    "base": "Base",
-    "eth": "Ethereum (ETH)",
-    "robinhood": "Robinhood (RH)",
-    "arc": "ARC",
-    "stable": "Stable",
-}
+# 链选项唯一来源：app/interfaces/asset_config.py（TOKEN_CHAINS / CHAIN_LABELS）
+CHAIN_OPTIONS = TOKEN_CHAINS
 
 # 建表语句唯一源：monitor_price.CREATE_TABLE_SQL / CREATE_INDEX_SQL，本页直接复用。
 
@@ -200,9 +193,9 @@ with st.expander("➕ 新增价格监控规则", expanded=True):
                         info, _source = fetch_token_info(new_chain, new_address.strip())
                         symbol = str((info or {}).get("symbol") or "").strip()
                 if add_rule(new_address, new_chain, new_target, new_direction, symbol):
-                    st.success(f"✅ 已添加规则: {new_address[:10]}... "
-                               f"({CHAIN_LABELS[new_chain]}) 符号 {symbol or '未识别'} "
-                               f"目标 {new_target}")
+                    st.toast(f"已添加规则: {new_address[:10]}... "
+                             f"({CHAIN_LABELS[new_chain]}) 符号 {symbol or '未识别'} "
+                             f"目标 {new_target}", icon="✅")
                     st.rerun()
 
 st.divider()

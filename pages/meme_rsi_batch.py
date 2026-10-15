@@ -11,11 +11,12 @@ from app.infrastructure.db.meme_watchlist import (
     update_meme_rsi_params,
 )
 from app.interfaces.monitor_controls import render_monitor_controls
-def render_page() -> None:
-    st.title("📡 批量 Meme 超卖超买监控")
+def render_page(embedded: bool = False) -> None:
+    if not embedded:
+        st.title("📡 批量 Meme 超卖超买监控")
     st.caption("粘贴 Solana(Meteora) 池子地址生成监控列表；常驻进程按所选周期的 RSI(3) 越界合并推送飞书。")
 
-    render_monitor_controls("meme_rsi_batch", "批量 Meme 超买超卖")
+    render_monitor_controls("meme_rsi_batch", "批量 Meme 超卖超买")
 
     params = get_meme_rsi_params()
     st.caption(f"RSI 周期固定为 {mrb.RSI_PERIOD}（不可改）；可选 15 分钟或 1 小时 K 线周期。")
@@ -95,10 +96,12 @@ def render_page() -> None:
         with m1:
             if st.button("启用" if not current else "停用", width="stretch"):
                 set_meme_pool_enabled(target, not current)
+                st.toast("已启用" if not current else "已停用", icon="✅")
                 st.rerun()
         with m2:
             if st.button("🗑️ 删除", width="stretch"):
                 remove_meme_pool(target)
+                st.toast("已删除", icon="🗑️")
                 st.rerun()
 
     if st.button("🔍 立即扫描一次", type="primary", width="stretch"):

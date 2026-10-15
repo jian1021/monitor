@@ -7,6 +7,8 @@ import streamlit as st
 from app.interfaces.monitor_controls import render_monitor_controls
 
 from app.interfaces.asset_config import (
+    CHAIN_LABELS,
+    TOKEN_CHAINS,
     add_new_asset,
     delete_asset,
     ensure_asset_schema,
@@ -36,12 +38,6 @@ ASSET_TYPE_MAP = {
     "etf": "📊 ETF",
 }
 
-# --- 侧边栏：全局账户操作 ---
-with st.sidebar:
-    st.write("👤 **当前登录：管理员**")
-    if st.button("🚪 退出登录"):
-        st.session_state["logged_in"] = False
-        st.rerun()
 # --- 读取标的 ---
 ensure_asset_schema()
 df = fetch_all_assets()
@@ -54,11 +50,8 @@ with st.container(border=True):
             "资产类别", options=list(ASSET_TYPE_MAP),
             format_func=lambda key: ASSET_TYPE_MAP[key],
         )
-        chain = c2.selectbox("所属链", ["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"],
-                             format_func=lambda key: {
-                                 "sol": "Solana", "bsc": "BNB Chain", "base": "Base",
-                                 "eth": "Ethereum", "robinhood": "Robinhood", "arc": "Arc", "stable": "Stable",
-                             }[key])
+        chain = c2.selectbox("所属链", TOKEN_CHAINS,
+                             format_func=lambda key: CHAIN_LABELS[key])
         code_placeholder = "池子地址" if new_type == "meteora" else "代码或合约地址"
         new_code = c3.text_input("标的代码 / 地址", placeholder=code_placeholder)
         new_name = c4.text_input("显示名称（可选）", placeholder="未填写时使用代码")
@@ -67,7 +60,7 @@ with st.container(border=True):
             if not new_code.strip():
                 st.warning("请输入标的代码或地址。")
             elif add_new_asset(new_type, new_code, new_name, chain=chain):
-                st.success(f"已添加：{new_name.strip() or new_code.strip()}")
+                st.toast(f"已添加：{new_name.strip() or new_code.strip()}", icon="✅")
                 st.rerun()
 
 total_count = len(df)
@@ -154,7 +147,7 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
             if failed:
                 st.error(f"有 {failed} 条状态保存失败，请检查数据库连接。")
             else:
-                st.success(f"运行状态已保存（更新 {updates} 条）。")
+                st.toast(f"运行状态已保存（更新 {updates} 条）。", icon="✅")
                 st.rerun()
 
         with st.expander("删除标的", expanded=False):
@@ -171,6 +164,6 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
                          key=f"delete_asset_{type_key}"):
                 if delete_asset(selected_id):
                     st.session_state[f"confirm_delete_{type_key}"] = False
-                    st.success("标的已删除。")
+                    st.toast("标的已删除。", icon="🗑️")
                     st.rerun()
                 st.error("删除失败，请检查数据库连接。")

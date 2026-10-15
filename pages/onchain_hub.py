@@ -18,25 +18,25 @@ if token_tab.open:
     with token_tab:
         from pages.st_onchain_token import render_page
 
-        render_page()
+        render_page(embedded=True)
 
 if meme_tab.open:
     with meme_tab:
         from pages.meme_rsi_batch import render_page
 
-        render_page()
+        render_page(embedded=True)
 
 if meteora_tab.open:
     with meteora_tab:
         from pages.meteora_scanner import main as render_meteora_scanner
 
-        render_meteora_scanner()
+        render_meteora_scanner(embedded=True)
 
 if robinhood_tab.open:
     with robinhood_tab:
         from pages.fee_screen import render_page
 
-        render_page()
+        render_page(embedded=True)
 
 if price_range_tab.open:
     with price_range_tab:

@@ -138,7 +138,7 @@ with tab_lp:
                             "entry_price": None,
                         })
                         if created:
-                            st.success("✅ 规则已添加")
+                            st.toast("规则已添加", icon="✅")
                             st.rerun()
                         else:
                             st.error("❌ 规则写入失败")
@@ -225,7 +225,7 @@ with tab_price:
                             "entry_tick": picked["active_tick"],
                         })
                         if created:
-                            st.success("✅ 规则已添加")
+                            st.toast("规则已添加", icon="✅")
                             st.rerun()
                         else:
                             st.error("❌ 规则写入失败")
@@ -297,7 +297,7 @@ with tab_price:
                             "entry_price": entry_price,
                         })
                         if created:
-                            st.success("✅ 规则已添加")
+                            st.toast("规则已添加", icon="✅")
                             st.rerun()
                         else:
                             st.error("❌ 规则写入失败")

@@ -17,6 +17,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.infrastructure.market_data.dexscreener import fetch_token_info
+from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
 
 # Windows 控制台默认 cp1252 无法打印中文/emoji，强制 UTF-8 输出
 if os.name == "nt":
@@ -158,12 +159,8 @@ def run_streamlit():
         with c2:
             chain = st.selectbox(
                 "所属公链",
-                options=["sol", "bsc", "base", "eth", "robinhood", "arc", "stable"],
-                format_func=lambda x: {
-                    "sol": "Solana (SOL)", "bsc": "BNB Chain (BSC)", "base": "Base",
-                    "eth": "Ethereum (ETH)", "robinhood": "Robinhood", "arc": "ARC",
-                    "stable": "Stable",
-                }[x],
+                options=TOKEN_CHAINS,
+                format_func=lambda x: CHAIN_LABELS[x],
             )
         c3, c4 = st.columns(2)
         with c3:
@@ -179,14 +176,13 @@ def run_streamlit():
         )
         submitted = st.form_submit_button("🚀 拉取数据并模拟", type="primary")
 
-    if submitted or (st.session_state.get("sim_addr") and st.session_state.get("sim_submit")):
-        st.session_state["sim_submit"] = False
+    if submitted:
         if not address.strip():
             st.warning("⚠️ 请输入 Token 合约地址")
             st.stop()
 
         # ---- 拉取池子数据 ----
-        with st.spinner("正在通过 GMGN 拉取池子数据 ..."):
+        with st.spinner("正在通过 Dexscreener 拉取池子数据 ..."):
             data = fetch_pool(chain, address)
         if "error" in data:
             st.error(f"❌ 拉取失败: {data['error']}")
@@ -194,12 +190,14 @@ def run_streamlit():
         st.session_state["sim_data"] = data
         st.session_state["sim_addr"] = address
         st.session_state["sim_chain"] = chain
-
-    else:
+    elif "sim_data" not in st.session_state:
         st.info("👆 填写上方参数后点击「拉取数据并模拟」。")
         st.stop()
 
     data = st.session_state["sim_data"]
+    if data["price"] is None:
+        st.error("❌ 未取到该池子的当前价格，无法模拟。请检查地址与公链是否匹配。")
+        st.stop()
 
     # ---- 池子关键指标卡片 ----
     st.divider()

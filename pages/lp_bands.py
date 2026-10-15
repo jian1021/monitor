@@ -12,9 +12,10 @@ import streamlit as st
 
 from app.application.lp_bands import tool
 from app.application.lp_bands.chart import build_chart_df
+from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
 
-CHAIN_OPTS = ['sol', 'bsc', 'base', 'eth', 'robinhood', 'arc', 'stable']
-RES_OPTS = ['30s', '1m', '5m', '15m', '1h', '4h', '1d']
+CHAIN_OPTS = TOKEN_CHAINS
+RES_OPTS = ["30s", "1m", "5m", "15m", "1h", "4h", "1d"]
 
 st.set_page_config(page_title="LP 区间可视化", page_icon="📶", layout="wide")
 
@@ -24,7 +25,8 @@ with st.container(border=True):
     st.subheader('⚙️ 分析参数')
     c1, c2, c3 = st.columns(3)
     token = c1.text_input('Token 地址', placeholder='So11111111111111111111111111111111111111112')
-    chain = c2.selectbox('链', CHAIN_OPTS, index=0)
+    chain = c2.selectbox("链", CHAIN_OPTS, index=0,
+                         format_func=lambda key: CHAIN_LABELS[key])
     res = c3.selectbox('K线周期', RES_OPTS, index=4)
     c4, c5, c6, c7 = st.columns([1, 1, 1, 1])
     days = c4.number_input('天数 (0=按周期自动取满100根)', min_value=0.0, value=0.0, step=1.0)

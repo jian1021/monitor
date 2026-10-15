@@ -24,10 +24,11 @@ from app.interfaces.asset_grid import render_asset_grid
 TOKEN_TIMEFRAMES = {"1d": "日线", "4h": "4H", "1h": "1H"}
 TIMEFRAME_LABELS = {v: k for k, v in TOKEN_TIMEFRAMES.items()}
 
-def render_page() -> None:
+def render_page(embedded: bool = False) -> None:
     FOCUS_TYPES = ["token"]
 
-    st.title("🔗 链上代币 · 标的管理")
+    if not embedded:
+        st.title("🔗 链上代币 · 标的管理")
     st.caption("🔎 当前页面专注 **链上代币** 的添加与管理（按公链搜索或直接粘合约地址）；其他资产类别请前往对应页面配置。")
     render_monitor_controls("onchain_token", "链上代币")
 
@@ -70,7 +71,7 @@ def render_page() -> None:
             final_name = chosen.get("symbol") or chosen.get("name") or picked[:10]
             if add_new_asset("token", chosen["address"], final_name, tok_chain, tok_timeframe):
                 st.session_state.pop("tok_candidates", None)
-                st.success(f"✅ 已添加: {final_name}（{picked[:10]}...）")
+                st.toast(f"已添加: {final_name}（{picked[:10]}...）", icon="✅")
                 st.rerun()
 
 
@@ -108,7 +109,7 @@ def render_page() -> None:
                         client.execute(
                             "UPDATE asset_config SET timeframe = '1d' WHERE asset_type = 'token' AND timeframe != '1d'"
                         )
-                        st.success("✅ 已将所有链上代币时间级别更新为日线")
+                        st.toast("已将所有链上代币时间级别更新为日线", icon="✅")
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ 更新失败: {e}")
@@ -122,7 +123,7 @@ def render_page() -> None:
                         client.execute(
                             "UPDATE asset_config SET timeframe = '1h' WHERE asset_type = 'token' AND timeframe != '1h'"
                         )
-                        st.success("✅ 已将所有链上代币时间级别更新为1H")
+                        st.toast("已将所有链上代币时间级别更新为1H", icon="✅")
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ 更新失败: {e}")

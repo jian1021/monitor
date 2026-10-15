@@ -96,9 +96,10 @@ if st.button("💾 保存退出策略", type="primary"):
     config = {"enabled": enabled, "pools": selected_pools,
               "rsi_high": float(rsi_high), "timeframe": timeframe}
     if save_exit_strategy(config):
-        st.success("退出策略已保存。启用后由运行中的 main.py 监控循环按配置间隔检查并推送飞书。")
+        st.toast("退出策略已保存，后台监控循环将按配置间隔检查并推送飞书。", icon="✅")
         st.rerun()
-    st.error("保存失败，请确认数据库连接已配置。")
+    else:
+        st.error("保存失败，请确认数据库连接已配置。")
 
 st.divider()
 st.subheader("已发现池子")
