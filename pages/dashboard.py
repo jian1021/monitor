@@ -111,7 +111,7 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
         display_df = filtered[["id", "name", "code", "chain", "timeframe", "enabled", "alarm_active", "last_alert_at"]].copy()
         display_df = display_df.rename(columns={
             "id": "ID", "name": "名称", "code": "池子地址" if type_key == "meteora" else "代码 / 地址",
-            "chain": "链", "timeframe": "周期", "enabled": "运行", "alarm_active": "报警中",
+            "chain": "所属链", "timeframe": "周期", "enabled": "运行", "alarm_active": "报警中",
             "last_alert_at": "最近报警",
         })
         with st.form(f"save_assets_{type_key}"):
@@ -123,7 +123,7 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
                     "名称": st.column_config.TextColumn(width="medium"),
                     "池子地址": st.column_config.TextColumn(width="large"),
                     "代码 / 地址": st.column_config.TextColumn(width="large"),
-                    "链": st.column_config.TextColumn(width="small"),
+                    "所属链": st.column_config.TextColumn(width="small"),
                     "周期": st.column_config.TextColumn(width="small"),
                     "运行": st.column_config.CheckboxColumn(help="取消勾选后，该标的不再参与后台监控"),
                     "报警中": st.column_config.CheckboxColumn(disabled=True),

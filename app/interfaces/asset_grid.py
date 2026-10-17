@@ -85,6 +85,7 @@ def render_asset_grid(
     gb.configure_grid_options(enableCellTextSelection=True, ensureDomOrder=True)
     gb.configure_column("名称", editable=False)
     gb.configure_column("交易对", editable=False)
+    gb.configure_column("所属链", editable=False, width=110)
     gb.configure_column("时间级别", editable=False, width=100)
     gb.configure_column("报警中", editable=False, width=100)
     gb.configure_column("最近报警时间", editable=False, width=180)

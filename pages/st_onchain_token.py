@@ -130,8 +130,14 @@ def render_page(embedded: bool = False) -> None:
                     finally:
                         client.close()
 
-        table = sub_df[["name", "code", "timeframe", "id", "enabled", "alarm_active", "last_alert_at"]].rename(columns={
-            "name": "名称", "code": "合约地址", "timeframe": "时间级别", "id": "ID",
+        # 链上代币是唯一跨多条链的类别，必须显示所属链，否则无法区分同名的跨链代币
+        # （如 sol 地址与 base/eth 的 0x 地址）。标签统一取自 CHAIN_LABELS。
+        labeled = sub_df.copy()
+        labeled["chain_label"] = labeled["chain"].apply(lambda c: CHAIN_LABELS.get(c, c or "sol"))
+        table = labeled[["name", "chain_label", "code", "timeframe", "id",
+                         "enabled", "alarm_active", "last_alert_at"]].rename(columns={
+            "name": "名称", "chain_label": "所属链", "code": "合约地址",
+            "timeframe": "时间级别", "id": "ID",
             "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
         })
         render_asset_grid(table, key=f"token_table_{type_key}",

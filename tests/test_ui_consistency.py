@@ -172,6 +172,36 @@ def test_embedded_pages_render_no_duplicate_heading():
     assert not headings, f"render_price_range 嵌入时仍渲染了大标题: {headings}"
 
 
+def test_base_chain_supported_by_token_module():
+    """链上代币模块必须支持 Base 链：链选项、标签与两个行情映射都要有 base。"""
+    tree = ast.parse((INTERFACES / "asset_config.py").read_text(encoding="utf-8"))
+    consts = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            if node.targets[0].id in ("TOKEN_CHAINS", "CHAIN_LABELS"):
+                consts[node.targets[0].id] = node.value
+    chains = [e.value for e in consts["TOKEN_CHAINS"].elts]
+    assert "base" in chains, "TOKEN_CHAINS 缺少 base 链"
+    labels = {k.value for k in consts["CHAIN_LABELS"].keys}
+    assert "base" in labels, "CHAIN_LABELS 缺少 base 的中文标签"
+
+    from app.infrastructure.market_data.chains import (
+        _to_dexscreener_chain, _to_gecko_network,
+    )
+    assert _to_dexscreener_chain("base") == "base"
+    assert _to_gecko_network("base") == "base"
+
+
+def test_onchain_token_table_shows_chain_column():
+    """链上代币是唯一跨多链的类别，表格必须显示所属链，否则分不清同名跨链代币。"""
+    src = (PAGES / "st_onchain_token.py").read_text(encoding="utf-8")
+    assert "所属链" in src, "链上代币表格缺少「所属链」列（多链标的无法区分）"
+    assert "CHAIN_LABELS" in src, "所属链的显示标签必须取自共享的 CHAIN_LABELS"
+    # 表格组件也要把该列设为只读
+    grid_src = (INTERFACES / "asset_grid.py").read_text(encoding="utf-8")
+    assert 'configure_column("所属链"' in grid_src, "asset_grid 未配置「所属链」列为只读"
+
+
 def test_no_circled_number_tab_labels():
     """一级标签用 emoji 前缀，二级标签曾混用 ①②③ 编号，风格不统一。"""
     pattern = re.compile(r"[①②③④⑤⑥⑦⑧⑨⑩]")
