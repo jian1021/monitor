@@ -41,6 +41,17 @@
   「页面简介」caption（否则顶部堆 1~4 条说明）；映射的 key 必须与标签名一一对应。
 - 以上各条由 `tests/test_ui_consistency.py` 强制（10 条：AST 守卫 + AppTest 运行时守卫）。
 
+## 生产部署（GCE 虚拟机）
+- 连接：`ssh gce`（端口 **5566 是 sshd 本身**，用户 root，密钥 `~/.ssh/google_compute_engine`）。
+  外部 IP 是**临时地址**，实例重启会变；连不上先跑 `~/bin/gce-ip` 刷新并自动改写 `~/.ssh/config`。
+- 代码在 `/root/monitor`，**venv 在 `/root/.venv`（不在项目目录内）**，`.env` 在 `/root/monitor/.env`。
+- 后台主循环由 systemd 托管：`monitor-main.service`
+  （`/root/.venv/bin/python -u main.py`，`Restart=always`，日志走 journald）。
+  `systemctl status|restart monitor-main` / `journalctl -u monitor-main -f`。
+- GCP 防火墙只放行 SSH，8787/8501 外网不可达；看网页要用隧道
+  `ssh -L 8501:localhost:8501 gce`。
+- 另有无关服务 `meme-pool-scan.service`（node，监听 8787），不要误当成本项目。
+
 ## 已达成的修复基线（不要回退）
 - LP 告警规则：取数失败写 `status='error'` 后**必须**继续被监控（`load_rules` 用
   `status IN ('open','error')`）。

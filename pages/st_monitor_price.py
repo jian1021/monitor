@@ -16,6 +16,7 @@ from app.application.monitors.price import CREATE_INDEX_SQL, CREATE_TABLE_SQL
 from app.infrastructure.notifications.sender import send_feishu_msg
 from app.infrastructure.market_data.dexscreener import fetch_token_info
 from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
+from app.interfaces.timefmt import to_local_display
 
 # 链选项唯一来源：app/interfaces/asset_config.py（TOKEN_CHAINS / CHAIN_LABELS）
 CHAIN_OPTIONS = TOKEN_CHAINS
@@ -228,7 +229,7 @@ view_df["方向"] = view_df["direction"].map(
 )
 view_df["目标价"] = view_df["target_price"]
 view_df["当前价"] = view_df["last_price"].fillna("-")
-view_df["最近检查"] = view_df["last_checked_at"].fillna("—")
+view_df["最近检查"] = view_df["last_checked_at"].apply(lambda v: to_local_display(v, fallback="—"))
 
 # 列筛选
 show_cols = {

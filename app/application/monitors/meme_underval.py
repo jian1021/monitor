@@ -345,7 +345,10 @@ def run_meme_underval_monitor(params=None):
         return []
 
     text = "🚀【Meme 低估监控告警】\n========================================\n\n" + build_push_message(hits, rsi_max=rsi_max)
-    send_feishu_msg(FEISHU_WEBHOOK, text)
+    if not send_feishu_msg(FEISHU_WEBHOOK, text):
+        # 发送失败不写去重记录，否则这批标的会被压制 24 小时 → 直接漏报
+        print("❌ 飞书推送失败，本轮不写入去重记录，下轮重试")
+        return []
     mark_pushed(MODULE_NAME, [h["meme_mint"] for h in hits])
     print(f"🎉 监控完毕，命中 {len(hits)} 个低估标的并推送。")
     return hits

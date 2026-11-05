@@ -5,6 +5,7 @@
 
 import streamlit as st
 from app.interfaces.monitor_controls import render_monitor_controls
+from app.interfaces.timefmt import to_local_display
 
 from app.interfaces.asset_config import (
     CHAIN_LABELS,
@@ -62,6 +63,8 @@ with st.container(border=True):
             elif add_new_asset(new_type, new_code, new_name, chain=chain):
                 st.toast(f"已添加：{new_name.strip() or new_code.strip()}", icon="✅")
                 st.rerun()
+            else:
+                st.warning("该标的已存在（同类型同代码），未重复添加。")
 
 total_count = len(df)
 enabled_count = int(df["enabled"].fillna(False).astype(bool).sum()) if total_count else 0
@@ -114,6 +117,8 @@ for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
             "chain": "所属链", "timeframe": "周期", "enabled": "运行", "alarm_active": "报警中",
             "last_alert_at": "最近报警",
         })
+        # 库里存 UTC，直接展示会比北京时间慢 8 小时
+        display_df["最近报警"] = display_df["最近报警"].apply(to_local_display)
         with st.form(f"save_assets_{type_key}"):
             edited = st.data_editor(
                 display_df, hide_index=True, width="stretch", num_rows="fixed",

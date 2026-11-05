@@ -11,9 +11,13 @@ from app.infrastructure.db.meme_watchlist import (
     list_meme_watchlist_pools,
     update_meme_pool_rsi,
 )
+from app.infrastructure.db.pump_alerts import clear_pushed, filter_unpushed, mark_pushed
 from app.infrastructure.notifications.sender import send_feishu_msg
 
 MODULE_NAME = "meme_rsi_batch"
+ALERT_MODULE = "meme_rsi_batch"
+# 边缘触发：越界那一刻推一次，回到区间内即清除记录。TTL 只是兜底，防止记录长留。
+ALERT_TTL_HOURS = 24 * 7
 RSI_PERIOD = 3
 
 _POOL_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -130,14 +134,39 @@ def run_batch_meme_rsi_monitor():
 
     hits = scan_watchlist(pools, rsi_low=rsi_low, rsi_high=rsi_high,
                           period=RSI_PERIOD, timeframe=timeframe)
+
+    # 边缘触发复位：已回到正常区间的池子清除推送记录，下次越界才会重新告警。
+    # 否则同一个池子只要一直越界，就会每轮（默认 60 分钟）重复推送。
+    in_band = []
+    for pool in list_meme_watchlist_pools():
+        last_rsi = pool.get("last_rsi")
+        if last_rsi is None:
+            continue
+        if rsi_low <= float(last_rsi) <= rsi_high:
+            in_band.append(str(pool.get("address") or ""))
+    if in_band:
+        clear_pushed(ALERT_MODULE, in_band)
+
     if not hits:
         print("✨ [批量 Meme RSI] 本轮无越界标的。")
+        return []
+
+    # 去重键带方向：同一个池从超卖翻成超买应当重新推送
+    keys = {h["address"]: f"{h['address']}:{h['side']}" for h in hits}
+    fresh = set(filter_unpushed(ALERT_MODULE, list(keys.values()), ttl_hours=ALERT_TTL_HOURS))
+    hits = [h for h in hits if keys[h["address"]] in fresh]
+    if not hits:
+        print("ℹ️ [批量 Meme RSI] 越界标的均已推送过且仍在越界，本轮跳过（回到区间后会重新武装）。")
         return []
 
     text = ("🚀【批量 Meme 超卖超买监控】\n" + "=" * 40 + "\n\n"
             + build_alert_message(hits, rsi_low=rsi_low, rsi_high=rsi_high,
                                   period=RSI_PERIOD, timeframe=timeframe))
-    send_feishu_msg(FEISHU_WEBHOOK, text)
+    if not send_feishu_msg(FEISHU_WEBHOOK, text):
+        # 发送失败不记去重，否则这批会被压制 7 天
+        print("❌ [批量 Meme RSI] 飞书推送失败，本轮不写入去重记录，下轮重试")
+        return []
+    mark_pushed(ALERT_MODULE, [keys[h["address"]] for h in hits])
     print(f"🎉 [批量 Meme RSI] 推送 {len(hits)} 个越界标的。")
     return hits
 

@@ -247,7 +247,10 @@ def run_once():
                 f"地址: {addr}\n"
                 f"监控地址: https://gmgn.ai/{chain.lower()}/token/{addr}"
             )
-            send_feishu_msg(FEISHU_WEBHOOK, msg)
+            if not send_feishu_msg(FEISHU_WEBHOOK, msg):
+                # 发送失败不标记已告警，否则这条规则以后不会再推（要等价格离开目标价才重置）
+                print(f"❌ [{sym}] 飞书推送失败，保留未告警状态，下轮重试")
+                continue
             mark_alerted(rule["id"])
             print(f"🚨 已推送告警: [{sym}] {price} {'>=' if rule['direction']=='gte' else '<='} {target}")
         elif rule["alerted"]:

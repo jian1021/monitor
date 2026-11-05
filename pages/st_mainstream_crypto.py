@@ -15,6 +15,7 @@ from app.interfaces.asset_config import (
     ensure_asset_schema, fetch_all_assets, update_asset_status,
 )
 from app.interfaces.asset_grid import render_asset_grid
+from app.interfaces.timefmt import to_local_display
 from app.infrastructure.market_data.okx import search_okx_symbols
 
 CRYPTO_TIMEFRAMES = {"1W": "周线", "1D": "日线", "4H": "4H", "1H": "1H", "15m": "15分钟"}
@@ -64,6 +65,8 @@ def render_crypto_adder():
             if add_new_asset("crypto", new_code, new_name or new_code, timeframe=new_timeframe):
                 st.toast(f"已添加主流加密货币: {new_code.strip()}", icon="✅")
                 st.rerun()
+            else:
+                st.warning("该交易对已在监控列表中，未重复添加。")
 
 
 render_crypto_adder()
@@ -94,6 +97,8 @@ for type_key in FOCUS_TYPES:
         "name": "名称", "code": "交易对", "timeframe": "时间级别", "id": "ID",
         "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
     })
+    # 库里存 UTC，直接展示会比北京时间慢 8 小时
+    table["最近报警时间"] = table["最近报警时间"].apply(to_local_display)
     render_asset_grid(table, key=f"crypto_table_{type_key}",
                       delete_asset=delete_asset,
                       update_asset_status=update_asset_status)

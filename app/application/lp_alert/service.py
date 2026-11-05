@@ -234,8 +234,14 @@ def run_once():
         if result["fired"]:
             print(f"🚨 规则 {rule['id']} 触发: {result['fired']}")
             text = result["message"]
+            sent = True
             if text:
-                send_feishu_msg(FEISHU_WEBHOOK, text)
+                sent = send_feishu_msg(FEISHU_WEBHOOK, text)
+            if not sent:
+                # 发送失败时不能写 target_alerted / floor_alerted，否则要等价格回中枢
+                # 才会重新武装，等于这条告警永久丢失。
+                print(f"❌ 规则 {rule['id']} 飞书推送失败，本轮不写入告警标记（下轮重试）")
+                continue
             for name in ("target", "floor"):
                 if name in result["fired"]:
                     mark_alerted(rule["id"], f"{name}_alerted")

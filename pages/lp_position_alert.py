@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import streamlit as st
 from app.interfaces.monitor_controls import render_monitor_controls
+from app.interfaces.timefmt import to_local_display
 
 from app.core.settings import FEISHU_WEBHOOK
 from scripts import lp_position_alert as lpa
@@ -348,7 +349,7 @@ view = pd.DataFrame([{
         else "-"),
     "状态": {"open": "🟢 监控中", "closed": "⚫ 已关闭", "error": "🔴 取数失败"}.get(r["status"], r["status"]),
     "报警状态": "🔴 报警中" if r["alarm_active"] else "🟢 未报警",
-    "最近报警时间": r["last_alert_at"] or "-",
+    "最近报警时间": to_local_display(r["last_alert_at"]),
     "启用": r["enabled"],
     "已告警": "".join([
         "盈利" if r["target_alerted"] else "",

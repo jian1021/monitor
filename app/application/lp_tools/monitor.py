@@ -88,5 +88,9 @@ def run_lp_apr_monitor() -> None:
     fresh = set(filter_unpushed(APR_MODULE, [k for k, _ in pending], ttl_hours=APR_TTL_HOURS))
     msgs = [msg for key, msg in pending if key in fresh]
     if msgs:
-        FeishuNotifier().send(FEISHU_WEBHOOK, "\n\n".join(msgs))
+        result = FeishuNotifier().send(FEISHU_WEBHOOK, "\n\n".join(msgs))
+        if not result.ok:
+            # 发送失败不记去重，否则同一池同一方向会被压制 6 小时 → 漏报
+            print(f"❌ [APR] 飞书推送失败（{result.detail}），本轮不写入去重记录")
+            return
         mark_pushed(APR_MODULE, [k for k, _ in pending if k in fresh])

@@ -93,12 +93,22 @@ def batch_update_status_by_type(asset_type: str, enabled: bool):
 
 
 def add_new_asset(asset_type: str, code: str, name: str, chain: str=None, timeframe: str=None):
-    """新增标的"""
+    """新增标的；同类型下同代码（忽略大小写）已存在时不再重复插入."""
     client = get_db_client()
     if not client:
         return False
     try:
-        client.execute('INSERT INTO asset_config (asset_type, code, name, enabled, chain, timeframe) VALUES (?, ?, ?, 1, ?, ?)', [asset_type, code.strip(), name.strip() or code.strip(), chain or 'sol', timeframe or '1W'])
+        code_clean = code.strip()
+        # 先去重：重复标的会让后台每轮重复取数、重复告警（历史上 ASTER-USDT 就有两条）
+        existing = client.execute(
+            "SELECT id, name, timeframe FROM asset_config"
+            " WHERE asset_type = ? AND lower(code) = lower(?)",
+            [asset_type, code_clean],
+        )
+        if existing.rows:
+            print(f"⚠️ 标的已存在，跳过新增: {asset_type} {code_clean}")
+            return False
+        client.execute('INSERT INTO asset_config (asset_type, code, name, enabled, chain, timeframe) VALUES (?, ?, ?, 1, ?, ?)', [asset_type, code_clean, name.strip() or code_clean, chain or 'sol', timeframe or '1W'])
         return True
     finally:
         client.close()

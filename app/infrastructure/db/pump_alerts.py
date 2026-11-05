@@ -52,6 +52,33 @@ def filter_unpushed(module: str, addresses, ttl_hours: int = PUMP_ALERT_TTL_HOUR
         client.close()
 
 
+def clear_pushed(module: str, addresses) -> int:
+    """删除指定地址的去重记录，使条件再次满足时能重新推送（边缘触发复位）.
+
+    用于「一旦回到正常区间就解除」的告警（如 RSI 越界）：只在越界那一刻推一次，
+    回到区间内即重新武装。失败不抛异常。
+    """
+    unique = list(dict.fromkeys(a for a in addresses if a))
+    if not unique:
+        return 0
+    ensure_pump_alert_schema()
+    client = get_db_client()
+    if not client:
+        return 0
+    try:
+        placeholders = ",".join("?" for _ in unique)
+        client.execute(
+            f"DELETE FROM pump_alert_sent WHERE module = ? AND address IN ({placeholders})",
+            [module, *unique],
+        )
+        return len(unique)
+    except Exception as e:
+        print(f"❌ 清除推送去重失败: {e}")
+        return 0
+    finally:
+        client.close()
+
+
 def mark_pushed(module: str, addresses) -> bool:
     """记录已推送地址；失败不抛异常，不阻塞告警发送."""
     unique = list(dict.fromkeys(a for a in addresses if a))

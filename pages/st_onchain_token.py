@@ -20,6 +20,7 @@ from app.interfaces.asset_config import (
 )
 from app.infrastructure.db.client import get_db_client
 from app.interfaces.asset_grid import render_asset_grid
+from app.interfaces.timefmt import to_local_display
 
 TOKEN_TIMEFRAMES = {"1d": "日线", "4h": "4H", "1h": "1H"}
 TIMEFRAME_LABELS = {v: k for k, v in TOKEN_TIMEFRAMES.items()}
@@ -73,6 +74,8 @@ def render_page(embedded: bool = False) -> None:
                 st.session_state.pop("tok_candidates", None)
                 st.toast(f"已添加: {final_name}（{picked[:10]}...）", icon="✅")
                 st.rerun()
+            else:
+                st.warning("该代币地址已在监控列表中，未重复添加。")
 
 
     render_token_adder()
@@ -140,6 +143,8 @@ def render_page(embedded: bool = False) -> None:
             "timeframe": "时间级别", "id": "ID",
             "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
         })
+        # 库里存 UTC，直接展示会比北京时间慢 8 小时
+        table["最近报警时间"] = table["最近报警时间"].apply(to_local_display)
         render_asset_grid(table, key=f"token_table_{type_key}",
                           delete_asset=delete_asset,
                           update_asset_status=update_asset_status)

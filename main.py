@@ -132,9 +132,27 @@ def should_push_rsi_alert(item, rsi, price, settings) -> bool:
     return not already_latched
 
 
+def _send_rsi_messages(messages, pending_latch) -> None:
+    """发送合并后的 RSI 告警；失败时回滚本轮新加的 latch。
+
+    should_push_rsi_alert() 会在发送前把 alert_latched 写进库，若飞书发送失败
+    而不回滚，这条告警要等 RSI 回到中枢区间才会重新武装——等于永久丢失。
+    """
+    if not messages:
+        return
+    if send_feishu_msg(FEISHU_WEBHOOK, "\n\n".join(messages)):
+        return
+    print("❌ 飞书推送失败，回滚本轮新增的告警闩锁，下轮重试")
+    for item, rsi, price in pending_latch:
+        update_asset_alert_state(item.get("id"), active=bool(item.get("alarm_active")),
+                                 latched=False, rsi=float(rsi), price=float(price),
+                                 alert=False)
+
+
 # ================= RSI 监控（Meteora 池 / 可转债 / ETF） =================
 def run_rsi_monitor(config: dict) -> None:
     messages = []
+    pending_latch = []
     bs_login_ok = False
     try:
         lg_ret = bs.login()
@@ -158,6 +176,7 @@ def run_rsi_monitor(config: dict) -> None:
         if rsi is not None and price is not None:
             print(f"✅ [Meteora] {pool_name} 现价: ${price:.6f}, RSI({m_set['period']}): {rsi:.2f}")
             if should_push_rsi_alert(pool, rsi, price, m_set):
+                pending_latch.append((pool, rsi, price))
                 if rsi < m_set["rsi_low"]:
                     messages.append(f"🚨 【Meteora {pool_name} 超卖】现价 ${price:.6f}，1H RSI: {rsi:.2f} (低于 {m_set['rsi_low']})")
                 else:
@@ -177,6 +196,7 @@ def run_rsi_monitor(config: dict) -> None:
         if rsi is not None and price is not None:
             print(f"✅ [可转债] {cfg_name}({code}) 现价: {price:.2f}, {bond_tf} RSI({b_set['period']}): {rsi:.2f}")
             if should_push_rsi_alert(item, rsi, price, b_set):
+                pending_latch.append((item, rsi, price))
                 if rsi < b_set["rsi_low"]:
                     messages.append(f"🚨 【可转债 RSI 超卖】{cfg_name}({code}) 现价: {price:.2f} 元，{bond_tf} RSI: {rsi:.2f} (低于 {b_set['rsi_low']})")
                 else:
@@ -196,6 +216,7 @@ def run_rsi_monitor(config: dict) -> None:
         if rsi is not None and price is not None:
             print(f"✅ [ETF] {cfg_name}({code}) 现价: {price:.3f}, {etf_tf} RSI({e_set['period']}): {rsi:.2f}")
             if should_push_rsi_alert(item, rsi, price, e_set):
+                pending_latch.append((item, rsi, price))
                 if rsi < e_set["rsi_low"]:
                     messages.append(f"🚨 【ETF RSI 超卖】{cfg_name}({code}) 现价: {price:.3f} 元，{etf_tf} RSI: {rsi:.2f} (低于 {e_set['rsi_low']})")
                 else:
@@ -207,8 +228,7 @@ def run_rsi_monitor(config: dict) -> None:
 
     # 发送 RSI 告警
     if messages:
-        full_msg = "\n\n".join(messages)
-        send_feishu_msg(FEISHU_WEBHOOK, full_msg)
+        _send_rsi_messages(messages, pending_latch)
     else:
         print("所有标的 RSI 均处于正常区间，不触发推送。")
 
@@ -217,6 +237,7 @@ def run_rsi_monitor(config: dict) -> None:
 def run_crypto_monitor(config: dict) -> None:
     """独立子程序：加密货币（OKX）RSI 监控，独立间隔与告警。"""
     messages = []
+    pending_latch = []
     crypto_list = config.get("crypto_okx", [])
     c_set = monitor_rsi.DEFAULT_SETTINGS["crypto"]
 
@@ -232,13 +253,14 @@ def run_crypto_monitor(config: dict) -> None:
         if rsi is not None and price is not None:
             print(f"✅ [OKX] {symbol} 现价: ${price:.4f}, {crypto_tf} RSI({c_set['period']}): {rsi:.2f}")
             if should_push_rsi_alert(coin, rsi, price, c_set):
+                pending_latch.append((coin, rsi, price))
                 if rsi < c_set["rsi_low"]:
                     messages.append(f"🚨 【{symbol} 超卖】现价 ${price:.4f}，{crypto_tf} RSI: {rsi:.2f} (低于 {c_set['rsi_low']})")
                 else:
                     messages.append(f"⚠️ 【{symbol} 超买】现价 ${price:.4f}，{crypto_tf} RSI: {rsi:.2f} (高于 {c_set['rsi_high']})")
 
     if messages:
-        send_feishu_msg(FEISHU_WEBHOOK, "\n\n".join(messages))
+        _send_rsi_messages(messages, pending_latch)
     else:
         print("所有加密货币 RSI 均处于正常区间，不触发推送。")
 
@@ -247,6 +269,7 @@ def run_crypto_monitor(config: dict) -> None:
 def run_onchain_token_monitor(config: dict) -> None:
     """独立子程序：链上代币 RSI 监控，独立间隔与告警；时间级别取每个标的的 timeframe。"""
     messages = []
+    pending_latch = []
     token_list = config.get("tokens", [])
     t_set = monitor_rsi.DEFAULT_SETTINGS["token"]
 
@@ -266,6 +289,7 @@ def run_onchain_token_monitor(config: dict) -> None:
             print(f"✅ [链上代币] {cfg_name}({short}...) {chain} 现价: {price:.8g}, "
                   f"{token_tf} RSI({t_set['period']}): {rsi:.2f}")
             if should_push_rsi_alert(item, rsi, price, t_set):
+                pending_latch.append((item, rsi, price))
                 if rsi < t_set["rsi_low"]:
                     messages.append(f"🚨 【链上代币 RSI 超卖】{cfg_name}({short}...) 链 {chain} "
                                     f"现价: {price:.8g}，{token_tf} RSI: {rsi:.2f} (低于 {t_set['rsi_low']})")
@@ -275,7 +299,7 @@ def run_onchain_token_monitor(config: dict) -> None:
         time.sleep(random.uniform(0.8, 1.5))
 
     if messages:
-        send_feishu_msg(FEISHU_WEBHOOK, "\n\n".join(messages))
+        _send_rsi_messages(messages, pending_latch)
     else:
         print("所有链上代币 RSI 均处于正常区间，不触发推送。")
 
