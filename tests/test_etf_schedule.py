@@ -3,23 +3,19 @@
 背景：ETF 原先挂在 "rsi" 模块（Meteora 池 / 可转债 / ETF 共用），
 间隔 24 小时。周线 RSI 一周才收一根 K 线，日更属于无效取数，且会与
 可转债的日更节奏互相牵制。现拆成独立的 "etf_rsi" 模块，默认 7 天一次。
+
+结构上用例已下沉到 app/application/monitors/runners.py（main.py 只做装配），
+因此这里直接对用例函数的源码做断言，避免重构后守卫失效却没人发现。
 """
 
-import ast
+import inspect
 from pathlib import Path
 
+from app.application.monitors import runners
 from app.infrastructure.db.intervals import DEFAULT_INTERVALS
 
 
 MAIN_PY = Path(__file__).resolve().parents[1] / "main.py"
-
-
-def _function_source(name: str) -> ast.FunctionDef:
-    tree = ast.parse(MAIN_PY.read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            return node
-    raise AssertionError(f"main.py 里找不到函数 {name}")
 
 
 def test_etf_module_runs_weekly():
@@ -29,24 +25,28 @@ def test_etf_module_runs_weekly():
 
 
 def test_etf_rsi_module_registered():
-    src = MAIN_PY.read_text(encoding="utf-8")
-    assert 'MonitorSpec("etf_rsi", "etf_rsi", _run_etf_rsi)' in src
-    assert "def run_etf_monitor(" in src
+    source = MAIN_PY.read_text(encoding="utf-8")
+    assert '"etf_rsi", "etf_rsi"' in source
+    assert "runners.run_etf_monitor" in source
 
 
 def test_rsi_monitor_no_longer_scans_etf():
     """run_rsi_monitor 内不得再出现 etfs，否则 ETF 会被两个模块重复扫。"""
-    node = _function_source("run_rsi_monitor")
-    segment = ast.get_source_segment(MAIN_PY.read_text(encoding="utf-8"), node) or ""
-    assert "etfs" not in segment
-    assert "convertible_bonds" in segment
+    body = inspect.getsource(runners.run_rsi_monitor)
+    assert "etfs" not in body
+    assert "convertible_bonds" in body
 
 
 def test_etf_monitor_scans_etf_only():
-    node = _function_source("run_etf_monitor")
-    segment = ast.get_source_segment(MAIN_PY.read_text(encoding="utf-8"), node) or ""
-    assert 'config.get("etfs", [])' in segment
-    assert "convertible_bonds" not in segment
+    body = inspect.getsource(runners.run_etf_monitor)
+    assert 'config.get("etfs", [])' in body
+    assert "convertible_bonds" not in body
+
+
+def test_etf_monitor_uses_weekly_settings():
+    """ETF 必须用周线配置，别被可转债/加密的日线或小时线设置串了。"""
+    body = inspect.getsource(runners.run_etf_monitor)
+    assert 'DEFAULT_SETTINGS["etf"]' in body
 
 
 def test_module_settings_default_allows_etf_rsi(monkeypatch):

@@ -26,8 +26,17 @@ def test_dashboard_logout_uses_canonical_session_key():
 
 
 def test_price_alert_ddl_single_sourced():
+    """price_alert 的建表与 CRUD 只允许有一份实现（application 层）。
+
+    页面不得内联 DDL，也不得自己拼 INSERT/UPDATE/DELETE——统一走
+    app/application/monitors/price.py。
+    """
     page_src = (REPO_ROOT / "pages" / "st_monitor_price.py").read_text(
         encoding="utf-8")
+    price_src = (REPO_ROOT / "app" / "application" / "monitors" / "price.py").read_text(
+        encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS price_alert" in price_src
     assert "CREATE TABLE IF NOT EXISTS price_alert" not in page_src
-    assert "from app.application.monitors.price import" in page_src
-    assert "CREATE_TABLE_SQL" in page_src
+    assert "from app.application.monitors import price as price_service" in page_src
+    for sql in ("INSERT INTO price_alert", "UPDATE price_alert", "DELETE FROM price_alert"):
+        assert sql not in page_src, f"页面不得内联 SQL：{sql}"

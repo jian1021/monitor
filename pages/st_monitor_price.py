@@ -5,15 +5,16 @@
   - 查看规则列表 / 当前价格 / 最近检查时间 / 是否已触发
   - 启用/停用/删除规则
 数据表: price_alert (Turso/libSQL)
+
+分层：建表 / 规则 CRUD / 价格回写全部走 app/application/monitors/price.py，
+本页只负责渲染与交互，不再自己拼 SQL。
 """
-import os
 import streamlit as st
 import pandas as pd
 
 from app.core.settings import FEISHU_WEBHOOK
-from app.infrastructure.db.client import get_db_client
-from app.application.monitors.price import CREATE_INDEX_SQL, CREATE_TABLE_SQL
-from app.infrastructure.notifications.sender import send_feishu_msg
+from app.application.monitors import price as price_service
+from app.application.monitors.price import RULE_COLUMNS
 from app.infrastructure.market_data.dexscreener import fetch_token_info
 from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
 from app.interfaces.timefmt import to_local_display
@@ -21,113 +22,48 @@ from app.interfaces.timefmt import to_local_display
 # 链选项唯一来源：app/interfaces/asset_config.py（TOKEN_CHAINS / CHAIN_LABELS）
 CHAIN_OPTIONS = TOKEN_CHAINS
 
-# 建表语句唯一源：monitor_price.CREATE_TABLE_SQL / CREATE_INDEX_SQL，本页直接复用。
 
 # ============================================================
-# 通用工具
+# 数据访问：全部委托 application 层，页面只做错误呈现
 # ============================================================
-def get_client():
-    return get_db_client()
-
-
-def ensure_table():
-    client = get_client()
-    if not client:
-        return False
+def ensure_table() -> bool:
     try:
-        client.batch([CREATE_TABLE_SQL, CREATE_INDEX_SQL])
-        return True
+        if price_service.ensure_table():
+            return True
+        st.error("❌ 初始化 price_alert 表失败：数据库连接不可用")
     except Exception as e:
         st.error(f"❌ 初始化 price_alert 表失败: {e}")
-        return False
-    finally:
-        client.close()
+    return False
 
 
-# ============================================================
-# CRUD
-# ============================================================
-def fetch_rules():
-    """读取全部价格监控规则"""
-    client = get_client()
-    if not client:
-        return pd.DataFrame()
+def fetch_rules() -> pd.DataFrame:
     try:
-        res = client.execute(
-            "SELECT id, address, chain, symbol, target_price, direction, enabled,"
-            " last_price, last_checked_at, alerted, created_at"
-            " FROM price_alert ORDER BY id DESC"
-        )
-        data = []
-        for row in res.rows:
-            data.append({
-                "id": row[0],
-                "address": row[1],
-                "chain": row[2],
-                "symbol": row[3] or "",
-                "target_price": row[4],
-                "direction": row[5],
-                "enabled": bool(row[6]),
-                "last_price": row[7],
-                "last_checked_at": row[8],
-                "alerted": bool(row[9]),
-                "created_at": row[10],
-            })
-        return pd.DataFrame(data)
+        rows = price_service.load_all_rules()
     except Exception as e:
         st.error(f"❌ 读取规则失败: {e}")
-        return pd.DataFrame()
-    finally:
-        client.close()
+        return pd.DataFrame(columns=list(RULE_COLUMNS))
+    return pd.DataFrame(rows, columns=list(RULE_COLUMNS))
 
 
-def add_rule(address: str, chain: str, target_price: float, direction: str, symbol: str):
-    client = get_client()
-    if not client:
-        return False
-    try:
-        client.execute(
-            "INSERT INTO price_alert (address, chain, symbol, target_price, direction, enabled)"
-            " VALUES (?, ?, ?, ?, ?, 1)",
-            [address.strip(), chain, symbol.strip(), target_price, direction],
-        )
+def add_rule(address: str, chain: str, symbol: str, target_price: float, direction: str) -> bool:
+    if price_service.add_rule(address, chain, symbol, target_price, direction):
         return True
-    except Exception as e:
-        st.error(f"❌ 新增规则失败: {e}")
-        return False
-    finally:
-        client.close()
+    st.error("❌ 新增规则失败，请检查数据库连接。")
+    return False
 
 
-def update_rule_status(rule_id: int, enabled: bool):
-    client = get_client()
-    if not client:
-        return False
-    try:
-        client.execute(
-            "UPDATE price_alert SET enabled = ? WHERE id = ?",
-            [1 if enabled else 0, rule_id],
-        )
+def update_rule_status(rule_id: int, enabled: bool) -> bool:
+    if price_service.set_rule_enabled(rule_id, enabled):
         return True
-    except Exception as e:
-        st.error(f"❌ 更新规则状态失败: {e}")
-        return False
-    finally:
-        client.close()
+    st.error("❌ 更新规则状态失败，请检查数据库连接。")
+    return False
 
 
-def delete_rule(rule_id: int):
-    client = get_client()
-    if not client:
-        return False
-    try:
-        client.execute("DELETE FROM price_alert WHERE id = ?", [rule_id])
+def delete_rule(rule_id: int) -> bool:
+    if price_service.delete_rule(rule_id):
         return True
-    except Exception as e:
-        st.error(f"❌ 删除规则失败: {e}")
-        return False
-    finally:
-        client.close()
+    st.error("❌ 删除规则失败，请检查数据库连接。")
+    return False
 
 
 # ============================================================
@@ -193,7 +129,7 @@ with st.expander("➕ 新增价格监控规则", expanded=True):
                     with st.spinner("正在自动获取代币符号 ..."):
                         info, _source = fetch_token_info(new_chain, new_address.strip())
                         symbol = str((info or {}).get("symbol") or "").strip()
-                if add_rule(new_address, new_chain, new_target, new_direction, symbol):
+                if add_rule(new_address, new_chain, symbol, new_target, new_direction):
                     st.toast(f"已添加规则: {new_address[:10]}... "
                              f"({CHAIN_LABELS[new_chain]}) 符号 {symbol or '未识别'} "
                              f"目标 {new_target}", icon="✅")
@@ -293,16 +229,8 @@ with st.expander("🔍 立即检查选中规则价格"):
             if price is not None:
                 sym = data.get("symbol") or rule["symbol"]
                 st.success(f"✅ {sym} 当前价格: {price}")
-                # 回写
-                client = get_client()
-                if client:
-                    try:
-                        client.execute(
-                            "UPDATE price_alert SET last_price = ?, last_checked_at = datetime('now') WHERE id = ?",
-                            [price, check_id],
-                        )
-                    finally:
-                        client.close()
+                # 回写最新价格与检查时间（application 层统一实现）
+                price_service.update_rule_price(check_id, price)
             else:
                 st.error(f"无法解析价格字段: {raw}")
 

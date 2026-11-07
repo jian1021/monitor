@@ -4,12 +4,10 @@
 安全回落到全局 Webhook，避免「配错一次，告警全静默」。
 """
 
-from pathlib import Path
+import inspect
 
+from app.application.monitors import rsi_alerts, runners
 from app.infrastructure.db import module_webhooks
-
-
-MAIN_PY = Path(__file__).resolve().parents[1] / "main.py"
 
 
 class _FakeResult:
@@ -64,16 +62,18 @@ def test_set_module_webhook_empty_deletes_row(monkeypatch):
 
 def test_etf_runner_uses_module_webhook():
     """ETF 告警必须走模块专属 Webhook，别再用全局 FEISHU_WEBHOOK。"""
-    source = MAIN_PY.read_text(encoding="utf-8")
-    start = source.index("def run_etf_monitor(")
-    end = source.index("def run_crypto_monitor(")
-    body = source[start:end]
-    assert 'module_webhook("etf_rsi")' in body
+    body = inspect.getsource(runners.run_etf_monitor)
+    assert 'webhook_for("etf_rsi")' in body
 
 
-def test_module_webhook_helper_defaults_to_global():
-    source = MAIN_PY.read_text(encoding="utf-8")
-    start = source.index("def module_webhook(")
-    end = source.index("def _send_rsi_messages(")
-    body = source[start:end]
-    assert "get_module_webhook(module_key, FEISHU_WEBHOOK)" in body
+def test_webhook_helper_defaults_to_global(monkeypatch):
+    """未配置专属群时必须回落到全局，不能静默不推送。"""
+    monkeypatch.setattr(rsi_alerts, "get_module_webhook",
+                        lambda key, fallback: fallback)
+    assert rsi_alerts.webhook_for("etf_rsi") == rsi_alerts.FEISHU_WEBHOOK
+
+
+def test_webhook_helper_prefers_module_value(monkeypatch):
+    monkeypatch.setattr(rsi_alerts, "get_module_webhook",
+                        lambda key, fallback: "https://example.com/dedicated")
+    assert rsi_alerts.webhook_for("etf_rsi") == "https://example.com/dedicated"

@@ -1,25 +1,20 @@
 """main.py — 监控主循环入口（支持单轮与本地常驻）.
 
-各子程序注册进 MonitorRegistry，由 MonitoringScheduler 统一计算到期与睡眠；
-执行间隔与启停由数据库 module_settings / module_intervals 控制（界面可改）。
+职责边界：本文件只做「装配 + 调度」——读资产配置、把各模块注册进
+MonitorRegistry、按 module_settings / module_intervals 判定到期并执行。
+各类监控的扫描与告警规则在 app/application/monitors/（runners / rsi_alerts）。
 """
 
 import argparse
-import random
 import threading
 import time
 import traceback
+from typing import Callable
 
-import baostock as bs
-
-from app.application.monitors import rsi as monitor_rsi
-from app.core.settings import FEISHU_WEBHOOK, LIBSQL_TOKEN, LIBSQL_URL
-from app.infrastructure.db.assets import load_instruments, update_asset_alert_state
-from app.infrastructure.db.intervals import DEFAULT_INTERVALS, get_module_intervals
-from app.infrastructure.db.module_settings import get_module_settings
-from app.infrastructure.db.module_webhooks import get_module_webhook
-from app.application.monitors.meme_underval import run_meme_underval_monitor
+from app.application.monitors import runners
 from app.application.monitors.meme_rsi_batch import run_batch_meme_rsi_monitor
+from app.application.monitors.meme_underval import run_meme_underval_monitor
+from app.application.lp_alert.service import run_once as run_lp_alert_once
 from app.application.lp_tools.monitor import run_lp_apr_monitor
 from app.application.exit_strategy.monitor import run_monitor as run_exit_strategy_monitor
 from app.application.meteora_scanner import config as meteora_config
@@ -27,24 +22,23 @@ from app.application.meteora_scanner.alerts import evaluate_saved_scan
 from app.application.meteora_scanner.db import Database as MeteoraDatabase
 from app.application.meteora_scanner.feishu import FeishuAlerter as MeteoraFeishuAlerter
 from app.application.meteora_scanner.scanner import Scanner as MeteoraScanner
-from app.application.lp_alert.service import run_once as run_lp_alert_once
-from app.infrastructure.db.lp_alert import ensure_table as ensure_lp_alert_table
-from app.infrastructure.notifications.sender import send_feishu_msg
-
 from app.application.monitoring.scheduler import MonitoringScheduler
 from app.core.contracts import MonitorSpec
+from app.core.settings import FEISHU_WEBHOOK, LIBSQL_TOKEN, LIBSQL_URL
 from app.domain.monitoring.registry import MonitorRegistry
+from app.infrastructure.db.assets import load_instruments
+from app.infrastructure.db.intervals import DEFAULT_INTERVALS, get_module_intervals
+from app.infrastructure.db.lp_alert import ensure_table as ensure_lp_alert_table
+from app.infrastructure.db.module_settings import get_module_settings
 
 
-# ================= 各子程序执行间隔 =================
-# 默认值（分钟）定义在 db.DEFAULT_INTERVALS；启动时从 module_intervals 表读取，
-# 界面（pages/dashboard.py）可修改，主循环每轮最多每 60 秒刷新一次。
-# 主循环轮询间隔（秒）—— 决定对"到期"的感知精度，设短一点即可
+# 主循环轮询间隔（秒）——决定对「到期」的感知精度
 POLL_INTERVAL = 30
 
 # 间隔缓存（已换算为秒）：读取失败时沿用，避免每次轮询都打一次 DB
 _intervals_cache: dict[str, int] = {k: v * 60 for k, v in DEFAULT_INTERVALS.items()}
 _intervals_cache_ts: float = 0.0
+
 _meteora_scan_lock = threading.Lock()
 _meteora_scanner: MeteoraScanner | None = None
 _meteora_scan_thread: threading.Thread | None = None
@@ -118,317 +112,55 @@ def refresh_intervals(force: bool = False) -> dict[str, int]:
     return _intervals_cache
 
 
-def should_push_rsi_alert(item, rsi, price, settings) -> bool:
-    """写入标的告警状态并返回本轮是否应推送；latch 未解除时抑制重复告警。"""
-    low, high = settings["rsi_low"], settings["rsi_high"]
-    if not (rsi < low or rsi > high):
-        update_asset_alert_state(item.get("id"), active=False, latched=False,
-                                 rsi=float(rsi), price=float(price), alert=False)
-        return False
-    already_latched = bool(item.get("alert_latched"))
-    update_asset_alert_state(
-        item.get("id"),
-        active=bool(item.get("alarm_active")) or not already_latched,
-        latched=True, rsi=float(rsi), price=float(price), alert=not already_latched)
-    return not already_latched
+def _lp_alert_job() -> None:
+    ensure_lp_alert_table()
+    run_lp_alert_once()
 
 
-def module_webhook(module_key: str) -> str:
-    """模块专属飞书 Webhook；未配置时回落到全局 FEISHU_WEBHOOK。"""
-    try:
-        return get_module_webhook(module_key, FEISHU_WEBHOOK)
-    except Exception as e:
-        print(f"⚠️ 读取模块 Webhook 失败（{module_key}），使用全局: {e}")
-        return FEISHU_WEBHOOK
+def _runner(label: str, action) -> Callable[[], None]:
+    """统一的执行外壳：打印分隔线与标题，异常只记录不打断主循环。"""
+    def wrapped():
+        print(f"\n{'='*50}")
+        print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 {label}")
+        try:
+            action()
+        except Exception as e:  # noqa: BLE001
+            print(f"❌ {label} 发生异常：{e}")
+            traceback.print_exc()
+    return wrapped
 
 
-def _send_rsi_messages(messages, pending_latch, webhook: str | None = None) -> None:
-    """发送合并后的 RSI 告警；失败时回滚本轮新加的 latch。
+def build_scheduler(get_config: Callable[[], dict]) -> MonitoringScheduler:
+    """注册所有监控模块；注册顺序即同一轮内的执行顺序。
 
-    should_push_rsi_alert() 会在发送前把 alert_latched 写进库，若飞书发送失败
-    而不回滚，这条告警要等 RSI 回到中枢区间才会重新武装——等于永久丢失。
+    get_config 每轮返回最新资产配置——主循环会周期性重载配置，
+    若在建表时把 config 固化进闭包，界面上的增删改就永远不生效。
     """
-    if not messages:
-        return
-    if send_feishu_msg(webhook or FEISHU_WEBHOOK, "\n\n".join(messages)):
-        return
-    print("❌ 飞书推送失败，回滚本轮新增的告警闩锁，下轮重试")
-    for item, rsi, price in pending_latch:
-        update_asset_alert_state(item.get("id"), active=bool(item.get("alarm_active")),
-                                 latched=False, rsi=float(rsi), price=float(price),
-                                 alert=False)
-
-
-# ================= RSI 监控（Meteora 池 / 可转债） =================
-def _baostock_login() -> bool:
-    """登录 baostock；失败时 A 股取数自动降级到腾讯源。"""
-    try:
-        lg_ret = bs.login()
-        if lg_ret.error_code == '0':
-            print("✅ baostock login success")
-            return True
-    except Exception as e:
-        print(f"⚠️ baostock登录失败，A股源将全部降级到腾讯源 {e}")
-    return False
-
-
-def _scan_a_share_rsi(items, settings, tag, messages, pending_latch, bs_login_ok) -> None:
-    """逐只扫 A 股类标的（可转债 / ETF），命中区间的加入 messages 待合并推送。"""
-    tf = monitor_rsi.timeframe_label(settings["frequency"])
-    low, high, period = settings["rsi_low"], settings["rsi_high"], settings["period"]
-    for item in items:
-        if not item.get("enabled", True):
-            continue
-        code = str(item.get("code"))
-        cfg_name = item.get("name", code)
-        rsi, price = monitor_rsi.get_a_share_rsi(
-            code, bs_login_ok, length=period, frequency=settings["frequency"])
-        if rsi is not None and price is not None:
-            print(f"✅ [{tag}] {cfg_name}({code}) 现价: {price:.3f}, {tf} RSI({period}): {rsi:.2f}")
-            if should_push_rsi_alert(item, rsi, price, settings):
-                pending_latch.append((item, rsi, price))
-                if rsi < low:
-                    messages.append(f"🚨 【{tag} RSI 超卖】{cfg_name}({code}) 现价: {price:.3f} 元，{tf} RSI: {rsi:.2f} (低于 {low})")
-                else:
-                    messages.append(f"⚠️ 【{tag} RSI 超买】{cfg_name}({code}) 现价: {price:.3f} 元，{tf} RSI: {rsi:.2f} (高于 {high})")
-        time.sleep(random.uniform(0.8, 1.5))
-
-
-def run_rsi_monitor(config: dict) -> None:
-    """Meteora 池 + 可转债；ETF 已拆到独立的 run_etf_monitor（按周执行）。"""
-    messages = []
-    pending_latch = []
-    bs_login_ok = _baostock_login()
-
-    # 1. Meteora 流动池监控
-    meteora_list = config.get("meteora", [])
-    m_set = monitor_rsi.DEFAULT_SETTINGS["meteora"]
-    for pool in meteora_list:
-        if not pool.get("enabled", True):
-            continue
-        address = pool.get("code")
-        pool_name = pool.get("name", address)
-        if not address:
-            continue
-        rsi, price = monitor_rsi.get_meteora_rsi(address, m_set["timeframe"], m_set["aggregate"], m_set["period"])
-        if rsi is not None and price is not None:
-            print(f"✅ [Meteora] {pool_name} 现价: ${price:.6f}, RSI({m_set['period']}): {rsi:.2f}")
-            if should_push_rsi_alert(pool, rsi, price, m_set):
-                pending_latch.append((pool, rsi, price))
-                if rsi < m_set["rsi_low"]:
-                    messages.append(f"🚨 【Meteora {pool_name} 超卖】现价 ${price:.6f}，1H RSI: {rsi:.2f} (低于 {m_set['rsi_low']})")
-                else:
-                    messages.append(f"⚠️ 【Meteora {pool_name} 超买】现价 ${price:.6f}，1H RSI: {rsi:.2f} (高于 {m_set['rsi_high']})")
-        time.sleep(random.uniform(1.0, 2.0))
-
-    # 2. 可转债监控
-    _scan_a_share_rsi(config.get("convertible_bonds", []),
-                      monitor_rsi.DEFAULT_SETTINGS["bond"], "可转债",
-                      messages, pending_latch, bs_login_ok)
-
-    if bs_login_ok:
-        bs.logout()
-
-    # 发送 RSI 告警
-    if messages:
-        _send_rsi_messages(messages, pending_latch)
-    else:
-        print("所有标的 RSI 均处于正常区间，不触发推送。")
-
-
-def run_etf_monitor(config: dict) -> None:
-    """ETF 周线 RSI：独立模块独立间隔（默认 7 天），与可转债 / Meteora 解耦。"""
-    messages = []
-    pending_latch = []
-    bs_login_ok = _baostock_login()
-
-    _scan_a_share_rsi(config.get("etfs", []),
-                      monitor_rsi.DEFAULT_SETTINGS["etf"], "ETF",
-                      messages, pending_latch, bs_login_ok)
-
-    if bs_login_ok:
-        bs.logout()
-
-    if messages:
-        _send_rsi_messages(messages, pending_latch, module_webhook("etf_rsi"))
-    else:
-        print("所有 ETF RSI 均处于正常区间，不触发推送。")
-
-
-# ================= 加密货币（OKX）RSI 监控 =================
-def run_crypto_monitor(config: dict) -> None:
-    """独立子程序：加密货币（OKX）RSI 监控，独立间隔与告警。"""
-    messages = []
-    pending_latch = []
-    crypto_list = config.get("crypto_okx", [])
-    c_set = monitor_rsi.DEFAULT_SETTINGS["crypto"]
-
-    for coin in crypto_list:
-        if not coin.get("enabled", True):
-            continue
-        symbol = coin.get("symbol")
-        if not symbol:
-            continue
-        interval = coin.get("timeframe") or c_set["interval"]
-        crypto_tf = monitor_rsi.timeframe_label(interval)
-        rsi, price = monitor_rsi.get_okx_rsi(symbol, interval, c_set["period"])
-        if rsi is not None and price is not None:
-            print(f"✅ [OKX] {symbol} 现价: ${price:.4f}, {crypto_tf} RSI({c_set['period']}): {rsi:.2f}")
-            if should_push_rsi_alert(coin, rsi, price, c_set):
-                pending_latch.append((coin, rsi, price))
-                if rsi < c_set["rsi_low"]:
-                    messages.append(f"🚨 【{symbol} 超卖】现价 ${price:.4f}，{crypto_tf} RSI: {rsi:.2f} (低于 {c_set['rsi_low']})")
-                else:
-                    messages.append(f"⚠️ 【{symbol} 超买】现价 ${price:.4f}，{crypto_tf} RSI: {rsi:.2f} (高于 {c_set['rsi_high']})")
-
-    if messages:
-        _send_rsi_messages(messages, pending_latch)
-    else:
-        print("所有加密货币 RSI 均处于正常区间，不触发推送。")
-
-
-# ================= 链上代币 RSI 监控 =================
-def run_onchain_token_monitor(config: dict) -> None:
-    """独立子程序：链上代币 RSI 监控，独立间隔与告警；时间级别取每个标的的 timeframe。"""
-    messages = []
-    pending_latch = []
-    token_list = config.get("tokens", [])
-    t_set = monitor_rsi.DEFAULT_SETTINGS["token"]
-
-    for item in token_list:
-        if not item.get("enabled", True):
-            continue
-        code = str(item.get("code"))
-        chain = item.get("chain") or "sol"
-        cfg_name = item.get("name", code)
-        resolution = item.get("timeframe") or t_set["resolution"]
-        days = monitor_rsi.TOKEN_RESOLUTION_DAYS.get(resolution, t_set.get("days"))
-        token_tf = monitor_rsi.timeframe_label(resolution)
-        rsi, price = monitor_rsi.get_token_rsi(
-            chain, code, resolution, t_set["period"], days)
-        if rsi is not None and price is not None:
-            short = code[:10]
-            print(f"✅ [链上代币] {cfg_name}({short}...) {chain} 现价: {price:.8g}, "
-                  f"{token_tf} RSI({t_set['period']}): {rsi:.2f}")
-            if should_push_rsi_alert(item, rsi, price, t_set):
-                pending_latch.append((item, rsi, price))
-                if rsi < t_set["rsi_low"]:
-                    messages.append(f"🚨 【链上代币 RSI 超卖】{cfg_name}({short}...) 链 {chain} "
-                                    f"现价: {price:.8g}，{token_tf} RSI: {rsi:.2f} (低于 {t_set['rsi_low']})")
-                else:
-                    messages.append(f"⚠️ 【链上代币 RSI 超买】{cfg_name}({short}...) 链 {chain} "
-                                    f"现价: {price:.8g}，{token_tf} RSI: {rsi:.2f} (高于 {t_set['rsi_high']})")
-        time.sleep(random.uniform(0.8, 1.5))
-
-    if messages:
-        _send_rsi_messages(messages, pending_latch)
-    else:
-        print("所有链上代币 RSI 均处于正常区间，不触发推送。")
-
-
-def _run_rsi():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 RSI 监控")
-    try:
-        run_rsi_monitor(config)
-    except Exception as e:
-        print(f"❌ run_rsi_monitor() 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_etf_rsi():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 ETF 周线 RSI 监控")
-    try:
-        run_etf_monitor(config)
-    except Exception as e:
-        print(f"❌ run_etf_monitor() 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_crypto():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行加密货币（OKX）RSI 监控")
-    try:
-        run_crypto_monitor(config)
-    except Exception as e:
-        print(f"❌ run_crypto_monitor() 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_onchain_token():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行链上代币 RSI 监控")
-    try:
-        run_onchain_token_monitor(config)
-    except Exception as e:
-        print(f"❌ run_onchain_token_monitor() 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_meme_underval():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 Meme 低估监控")
-    try:
-        run_meme_underval_monitor()
-    except Exception as e:
-        print(f"❌ run_meme_underval_monitor() 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_meme_rsi_batch():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 批量 Meme 超卖超买监控")
-    try:
-        run_batch_meme_rsi_monitor()
-    except Exception as e:
-        print(f"❌ run_batch_meme_rsi_monitor() 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_lp_alert():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 LP 仓位 / 池子价格告警")
-    try:
-        ensure_lp_alert_table()
-        run_lp_alert_once()
-    except Exception as e:
-        print(f"❌ lp_position_alert 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_lp_apr():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 LP 区间 APR 监控")
-    try:
-        run_lp_apr_monitor()
-    except Exception as e:
-        print(f"❌ run_lp_apr_monitor 发生异常：{e}")
-        traceback.print_exc()
-
-
-def _run_exit_strategy():
-    print(f"\n{'='*50}")
-    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行退出策略监控")
-    try:
-        run_exit_strategy_monitor()
-    except Exception as e:
-        print(f"❌ 退出策略监控发生异常：{e}")
-        traceback.print_exc()
-
-
-def build_scheduler() -> MonitoringScheduler:
     registry = MonitorRegistry()
-    registry.register(MonitorSpec("rsi", "rsi", _run_rsi))
-    registry.register(MonitorSpec("etf_rsi", "etf_rsi", _run_etf_rsi))
-    registry.register(MonitorSpec("crypto", "crypto", _run_crypto))
-    registry.register(MonitorSpec("onchain_token", "onchain_token", _run_onchain_token))
-    registry.register(MonitorSpec("meme_underval", "meme_underval", _run_meme_underval))
-    registry.register(MonitorSpec("meme_rsi_batch", "meme_rsi_batch", _run_meme_rsi_batch))
-    registry.register(MonitorSpec("lp_alert", "lp_alert", _run_lp_alert))
-    registry.register(MonitorSpec("lp_apr", "lp_apr", _run_lp_apr))
-    registry.register(MonitorSpec("meteora_scan", "meteora_scan", _run_meteora_scan))
-    registry.register(MonitorSpec("exit_strategy", "exit_strategy", _run_exit_strategy))
+    registry.register(MonitorSpec(
+        "rsi", "rsi", _runner("RSI 监控", lambda: runners.run_rsi_monitor(get_config()))))
+    registry.register(MonitorSpec(
+        "etf_rsi", "etf_rsi", _runner("ETF 周线 RSI 监控", lambda: runners.run_etf_monitor(get_config()))))
+    registry.register(MonitorSpec(
+        "crypto", "crypto", _runner("加密货币（OKX）RSI 监控", lambda: runners.run_crypto_monitor(get_config()))))
+    registry.register(MonitorSpec(
+        "onchain_token", "onchain_token",
+        _runner("链上代币 RSI 监控", lambda: runners.run_onchain_token_monitor(get_config()))))
+    registry.register(MonitorSpec(
+        "meme_underval", "meme_underval",
+        _runner("Meme 低估监控", run_meme_underval_monitor)))
+    registry.register(MonitorSpec(
+        "meme_rsi_batch", "meme_rsi_batch",
+        _runner("批量 Meme 超卖超买监控", run_batch_meme_rsi_monitor)))
+    registry.register(MonitorSpec(
+        "lp_alert", "lp_alert",
+        _runner("LP 仓位 / 池子价格告警", _lp_alert_job)))
+    registry.register(MonitorSpec(
+        "lp_apr", "lp_apr", _runner("LP 区间 APR 监控", run_lp_apr_monitor)))
+    registry.register(MonitorSpec(
+        "meteora_scan", "meteora_scan", _runner("Meteora DLMM 全池扫描", _run_meteora_scan)))
+    registry.register(MonitorSpec(
+        "exit_strategy", "exit_strategy", _runner("退出策略监控", run_exit_strategy_monitor)))
     return MonitoringScheduler(registry, poll_interval=POLL_INTERVAL)
 
 
@@ -466,7 +198,11 @@ if __name__ == "__main__":
     for name in DEFAULT_INTERVALS:
         print(f"   {name}: 每 {intervals[name] // 60} 分钟执行一次")
 
-    scheduler = build_scheduler()
+    def _current_config() -> dict:
+        """由主循环周期性刷新；闭包读全局，保证 runner 每轮拿到最新标的。"""
+        return config
+
+    scheduler = build_scheduler(_current_config)
 
     while True:
         now = time.time()

@@ -197,6 +197,89 @@ def clear_alerted(rule_id: int):
 
 
 # ============================================================
+# 规则维护（页面 CRUD 的唯一实现；页面不得再自己拼 SQL）
+# ============================================================
+RULE_COLUMNS = ("id", "address", "chain", "symbol", "target_price", "direction",
+                "enabled", "last_price", "last_checked_at", "alerted", "created_at")
+
+
+def load_all_rules() -> list[dict]:
+    """读取全部规则（含停用），按 id 倒序，供管理页展示。"""
+    client = get_db_client()
+    if not client:
+        return []
+    try:
+        rows = client.execute(
+            "SELECT id, address, chain, symbol, target_price, direction, enabled,"
+            " last_price, last_checked_at, alerted, created_at"
+            " FROM price_alert ORDER BY id DESC"
+        ).rows
+        return [
+            {
+                "id": row[0], "address": row[1], "chain": row[2], "symbol": row[3] or "",
+                "target_price": row[4], "direction": row[5], "enabled": bool(row[6]),
+                "last_price": row[7], "last_checked_at": row[8],
+                "alerted": bool(row[9]), "created_at": row[10],
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        print(f"❌ 读取价格规则失败: {e}")
+        raise
+    finally:
+        client.close()
+
+
+def add_rule(address: str, chain: str, symbol: str, target_price: float,
+             direction: str) -> bool:
+    """新增价格规则；参数由调用方校验后传入。"""
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute(
+            "INSERT INTO price_alert (address, chain, symbol, target_price, direction, enabled)"
+            " VALUES (?, ?, ?, ?, ?, 1)",
+            [address.strip(), chain, (symbol or "").strip(), target_price, direction],
+        )
+        return True
+    except Exception as e:
+        print(f"❌ 新增价格规则失败: {e}")
+        return False
+    finally:
+        client.close()
+
+
+def set_rule_enabled(rule_id: int, enabled: bool) -> bool:
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute("UPDATE price_alert SET enabled = ? WHERE id = ?",
+                       [1 if enabled else 0, rule_id])
+        return True
+    except Exception as e:
+        print(f"❌ 更新价格规则状态失败 (id={rule_id}): {e}")
+        return False
+    finally:
+        client.close()
+
+
+def delete_rule(rule_id: int) -> bool:
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute("DELETE FROM price_alert WHERE id = ?", [rule_id])
+        return True
+    except Exception as e:
+        print(f"❌ 删除价格规则失败 (id={rule_id}): {e}")
+        return False
+    finally:
+        client.close()
+
+
+# ============================================================
 # 单轮监控
 # ============================================================
 def run_once():
