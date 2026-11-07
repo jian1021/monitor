@@ -19,19 +19,55 @@ SLEEP_METEORA = (1.0, 2.0)
 
 
 # ================= 告警闩锁策略 =================
+def rsi_zone(rsi, settings) -> str:
+    """RSI 所处区间：below（超卖）/ above（超买）/ mid（中枢）/ unknown。"""
+    if rsi is None:
+        return "unknown"
+    if rsi < settings["rsi_low"]:
+        return "below"
+    if rsi > settings["rsi_high"]:
+        return "above"
+    return "mid"
+
+
 def should_push(item, rsi, price, settings) -> bool:
-    """写入标的告警状态并返回本轮是否应推送；latch 未解除时抑制重复告警。"""
-    low, high = settings["rsi_low"], settings["rsi_high"]
-    if not (rsi < low or rsi > high):
+    """写入标的告警状态并返回本轮是否应推送；闩锁未解除时抑制重复告警。
+
+    闩锁只在「同一侧仍然越界」时抑制。RSI(3) 这类极短周期指标可能从超卖
+    直接跳到超买，若沿用上一侧的闩锁，另一侧的告警会被静默吞掉。
+    """
+    zone = rsi_zone(rsi, settings)
+    if zone == "mid":
         update_asset_alert_state(item.get("id"), active=False, latched=False,
                                  rsi=float(rsi), price=float(price), alert=False)
         return False
-    already_latched = bool(item.get("alert_latched"))
+    prev_zone = rsi_zone(item.get("last_rsi"), settings)
+    already_latched = bool(item.get("alert_latched")) and prev_zone == zone
     update_asset_alert_state(
         item.get("id"),
         active=bool(item.get("alarm_active")) or not already_latched,
         latched=True, rsi=float(rsi), price=float(price), alert=not already_latched)
     return not already_latched
+
+
+def should_push_rebound(item, rsi, price, settings) -> bool:
+    """超卖区回升并上穿下限时报一次「反转突破」（离场/反弹信号）。
+
+    判据是「上一轮 last_rsi 在超卖区、本轮回到中枢」，本身是边缘事件：
+    同一段回升只会命中一次，不需要额外闩锁。但仍要清掉超卖闩锁，
+    否则下一轮重新跌破时不会再次报警。
+    """
+    if not settings.get("alert_on_rebound"):
+        return False
+    prev = item.get("last_rsi")
+    if prev is None:
+        return False
+    if rsi_zone(prev, settings) != "below" or rsi_zone(rsi, settings) != "mid":
+        return False
+    update_asset_alert_state(item.get("id"), active=False, latched=False,
+                             rsi=float(rsi), price=float(price), alert=True)
+    return True
+
 
 
 def webhook_for(module_key: str) -> str:
@@ -56,12 +92,16 @@ class AlertBatch:
         self.messages: list[str] = []
         self.pending: list[tuple] = []
 
+    def collect(self, item, rsi, price, message: str) -> None:
+        """把已判定需要推送的事件加入批次（边缘事件自行负责去重）。"""
+        self.pending.append((item, rsi, price))
+        self.messages.append(message)
+
     def offer(self, item, rsi, price, message: str, settings: dict) -> bool:
         """命中区间且未被闩锁时收集消息，返回是否真的加入了待推送批次。"""
         if not should_push(item, rsi, price, settings):
             return False
-        self.pending.append((item, rsi, price))
-        self.messages.append(message)
+        self.collect(item, rsi, price, message)
         return True
 
     def flush(self) -> bool:
@@ -74,9 +114,13 @@ class AlertBatch:
             return True
         print("❌ 飞书推送失败，回滚本轮新增的告警闩锁，下轮重试")
         for item, rsi, price in self.pending:
+            # last_rsi 也要退回上一轮的值：反转突破靠「前值在超卖区」判边缘，
+            # 若把当前值留在库里，这次告警就再也检测不出来了。
+            prev = item.get("last_rsi")
             update_asset_alert_state(item.get("id"), active=bool(item.get("alarm_active")),
-                                     latched=False, rsi=float(rsi), price=float(price),
-                                     alert=False)
+                                     latched=False,
+                                     rsi=float(prev) if prev is not None else float(rsi),
+                                     price=float(price), alert=False)
         return False
 
 
@@ -118,13 +162,20 @@ def scan_a_share(items, settings, tag, batch: AlertBatch, bs_login_ok: bool) -> 
             code, bs_login_ok, length=period, frequency=settings["frequency"])
         if rsi is not None and price is not None:
             print(f"✅ [{tag}] {cfg_name}({code}) 现价: {price:.3f}, {tf} RSI({period}): {rsi:.2f}")
-            if rsi < low:
+            prev_rsi = item.get("last_rsi")
+            if should_push_rebound(item, rsi, price, settings):
+                message = (f"🔁 【{tag} RSI 反转突破】{cfg_name}({code}) 现价: {price:.3f} 元，"
+                           f"{tf} RSI: {rsi:.2f}（上穿 {low}，前值 {float(prev_rsi):.2f}），"
+                           f"已脱离超卖区")
+                batch.collect(item, rsi, price, message)
+            elif rsi < low:
                 message = (f"🚨 【{tag} RSI 超卖】{cfg_name}({code}) 现价: {price:.3f} 元，"
                            f"{tf} RSI: {rsi:.2f} (低于 {low})")
+                batch.offer(item, rsi, price, message, settings)
             else:
                 message = (f"⚠️ 【{tag} RSI 超买】{cfg_name}({code}) 现价: {price:.3f} 元，"
                            f"{tf} RSI: {rsi:.2f} (高于 {high})")
-            batch.offer(item, rsi, price, message, settings)
+                batch.offer(item, rsi, price, message, settings)
         time.sleep(random.uniform(*SLEEP_A_SHARE))
 
 

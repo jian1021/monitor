@@ -34,7 +34,9 @@ DEFAULT_SETTINGS = {
         "frequency": "w",
         "period": 3,
         "rsi_low": 10,
-        "rsi_high": 90
+        "rsi_high": 90,
+        # 跌破下限时报「超卖」，从下限下方回升上穿时再报一次「反转突破」
+        "alert_on_rebound": True
     },
     "token": {
         "resolution": "1d",

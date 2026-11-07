@@ -27,6 +27,10 @@ st.title("⚙️ 超卖监控 · 标的管理")
 st.caption("🔎 当前页面专注 **Meteora 池 / 可转债 / ETF** 的添加与管理；其他资产类别请前往对应页面配置。")
 render_monitor_controls("rsi", "RSI 监控（Meteora 池 / 可转债）")
 render_monitor_controls("etf_rsi", "ETF 周线 RSI 监控", webhook_editable=True)
+st.caption(
+    "📐 ETF 告警口径：周线 RSI(3) 跌破 10 报「超卖」；从 10 下方回升上穿 10 再报一次"
+    "「反转突破」——同一段回升只报一次，不重复轰炸。"
+)
 
 _missing = stale_module_names()
 if _missing:
