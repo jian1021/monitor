@@ -26,7 +26,7 @@ st.set_page_config(page_title="超卖监控 · 标的管理", page_icon="⚙️"
 st.title("⚙️ 超卖监控 · 标的管理")
 st.caption("🔎 当前页面专注 **Meteora 池 / 可转债 / ETF** 的添加与管理；其他资产类别请前往对应页面配置。")
 render_monitor_controls("rsi", "RSI 监控（Meteora 池 / 可转债）")
-render_monitor_controls("etf_rsi", "ETF 周线 RSI 监控")
+render_monitor_controls("etf_rsi", "ETF 周线 RSI 监控", webhook_editable=True)
 
 _missing = stale_module_names()
 if _missing:

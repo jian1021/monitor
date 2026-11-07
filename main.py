@@ -17,6 +17,7 @@ from app.core.settings import FEISHU_WEBHOOK, LIBSQL_TOKEN, LIBSQL_URL
 from app.infrastructure.db.assets import load_instruments, update_asset_alert_state
 from app.infrastructure.db.intervals import DEFAULT_INTERVALS, get_module_intervals
 from app.infrastructure.db.module_settings import get_module_settings
+from app.infrastructure.db.module_webhooks import get_module_webhook
 from app.application.monitors.meme_underval import run_meme_underval_monitor
 from app.application.monitors.meme_rsi_batch import run_batch_meme_rsi_monitor
 from app.application.lp_tools.monitor import run_lp_apr_monitor
@@ -132,7 +133,16 @@ def should_push_rsi_alert(item, rsi, price, settings) -> bool:
     return not already_latched
 
 
-def _send_rsi_messages(messages, pending_latch) -> None:
+def module_webhook(module_key: str) -> str:
+    """模块专属飞书 Webhook；未配置时回落到全局 FEISHU_WEBHOOK。"""
+    try:
+        return get_module_webhook(module_key, FEISHU_WEBHOOK)
+    except Exception as e:
+        print(f"⚠️ 读取模块 Webhook 失败（{module_key}），使用全局: {e}")
+        return FEISHU_WEBHOOK
+
+
+def _send_rsi_messages(messages, pending_latch, webhook: str | None = None) -> None:
     """发送合并后的 RSI 告警；失败时回滚本轮新加的 latch。
 
     should_push_rsi_alert() 会在发送前把 alert_latched 写进库，若飞书发送失败
@@ -140,7 +150,7 @@ def _send_rsi_messages(messages, pending_latch) -> None:
     """
     if not messages:
         return
-    if send_feishu_msg(FEISHU_WEBHOOK, "\n\n".join(messages)):
+    if send_feishu_msg(webhook or FEISHU_WEBHOOK, "\n\n".join(messages)):
         return
     print("❌ 飞书推送失败，回滚本轮新增的告警闩锁，下轮重试")
     for item, rsi, price in pending_latch:
@@ -240,7 +250,7 @@ def run_etf_monitor(config: dict) -> None:
         bs.logout()
 
     if messages:
-        _send_rsi_messages(messages, pending_latch)
+        _send_rsi_messages(messages, pending_latch, module_webhook("etf_rsi"))
     else:
         print("所有 ETF RSI 均处于正常区间，不触发推送。")
 
