@@ -149,18 +149,46 @@ def _send_rsi_messages(messages, pending_latch) -> None:
                                  alert=False)
 
 
-# ================= RSI 监控（Meteora 池 / 可转债 / ETF） =================
-def run_rsi_monitor(config: dict) -> None:
-    messages = []
-    pending_latch = []
-    bs_login_ok = False
+# ================= RSI 监控（Meteora 池 / 可转债） =================
+def _baostock_login() -> bool:
+    """登录 baostock；失败时 A 股取数自动降级到腾讯源。"""
     try:
         lg_ret = bs.login()
         if lg_ret.error_code == '0':
-            bs_login_ok = True
             print("✅ baostock login success")
+            return True
     except Exception as e:
         print(f"⚠️ baostock登录失败，A股源将全部降级到腾讯源 {e}")
+    return False
+
+
+def _scan_a_share_rsi(items, settings, tag, messages, pending_latch, bs_login_ok) -> None:
+    """逐只扫 A 股类标的（可转债 / ETF），命中区间的加入 messages 待合并推送。"""
+    tf = monitor_rsi.timeframe_label(settings["frequency"])
+    low, high, period = settings["rsi_low"], settings["rsi_high"], settings["period"]
+    for item in items:
+        if not item.get("enabled", True):
+            continue
+        code = str(item.get("code"))
+        cfg_name = item.get("name", code)
+        rsi, price = monitor_rsi.get_a_share_rsi(
+            code, bs_login_ok, length=period, frequency=settings["frequency"])
+        if rsi is not None and price is not None:
+            print(f"✅ [{tag}] {cfg_name}({code}) 现价: {price:.3f}, {tf} RSI({period}): {rsi:.2f}")
+            if should_push_rsi_alert(item, rsi, price, settings):
+                pending_latch.append((item, rsi, price))
+                if rsi < low:
+                    messages.append(f"🚨 【{tag} RSI 超卖】{cfg_name}({code}) 现价: {price:.3f} 元，{tf} RSI: {rsi:.2f} (低于 {low})")
+                else:
+                    messages.append(f"⚠️ 【{tag} RSI 超买】{cfg_name}({code}) 现价: {price:.3f} 元，{tf} RSI: {rsi:.2f} (高于 {high})")
+        time.sleep(random.uniform(0.8, 1.5))
+
+
+def run_rsi_monitor(config: dict) -> None:
+    """Meteora 池 + 可转债；ETF 已拆到独立的 run_etf_monitor（按周执行）。"""
+    messages = []
+    pending_latch = []
+    bs_login_ok = _baostock_login()
 
     # 1. Meteora 流动池监控
     meteora_list = config.get("meteora", [])
@@ -184,44 +212,9 @@ def run_rsi_monitor(config: dict) -> None:
         time.sleep(random.uniform(1.0, 2.0))
 
     # 2. 可转债监控
-    cb_list = config.get("convertible_bonds", [])
-    b_set = monitor_rsi.DEFAULT_SETTINGS["bond"]
-    bond_tf = monitor_rsi.timeframe_label(b_set["frequency"])
-    for item in cb_list:
-        if not item.get("enabled", True):
-            continue
-        code = str(item.get("code"))
-        cfg_name = item.get("name", code)
-        rsi, price = monitor_rsi.get_a_share_rsi(code, bs_login_ok, length=b_set["period"], frequency=b_set["frequency"])
-        if rsi is not None and price is not None:
-            print(f"✅ [可转债] {cfg_name}({code}) 现价: {price:.2f}, {bond_tf} RSI({b_set['period']}): {rsi:.2f}")
-            if should_push_rsi_alert(item, rsi, price, b_set):
-                pending_latch.append((item, rsi, price))
-                if rsi < b_set["rsi_low"]:
-                    messages.append(f"🚨 【可转债 RSI 超卖】{cfg_name}({code}) 现价: {price:.2f} 元，{bond_tf} RSI: {rsi:.2f} (低于 {b_set['rsi_low']})")
-                else:
-                    messages.append(f"⚠️ 【可转债 RSI 超买】{cfg_name}({code}) 现价: {price:.2f} 元，{bond_tf} RSI: {rsi:.2f} (高于 {b_set['rsi_high']})")
-        time.sleep(random.uniform(0.8, 1.5))
-
-    # 3. ETF 监控
-    etf_list = config.get("etfs", [])
-    e_set = monitor_rsi.DEFAULT_SETTINGS["etf"]
-    etf_tf = monitor_rsi.timeframe_label(e_set["frequency"])
-    for item in etf_list:
-        if not item.get("enabled", True):
-            continue
-        code = str(item.get("code"))
-        cfg_name = item.get("name", code)
-        rsi, price = monitor_rsi.get_a_share_rsi(code, bs_login_ok, length=e_set["period"], frequency=e_set["frequency"])
-        if rsi is not None and price is not None:
-            print(f"✅ [ETF] {cfg_name}({code}) 现价: {price:.3f}, {etf_tf} RSI({e_set['period']}): {rsi:.2f}")
-            if should_push_rsi_alert(item, rsi, price, e_set):
-                pending_latch.append((item, rsi, price))
-                if rsi < e_set["rsi_low"]:
-                    messages.append(f"🚨 【ETF RSI 超卖】{cfg_name}({code}) 现价: {price:.3f} 元，{etf_tf} RSI: {rsi:.2f} (低于 {e_set['rsi_low']})")
-                else:
-                    messages.append(f"⚠️ 【ETF RSI 超买】{cfg_name}({code}) 现价: {price:.3f} 元，{etf_tf} RSI: {rsi:.2f} (高于 {e_set['rsi_high']})")
-        time.sleep(random.uniform(0.8, 1.5))
+    _scan_a_share_rsi(config.get("convertible_bonds", []),
+                      monitor_rsi.DEFAULT_SETTINGS["bond"], "可转债",
+                      messages, pending_latch, bs_login_ok)
 
     if bs_login_ok:
         bs.logout()
@@ -231,6 +224,25 @@ def run_rsi_monitor(config: dict) -> None:
         _send_rsi_messages(messages, pending_latch)
     else:
         print("所有标的 RSI 均处于正常区间，不触发推送。")
+
+
+def run_etf_monitor(config: dict) -> None:
+    """ETF 周线 RSI：独立模块独立间隔（默认 7 天），与可转债 / Meteora 解耦。"""
+    messages = []
+    pending_latch = []
+    bs_login_ok = _baostock_login()
+
+    _scan_a_share_rsi(config.get("etfs", []),
+                      monitor_rsi.DEFAULT_SETTINGS["etf"], "ETF",
+                      messages, pending_latch, bs_login_ok)
+
+    if bs_login_ok:
+        bs.logout()
+
+    if messages:
+        _send_rsi_messages(messages, pending_latch)
+    else:
+        print("所有 ETF RSI 均处于正常区间，不触发推送。")
 
 
 # ================= 加密货币（OKX）RSI 监控 =================
@@ -314,6 +326,16 @@ def _run_rsi():
         traceback.print_exc()
 
 
+def _run_etf_rsi():
+    print(f"\n{'='*50}")
+    print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行 ETF 周线 RSI 监控")
+    try:
+        run_etf_monitor(config)
+    except Exception as e:
+        print(f"❌ run_etf_monitor() 发生异常：{e}")
+        traceback.print_exc()
+
+
 def _run_crypto():
     print(f"\n{'='*50}")
     print(f"[{time.strftime('%H:%M:%S')}] ▶ 开始执行加密货币（OKX）RSI 监控")
@@ -388,6 +410,7 @@ def _run_exit_strategy():
 def build_scheduler() -> MonitoringScheduler:
     registry = MonitorRegistry()
     registry.register(MonitorSpec("rsi", "rsi", _run_rsi))
+    registry.register(MonitorSpec("etf_rsi", "etf_rsi", _run_etf_rsi))
     registry.register(MonitorSpec("crypto", "crypto", _run_crypto))
     registry.register(MonitorSpec("onchain_token", "onchain_token", _run_onchain_token))
     registry.register(MonitorSpec("meme_underval", "meme_underval", _run_meme_underval))

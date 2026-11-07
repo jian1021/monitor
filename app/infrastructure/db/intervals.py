@@ -4,7 +4,8 @@ from app.infrastructure.db.client import get_db_client
 
 # 各子程序默认执行间隔（分钟）；module_intervals 表可按模块覆盖。
 DEFAULT_INTERVALS = {
-    "rsi":              1440,   # RSI 监控（Meteora 池 / 可转债 / ETF）：24 小时
+    "rsi":              1440,   # RSI 监控（Meteora 池 / 可转债）：24 小时
+    "etf_rsi":         10080,   # ETF 周线 RSI 监控：7 天（周线一周才收一根 K）
     "crypto":             30,   # 加密货币（OKX）RSI 监控：30 分钟
     "onchain_token":      30,   # 链上代币 RSI 监控：30 分钟
     "meme_underval":       30,   # Meme 低估监控（Top Performers）：30 分钟

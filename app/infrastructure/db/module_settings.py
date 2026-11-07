@@ -27,7 +27,7 @@ def get_module_settings() -> dict:
     """返回所有模块的启停状态，格式: {模块名: True/False}"""
     ensure_module_settings()
     client = get_db_client()
-    defaults = {"rsi": True, "crypto": True, "onchain_token": True, "meme_underval": True,
+    defaults = {"rsi": True, "etf_rsi": True, "crypto": True, "onchain_token": True, "meme_underval": True,
                 "meme_rsi_batch": True, "lp_alert": True,
                 "lp_apr": True,
                 "meteora_scan": True, "exit_strategy": True}
