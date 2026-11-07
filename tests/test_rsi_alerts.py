@@ -169,3 +169,51 @@ def test_etf_scan_emits_rebound_message(monkeypatch):
     assert len(batch.messages) == 1
     msg = batch.messages[0]
     assert "反转突破" in msg and "12.34" in msg and "2.85" in msg
+
+
+# ================= 链上代币同样要「跌破 + 反弹」双向告警 =================
+TOKEN_SET = {"resolution": "1d", "days": 15, "period": 3,
+             "rsi_low": 10, "rsi_high": 90, "alert_on_rebound": True}
+
+
+def test_token_settings_enable_rebound():
+    """链上代币必须开启反转突破，否则只有跌破报警。"""
+    from app.application.monitors import rsi as monitor_rsi
+
+    assert monitor_rsi.DEFAULT_SETTINGS["token"].get("alert_on_rebound") is True
+
+
+def test_token_scan_emits_rebound(monkeypatch):
+    """链上代币 prev<10、本轮上穿 10 → 报「反转突破」，带上前值与所属链。"""
+    monkeypatch.setattr(rsi_alerts, "update_asset_alert_state", _Recorder())
+    monkeypatch.setattr(rsi_alerts.monitor_rsi, "get_token_rsi",
+                        lambda chain, code, res, period, days: (12.34, 0.0004123))
+    monkeypatch.setattr(rsi_alerts, "time", type("T", (), {
+        "sleep": staticmethod(lambda *_: None)}))
+
+    batch = rsi_alerts.AlertBatch()
+    rsi_alerts.scan_onchain_tokens([{
+        "id": 21, "code": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+        "name": "PEPE", "chain": "sol", "last_rsi": 4.2, "alert_latched": True,
+    }], TOKEN_SET, batch)
+
+    assert len(batch.messages) == 1
+    msg = batch.messages[0]
+    assert "链上代币 RSI 反转突破" in msg and "12.34" in msg and "4.20" in msg
+    assert "链 sol" in msg
+
+
+def test_token_scan_no_rebound_without_previous_low(monkeypatch):
+    """首次入库（无前值）只算基线，不误报突破。"""
+    monkeypatch.setattr(rsi_alerts, "update_asset_alert_state", _Recorder())
+    monkeypatch.setattr(rsi_alerts.monitor_rsi, "get_token_rsi",
+                        lambda chain, code, res, period, days: (42.0, 0.001))
+    monkeypatch.setattr(rsi_alerts, "time", type("T", (), {
+        "sleep": staticmethod(lambda *_: None)}))
+
+    batch = rsi_alerts.AlertBatch()
+    rsi_alerts.scan_onchain_tokens([{
+        "id": 22, "code": "abc", "name": "NEW", "chain": "base", "last_rsi": None,
+    }], TOKEN_SET, batch)
+
+    assert batch.messages == []

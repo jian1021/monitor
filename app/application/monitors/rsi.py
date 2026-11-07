@@ -43,7 +43,9 @@ DEFAULT_SETTINGS = {
         "days": 15,
         "period": 3,
         "rsi_low": 10,
-        "rsi_high": 90
+        "rsi_high": 90,
+        # 跌破下限报「超卖」，回升上穿下限再报一次「反转突破」
+        "alert_on_rebound": True
     }
 }
 

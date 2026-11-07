@@ -149,6 +149,17 @@ def baostock_logout() -> None:
 
 
 # ================= 各资产类别的扫描循环 =================
+def rebound_alert_line(tag, subject, price_text, tf, rsi, low, prev_rsi) -> str:
+    """「反转突破」统一文案：RSI 从下限下方回升上穿，即脱离超卖区。
+
+    tag      —— 标题前缀，如 "ETF" / "链上代币" / "Meteora 某池"
+    subject  —— 标的描述，如 "光伏ETF(515790)"；为空时省略
+    """
+    prefix = f"{subject} " if subject else ""
+    return (f"🔁 【{tag} RSI 反转突破】{prefix}现价: {price_text}，{tf} RSI: {rsi:.2f}"
+            f"（上穿 {low}，前值 {float(prev_rsi):.2f}），已脱离超卖区")
+
+
 def scan_a_share(items, settings, tag, batch: AlertBatch, bs_login_ok: bool) -> None:
     """逐只扫 A 股类标的（可转债 / ETF），命中区间的加入批次。"""
     tf = monitor_rsi.timeframe_label(settings["frequency"])
@@ -162,11 +173,10 @@ def scan_a_share(items, settings, tag, batch: AlertBatch, bs_login_ok: bool) -> 
             code, bs_login_ok, length=period, frequency=settings["frequency"])
         if rsi is not None and price is not None:
             print(f"✅ [{tag}] {cfg_name}({code}) 现价: {price:.3f}, {tf} RSI({period}): {rsi:.2f}")
-            prev_rsi = item.get("last_rsi")
             if should_push_rebound(item, rsi, price, settings):
-                message = (f"🔁 【{tag} RSI 反转突破】{cfg_name}({code}) 现价: {price:.3f} 元，"
-                           f"{tf} RSI: {rsi:.2f}（上穿 {low}，前值 {float(prev_rsi):.2f}），"
-                           f"已脱离超卖区")
+                message = rebound_alert_line(
+                    tag, f"{cfg_name}({code})", f"{price:.3f} 元", tf,
+                    rsi, low, item.get("last_rsi"))
                 batch.collect(item, rsi, price, message)
             elif rsi < low:
                 message = (f"🚨 【{tag} RSI 超卖】{cfg_name}({code}) 现价: {price:.3f} 元，"
@@ -193,13 +203,18 @@ def scan_meteora_pools(pools, settings, batch: AlertBatch) -> None:
             address, settings["timeframe"], settings["aggregate"], period)
         if rsi is not None and price is not None:
             print(f"✅ [Meteora] {pool_name} 现价: ${price:.6f}, RSI({period}): {rsi:.2f}")
-            if rsi < settings["rsi_low"]:
+            if should_push_rebound(pool, rsi, price, settings):
+                batch.collect(pool, rsi, price, rebound_alert_line(
+                    f"Meteora {pool_name}", "", f"${price:.6f}", "1H",
+                    rsi, settings["rsi_low"], pool.get("last_rsi")))
+            elif rsi < settings["rsi_low"]:
                 message = (f"🚨 【Meteora {pool_name} 超卖】现价 ${price:.6f}，"
                            f"1H RSI: {rsi:.2f} (低于 {settings['rsi_low']})")
+                batch.offer(pool, rsi, price, message, settings)
             else:
                 message = (f"⚠️ 【Meteora {pool_name} 超买】现价 ${price:.6f}，"
                            f"1H RSI: {rsi:.2f} (高于 {settings['rsi_high']})")
-            batch.offer(pool, rsi, price, message, settings)
+                batch.offer(pool, rsi, price, message, settings)
         time.sleep(random.uniform(*SLEEP_METEORA))
 
 
@@ -217,18 +232,24 @@ def scan_okx_symbols(coins, settings, batch: AlertBatch) -> None:
         rsi, price = monitor_rsi.get_okx_rsi(symbol, interval, period)
         if rsi is not None and price is not None:
             print(f"✅ [OKX] {symbol} 现价: ${price:.4f}, {tf} RSI({period}): {rsi:.2f}")
-            if rsi < settings["rsi_low"]:
+            if should_push_rebound(coin, rsi, price, settings):
+                batch.collect(coin, rsi, price, rebound_alert_line(
+                    symbol, "", f"${price:.4f}", tf,
+                    rsi, settings["rsi_low"], coin.get("last_rsi")))
+            elif rsi < settings["rsi_low"]:
                 message = (f"🚨 【{symbol} 超卖】现价 ${price:.4f}，{tf} RSI: {rsi:.2f} "
                            f"(低于 {settings['rsi_low']})")
+                batch.offer(coin, rsi, price, message, settings)
             else:
                 message = (f"⚠️ 【{symbol} 超买】现价 ${price:.4f}，{tf} RSI: {rsi:.2f} "
                            f"(高于 {settings['rsi_high']})")
-            batch.offer(coin, rsi, price, message, settings)
+                batch.offer(coin, rsi, price, message, settings)
 
 
 def scan_onchain_tokens(tokens, settings, batch: AlertBatch) -> None:
     """链上代币；每只标的自带 chain / timeframe。"""
     period = settings["period"]
+    low, high = settings["rsi_low"], settings["rsi_high"]
     for item in tokens:
         if not item.get("enabled", True):
             continue
@@ -241,13 +262,20 @@ def scan_onchain_tokens(tokens, settings, batch: AlertBatch) -> None:
         rsi, price = monitor_rsi.get_token_rsi(chain, code, resolution, period, days)
         if rsi is not None and price is not None:
             short = code[:10]
+            subject = f"{cfg_name}({short}...) 链 {chain}"
             print(f"✅ [链上代币] {cfg_name}({short}...) {chain} 现价: {price:.8g}, "
                   f"{tf} RSI({period}): {rsi:.2f}")
-            if rsi < settings["rsi_low"]:
-                message = (f"🚨 【链上代币 RSI 超卖】{cfg_name}({short}...) 链 {chain} "
-                           f"现价: {price:.8g}，{tf} RSI: {rsi:.2f} (低于 {settings['rsi_low']})")
+            if should_push_rebound(item, rsi, price, settings):
+                message = rebound_alert_line(
+                    "链上代币", subject, f"{price:.8g}", tf,
+                    rsi, low, item.get("last_rsi"))
+                batch.collect(item, rsi, price, message)
+            elif rsi < low:
+                message = (f"🚨 【链上代币 RSI 超卖】{subject} "
+                           f"现价: {price:.8g}，{tf} RSI: {rsi:.2f} (低于 {low})")
+                batch.offer(item, rsi, price, message, settings)
             else:
-                message = (f"⚠️ 【链上代币 RSI 超买】{cfg_name}({short}...) 链 {chain} "
-                           f"现价: {price:.8g}，{tf} RSI: {rsi:.2f} (高于 {settings['rsi_high']})")
-            batch.offer(item, rsi, price, message, settings)
+                message = (f"⚠️ 【链上代币 RSI 超买】{subject} "
+                           f"现价: {price:.8g}，{tf} RSI: {rsi:.2f} (高于 {high})")
+                batch.offer(item, rsi, price, message, settings)
         time.sleep(random.uniform(*SLEEP_A_SHARE))

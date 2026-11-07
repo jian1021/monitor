@@ -32,6 +32,10 @@ def render_page(embedded: bool = False) -> None:
         st.title("🔗 链上代币 · 标的管理")
     st.caption("🔎 当前页面专注 **链上代币** 的添加与管理（按公链搜索或直接粘合约地址）；其他资产类别请前往对应页面配置。")
     render_monitor_controls("onchain_token", "链上代币")
+    st.caption(
+        "📐 告警口径：RSI(3) 跌破 10 报「超卖」；从 10 下方回升上穿 10 再报一次「反转突破」"
+        "——同一段回升只报一次，不重复轰炸。"
+    )
 
     _missing = stale_module_names()
     if _missing:
