@@ -59,7 +59,19 @@ _TIMEFRAME_LABELS = {
 # 链上代币：各 K 线周期的取数窗口（天），与页面 TOKEN_TIMEFRAMES 的 key 对齐
 TOKEN_RESOLUTION_DAYS = {"1h": 5, "4h": 7, "1d": 15}
 
-RSI_BAR_OFFSET = 2  # 1=最新未收线 2=倒数第二根已收线，下次切回最新只需改1
+RSI_BAR_OFFSET = 2  # 日内级别取倒数第二根：最新一根可能尚未收线
+
+
+def _bar_offset(frequency=None) -> int:
+    """按周期决定取第几根 K 线。
+
+    周线必须取最新一根：A 股周五收盘后当周 K 线即定型，此时若仍回退一根，
+    整体会滞后一整周——本周 RSI 已从超卖区上穿，代码却按上周判定，
+    表现为「突破发生在第一周、报警拖到第二周」。
+    日内级别（1h/4h/1d）最新一根可能未收线，继续取倒数第二根。
+    """
+    key = str(frequency or "").strip().lower()
+    return 1 if key in ("w", "week", "1w") else RSI_BAR_OFFSET
 
 
 def _calc_rsi(close, window: int, offset: int | None = None):
@@ -104,12 +116,13 @@ def get_token_rsi(chain, address, resolution="1h", length=14, days=None):
 def get_okx_rsi(symbol, interval="1H", length=14):
     url = f"https://www.okx.com/api/v5/market/candles?instId={symbol}&bar={interval}&limit=100"
     try:
+        offset = _bar_offset(interval)
         res = requests.get(url, headers=headers, timeout=10).json()
         if res.get('code') == '0' and len(res.get('data', [])) > 0:
             df = pd.DataFrame(res['data'])
             df = df.iloc[::-1].reset_index(drop=True)
             close = df[4].astype(float)
-            return _calc_rsi(close, length)
+            return _calc_rsi(close, length, offset=offset)
     except Exception as e:
         import traceback
         print(f"❌ OKX [{symbol}] 获取失败: {e}")
@@ -325,15 +338,16 @@ _TENCENT_KLINE = {
 
 def _get_tencent_rsi(code, length=5, frequency="d"):
     try:
+        offset = _bar_offset(frequency)
         mkt, c = _split_a_share_code(code)
         period, keys = _TENCENT_KLINE.get(str(frequency).lower(), _TENCENT_KLINE["d"])
         url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={mkt}{c},{period},,,320,qfq"
         res = requests.get(url, headers=headers, timeout=10).json()
         node = res.get('data', {}).get(f'{mkt}{c}', {})
         rows = next((node[k] for k in keys if node.get(k)), [])
-        if len(rows) >= length + RSI_BAR_OFFSET - 1:
+        if len(rows) >= length + offset - 1:
             close = pd.Series([float(k[2]) for k in rows])
-            return _calc_rsi(close, length)
+            return _calc_rsi(close, length, offset=offset)
     except Exception as e:
         import traceback
         print(f"❌ 腾讯降级源 [{code}] 获取失败: {e}")
@@ -343,6 +357,7 @@ def _get_tencent_rsi(code, length=5, frequency="d"):
 
 def get_a_share_rsi(code, bs_login_done: bool, length=5, max_retries=3, frequency="d"):
     bs_code = _to_bs_code(code)
+    offset = _bar_offset(frequency)
     lookback_days = 100 if str(frequency).lower() == "d" else 730
     start_date = (pd.Timestamp.now() - pd.Timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
@@ -363,9 +378,9 @@ def get_a_share_rsi(code, bs_login_done: bool, length=5, max_retries=3, frequenc
 
             if df is not None and not df.empty and 'close' in df.columns:
                 df = df[df['close'] != '']
-                if len(df) >= length + RSI_BAR_OFFSET - 1:
+                if len(df) >= length + offset - 1:
                     close_num = df['close'].astype(float)
-                    return _calc_rsi(close_num, length)
+                    return _calc_rsi(close_num, length, offset=offset)
             return _get_tencent_rsi(code, length, frequency)
         except Exception as e:
             if attempt < max_retries - 1:
