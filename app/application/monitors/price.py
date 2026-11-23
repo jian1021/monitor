@@ -14,6 +14,7 @@ import os
 import sys
 import time
 import traceback
+from datetime import datetime, time as dtime, timedelta, timezone
 
 from app.infrastructure.db.client import get_db_client
 from app.core.settings import FEISHU_WEBHOOK
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS price_alert (
     enabled       INTEGER NOT NULL DEFAULT 1,
     last_price    REAL,
     last_checked_at TEXT,
+    daily_check_at TEXT,                           -- NULL=跟随调度轮询; 'HH:MM'=每天北京时间该时刻后检查一次
     alerted       INTEGER NOT NULL DEFAULT 0,    -- 1=该规则已触发过告警(避免重复轰炸)
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -66,8 +68,13 @@ CREATE TABLE IF NOT EXISTS price_alert (
 # 老库补列：CREATE TABLE IF NOT EXISTS 不会改动已存在的表，必须单独 ALTER
 _MIGRATIONS = (
     "ALTER TABLE price_alert ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'token'",
+    "ALTER TABLE price_alert ADD COLUMN daily_check_at TEXT",
 )
 CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);"
+
+# A 股 / 场内 ETF 新规则的默认检查频率：每天开盘 09:30（北京时间）检查一次
+ASHARE_DEFAULT_DAILY_CHECK = "09:30"
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 def ensure_table():
@@ -138,7 +145,7 @@ def load_enabled_rules():
     try:
         res = client.execute(
             "SELECT id, address, chain, asset_type, symbol, target_price, direction, alerted,"
-            " created_at FROM price_alert WHERE enabled = 1 ORDER BY id"
+            " last_checked_at, daily_check_at, created_at FROM price_alert WHERE enabled = 1 ORDER BY id"
         )
         for row in res.rows:
             rules.append({
@@ -150,6 +157,8 @@ def load_enabled_rules():
                 "target_price": float(row[5]),
                 "direction": row[6],
                 "alerted": bool(row[7]),
+                "last_checked_at": row[8],
+                "daily_check_at": row[9],
             })
         return rules
     except Exception as e:
@@ -220,7 +229,8 @@ def clear_alerted(rule_id: int):
 # 规则维护（页面 CRUD 的唯一实现；页面不得再自己拼 SQL）
 # ============================================================
 RULE_COLUMNS = ("id", "address", "chain", "asset_type", "symbol", "target_price", "direction",
-                "enabled", "last_price", "last_checked_at", "alerted", "created_at")
+                "enabled", "last_price", "last_checked_at", "daily_check_at",
+                "alerted", "created_at")
 
 
 def load_all_rules() -> list[dict]:
@@ -231,7 +241,7 @@ def load_all_rules() -> list[dict]:
     try:
         rows = client.execute(
             "SELECT id, address, chain, asset_type, symbol, target_price, direction, enabled,"
-            " last_price, last_checked_at, alerted, created_at"
+            " last_price, last_checked_at, daily_check_at, alerted, created_at"
             " FROM price_alert ORDER BY id DESC"
         ).rows
         return [
@@ -240,7 +250,8 @@ def load_all_rules() -> list[dict]:
                 "asset_type": row[3] or "token", "symbol": row[4] or "",
                 "target_price": row[5], "direction": row[6], "enabled": bool(row[7]),
                 "last_price": row[8], "last_checked_at": row[9],
-                "alerted": bool(row[10]), "created_at": row[11],
+                "daily_check_at": row[10],
+                "alerted": bool(row[11]), "created_at": row[12],
             }
             for row in rows
         ]
@@ -256,6 +267,7 @@ def add_rule(address: str, chain: str, symbol: str, target_price: float,
     """新增价格规则；参数由调用方校验后传入。
 
     asset_type='ashare' 时 address 存 6 位代码、chain 留空。
+    daily_check_at: 'HH:MM'（北京时间，每天该时刻后检查一次）；None 跟随调度轮询。
     """
     client = get_db_client()
     if not client:
@@ -263,13 +275,43 @@ def add_rule(address: str, chain: str, symbol: str, target_price: float,
     try:
         client.execute(
             "INSERT INTO price_alert (address, chain, asset_type, symbol, target_price,"
-            " direction, enabled) VALUES (?, ?, ?, ?, ?, ?, 1)",
+            " direction, daily_check_at, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
             [address.strip(), chain or "", asset_type,
-             (symbol or "").strip(), target_price, direction],
+             (symbol or "").strip(), target_price, direction,
+             normalize_daily_check(daily_check_at)],
         )
         return True
     except Exception as e:
         print(f"❌ 新增价格规则失败: {e}")
+        return False
+    finally:
+        client.close()
+
+
+def normalize_daily_check(value: str | None) -> str | None:
+    """规整每日检查时刻：'9:30' -> '09:30'；空值/非法值返回 None（跟随轮询）。"""
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        hh, mm = text.split(":")
+        return f"{int(hh):02d}:{int(mm):02d}"
+    except (ValueError, AttributeError):
+        return None
+
+
+def update_rule_schedule(rule_id: int, daily_check_at: str | None) -> bool:
+    """更新规则的每日检查时刻；None/空串表示恢复跟随调度轮询。"""
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute(
+            "UPDATE price_alert SET daily_check_at = ? WHERE id = ?",
+            [normalize_daily_check(daily_check_at), rule_id])
+        return True
+    except Exception as e:
+        print(f"❌ 更新检查频率失败 (id={rule_id}): {e}")
         return False
     finally:
         client.close()
@@ -307,6 +349,46 @@ def delete_rule(rule_id: int) -> bool:
 # ============================================================
 # 单轮监控
 # ============================================================
+def _parse_utc(ts) -> datetime | None:
+    """数据库 datetime('now') 存的是 UTC 文本，解析为 aware datetime。"""
+    if not ts:
+        return None
+    try:
+        return datetime.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def due_for_daily_check(rule: dict, now: datetime | None = None) -> bool:
+    """带 daily_check_at 的规则今天是否到了检查时刻（北京时间）。
+
+    - 无 daily_check_at：True（跟随调度轮询，不受限制）；
+    - 当前北京时间未到该时刻：False；
+    - 今天该时刻之后已检查过（last_checked_at 落在今天且晚于该时刻）：False；
+    - 否则 True（今天该时刻后还没查过，立即检查）。
+    """
+    daily = normalize_daily_check(rule.get("daily_check_at"))
+    if not daily:
+        return True
+    try:
+        hh, mm = daily.split(":")
+        target = dtime(int(hh), int(mm))
+    except (ValueError, AttributeError):
+        return True
+    now = now or datetime.now(BEIJING_TZ)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=BEIJING_TZ)
+    if now.time() < target:
+        return False
+    last = _parse_utc(rule.get("last_checked_at"))
+    if last is not None:
+        last_local = last.astimezone(BEIJING_TZ)
+        if last_local.date() == now.date() and last_local.time() >= target:
+            return False
+    return True
+
+
 def run_once():
     rules = load_enabled_rules()
     if not rules:
@@ -319,6 +401,10 @@ def run_once():
         asset_type = rule.get("asset_type") or "token"
         chain = normalize_chain(rule["chain"])
         addr = rule["address"]
+
+        # 每日定时规则（如 A股/ETF 每天 09:30）：未到时刻或今天已查过则跳过
+        if not due_for_daily_check(rule):
+            continue
 
         if asset_type == "ashare":
             # A 股 / 场内 ETF：按代码走腾讯行情，没有合约地址可校验

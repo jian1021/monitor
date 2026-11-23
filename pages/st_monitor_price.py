@@ -11,6 +11,7 @@
 """
 import streamlit as st
 import pandas as pd
+from datetime import time as dtime
 
 from app.core.settings import FEISHU_WEBHOOK
 from app.application.monitors import price as price_service
@@ -47,8 +48,10 @@ def fetch_rules() -> pd.DataFrame:
 
 
 def add_rule(address: str, chain: str, symbol: str, target_price: float,
-             direction: str, asset_type: str = "token") -> bool:
-    if price_service.add_rule(address, chain, symbol, target_price, direction, asset_type):
+             direction: str, asset_type: str = "token",
+             daily_check_at: str | None = None) -> bool:
+    if price_service.add_rule(address, chain, symbol, target_price, direction,
+                              asset_type, daily_check_at=daily_check_at):
         return True
     st.error("❌ 新增规则失败，请检查数据库连接。")
     return False
@@ -122,6 +125,13 @@ with st.expander("➕ 新增价格监控规则", expanded=True):
                     key="token_direction",
                 )
                 new_symbol = st.text_input("代币符号 (留空则自动获取)", placeholder="留空即自动识别")
+                tok_daily = st.checkbox("每天定时检查一次（不勾选则跟随轮询间隔）", value=False,
+                                        key="token_daily_check")
+                tok_check_time = st.time_input(
+                    "每日检查时刻（北京时间）", value=dtime(9, 30),
+                    key="token_check_time", disabled=not tok_daily,
+                    help="每天到该时刻后的下一轮调度执行一次检查",
+                )
 
             submitted = st.form_submit_button("✅ 添加规则", type="primary")
             if submitted:
@@ -135,7 +145,9 @@ with st.expander("➕ 新增价格监控规则", expanded=True):
                         with st.spinner("正在自动获取代币符号 ..."):
                             info, _source = fetch_token_info(new_chain, new_address.strip())
                             symbol = str((info or {}).get("symbol") or "").strip()
-                    if add_rule(new_address, new_chain, symbol, new_target, new_direction):
+                    daily_check = tok_check_time.strftime("%H:%M") if tok_daily else None
+                    if add_rule(new_address, new_chain, symbol, new_target, new_direction,
+                                daily_check_at=daily_check):
                         st.toast(f"已添加规则: {new_address[:10]}... "
                                  f"({CHAIN_LABELS[new_chain]}) 符号 {symbol or '未识别'} "
                                  f"目标 {new_target}", icon="✅")
@@ -167,6 +179,14 @@ with st.expander("➕ 新增价格监控规则", expanded=True):
                     key="ashare_direction",
                 )
 
+            ash_daily = st.checkbox("每天定时检查一次", value=True, key="ashare_daily_check",
+                                    help="默认每天开盘 09:30（北京时间）检查一次并判断是否报警；"
+                                         "不勾选则跟随调度轮询间隔（默认 5 分钟）")
+            ash_check_time = st.time_input(
+                "每日检查时刻（北京时间）", value=dtime(9, 30),
+                key="ashare_check_time", disabled=not ash_daily,
+            )
+
             ash_submit = st.form_submit_button("✅ 添加规则", type="primary")
             if ash_submit:
                 code = new_code.strip()
@@ -180,8 +200,11 @@ with st.expander("➕ 新增价格监控规则", expanded=True):
                         with st.spinner("正在获取标的名称 ..."):
                             _quote, fetched = fetch_realtime_price(code)
                             name = fetched or ""
-                    if add_rule(code, "", name, ash_target, ash_direction, asset_type="ashare"):
-                        st.toast(f"已添加 A股规则: {code} {name or '未识别'} 目标 {ash_target}",
+                    daily_check = ash_check_time.strftime("%H:%M") if ash_daily else None
+                    if add_rule(code, "", name, ash_target, ash_direction, asset_type="ashare",
+                                daily_check_at=daily_check):
+                        freq = f"每天 {daily_check}" if daily_check else "跟随轮询"
+                        st.toast(f"已添加 A股规则: {code} {name or '未识别'} 目标 {ash_target}（{freq}）",
                                  icon="✅")
                         st.rerun()
 
@@ -220,6 +243,9 @@ view_df["chain"] = view_df["chain"].fillna("").replace("", "—")
 view_df["目标价"] = view_df["target_price"]
 view_df["当前价"] = view_df["last_price"].fillna("-")
 view_df["最近检查"] = view_df["last_checked_at"].apply(lambda v: to_local_display(v, fallback="—"))
+view_df["检查频率"] = view_df["daily_check_at"].apply(
+    lambda v: f"每天 {v}" if v else "跟随轮询"
+)
 
 # 列筛选
 show_cols = {
@@ -231,6 +257,7 @@ show_cols = {
     "方向": "方向",
     "目标价": "目标价",
     "当前价": "当前价",
+    "检查频率": "检查频率",
     "最近检查": "最近检查",
     "created_at": "创建时间",
 }
@@ -282,7 +309,7 @@ with st.expander("🔍 立即检查选中规则价格"):
             # 回写最新价格与检查时间（application 层统一实现）
             price_service.update_rule_price(check_id, price)
 
-with st.expander("⚙️ 启用 / 停用 / 删除", expanded=True):
+with st.expander("⚙️ 启用 / 停用 / 删除 / 检查频率", expanded=True):
     manage_sel = st.selectbox(
         "选择规则 ID",
         options=df["id"].tolist(),
@@ -313,6 +340,24 @@ with st.expander("⚙️ 启用 / 停用 / 删除", expanded=True):
                 if delete_rule(manage_id):
                     st.toast("已删除", icon="🗑️")
                     st.rerun()
+
+    # ---- 检查频率修改 ----
+    cur_daily = rule_row.get("daily_check_at") or None
+    st.caption(f"📅 当前检查频率: {'每天 ' + cur_daily if cur_daily else '跟随轮询间隔'}")
+    edit_daily = st.checkbox("每天定时检查一次", value=bool(cur_daily),
+                             key="edit_daily_check")
+    default_time = (dtime(*[int(x) for x in cur_daily.split(":")])
+                    if cur_daily else dtime(9, 30))
+    edit_time = st.time_input("每日检查时刻（北京时间）", value=default_time,
+                              key="edit_check_time", disabled=not edit_daily)
+    if st.button("💾 保存检查频率"):
+        new_val = edit_time.strftime("%H:%M") if edit_daily else None
+        if price_service.update_rule_schedule(manage_id, new_val):
+            st.toast(f"检查频率已更新: {f'每天 {new_val}' if new_val else '跟随轮询'}",
+                     icon="✅")
+            st.rerun()
+        else:
+            st.error("❌ 更新失败，请检查数据库连接。")
 
 # ================= 运行说明 =================
 st.divider()
