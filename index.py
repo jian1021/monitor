@@ -1,5 +1,8 @@
 import os
 import streamlit as st
+import hmac
+
+from app.core.config import WEAK_ADMIN_PASSWORDS
 from app.core.settings import ADMIN_PASS, ADMIN_USER
 
 # Preload the exit-strategy page's package tree before Streamlit begins routing
@@ -29,11 +32,17 @@ def login():
         password = st.text_input("密码", type="password", placeholder="请输入密码")
         submit_btn = st.form_submit_button("登录系统", width="stretch")
 
+    if ADMIN_PASS in WEAK_ADMIN_PASSWORDS:
+        st.error("🔒 未配置 ADMIN_PASS 或使用了弱密码，已禁止登录。"
+                 "请在 .env / st.secrets 中设置一个强密码后重启。")
+        st.stop()
+
     if submit_btn:
         user_input = username.strip() if username else ""
         pass_input = password.strip() if password else ""
 
-        if user_input == ADMIN_USER and pass_input == ADMIN_PASS:
+        if (hmac.compare_digest(user_input, ADMIN_USER)
+                and hmac.compare_digest(pass_input, ADMIN_PASS)):
             st.session_state.logged_in = True
             st.success("✅ 登录成功，正在进入系统...")
             st.rerun()  # 状态改变，重新触发路由解析

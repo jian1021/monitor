@@ -16,7 +16,7 @@ def evaluate(rule, cur):
         price = cur.get("active_price")
         if (rule.get("enable_floor_alert") and rule.get("floor_price") is not None
                 and price is not None):
-            if price < float(rule["floor_price"]):
+            if price <= float(rule["floor_price"]):  # 与其他类型统一为「≤ 即跌穿」
                 fires["floor"] = True
         if (rule.get("enable_target_alert") and rule.get("target_pct") is not None
                 and price is not None and rule.get("entry_price")):
@@ -31,7 +31,8 @@ def evaluate(rule, cur):
             if value is not None and value >= tgt:
                 fires["target"] = True
         else:
-            value = cur.get("price")
+            # DLMM 无 USD price，价格模式改用池内 active_price（与 entry_price 同口径时才有意义）
+            value = cur.get("active_price") if rule.get("kind") == "dlmm" else cur.get("price")
             base = rule.get("entry_price")
             if value is not None and base is not None and float(base) > 0:
                 # 必须用 (100+tgt)/100 而不是 (1+tgt/100)：后者对 base=100、tgt=10
@@ -54,7 +55,7 @@ def needs_rearm(rule, cur):
     if rule.get("kind") == "evm_v4":
         price = cur.get("active_price")
         floor = rule.get("floor_price")
-        return price is not None and floor is not None and price > float(floor)
+        return price is not None and floor is not None and price > float(floor)  # 与 ≤ 跌穿互补
     if rule.get("floor_price") is None:
         return False
     value = _current_price(rule, cur)

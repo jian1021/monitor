@@ -9,9 +9,12 @@ import argparse
 import threading
 import time
 import traceback
+import signal
+from datetime import time as dtime
 from typing import Callable
 
 from app.application.monitors import runners
+from app.application.monitors import price as price_monitor
 from app.application.monitors.meme_rsi_batch import run_batch_meme_rsi_monitor
 from app.application.monitors.meme_underval import run_meme_underval_monitor
 from app.application.lp_alert.service import run_once as run_lp_alert_once
@@ -23,6 +26,14 @@ from app.application.meteora_scanner.db import Database as MeteoraDatabase
 from app.application.meteora_scanner.feishu import FeishuAlerter as MeteoraFeishuAlerter
 from app.application.meteora_scanner.scanner import Scanner as MeteoraScanner
 from app.application.monitoring.scheduler import MonitoringScheduler
+from app.application.monitoring.lanes import (
+    CachedSource, DailyAtPolicy, DbStateStore, IntervalPolicy, Job, Lane,
+    LaneScheduler, MemoryStateStore,
+)
+from app.infrastructure.market_data.trade_calendar import a_share_trading_day
+from app.infrastructure.db.client import get_db_client
+from app.infrastructure.notifications.sender import send_feishu_msg
+from app.infrastructure.db.module_webhooks import resolve_webhook
 from app.core.contracts import MonitorSpec
 from app.core.settings import FEISHU_WEBHOOK, LIBSQL_TOKEN, LIBSQL_URL
 from app.domain.monitoring.registry import MonitorRegistry
@@ -117,6 +128,12 @@ def _lp_alert_job() -> None:
     run_lp_alert_once()
 
 
+def _price_alert_job() -> None:
+    """价格到达告警：链上代币走 Dexscreener，A股/ETF 走腾讯行情。"""
+    price_monitor.ensure_table()
+    price_monitor.run_once()
+
+
 def _runner(label: str, action) -> Callable[[], None]:
     """统一的执行外壳：打印分隔线与标题，异常只记录不打断主循环。"""
     def wrapped():
@@ -156,6 +173,8 @@ def build_scheduler(get_config: Callable[[], dict]) -> MonitoringScheduler:
         "lp_alert", "lp_alert",
         _runner("LP 仓位 / 池子价格告警", _lp_alert_job)))
     registry.register(MonitorSpec(
+        "price", "price", _runner("价格到达告警", _price_alert_job)))
+    registry.register(MonitorSpec(
         "lp_apr", "lp_apr", _runner("LP 区间 APR 监控", run_lp_apr_monitor)))
     registry.register(MonitorSpec(
         "meteora_scan", "meteora_scan", _runner("Meteora DLMM 全池扫描", _run_meteora_scan)))
@@ -164,14 +183,72 @@ def build_scheduler(get_config: Callable[[], dict]) -> MonitoringScheduler:
     return MonitoringScheduler(registry, poll_interval=POLL_INTERVAL)
 
 
+
+def build_lanes(once: bool = False) -> LaneScheduler:
+    """分通道调度：fast（止损/仓位）/ crypto（7x24 固定间隔）/ close（A 股收盘后）。
+
+    各通道独立线程互不阻塞；计划时间对齐网格不漂移；next_due 持久化，重启不全量重跑；
+    module_settings / intervals / 资产配置读取失败时沿用缓存，不会让进程崩溃。
+    """
+    settings_src = CachedSource(get_module_settings, default={}, ttl=30)
+    intervals_src = CachedSource(lambda: get_module_intervals(DEFAULT_INTERVALS),
+                                 default=DEFAULT_INTERVALS, ttl=60)
+    config_src = CachedSource(load_instruments, default=load_instruments(), ttl=60)
+    cfg = config_src.get
+
+    def enabled(name: str) -> bool:
+        return bool(settings_src.get().get(name, True))
+
+    def every(key: str, offset: int = 0) -> IntervalPolicy:
+        return IntervalPolicy(
+            lambda: max(1, int(intervals_src.get().get(key, DEFAULT_INTERVALS.get(key, 60)))) * 60,
+            offset)
+
+    def on_unhealthy(job: str, n: int, exc: BaseException) -> None:
+        send_feishu_msg(resolve_webhook("health"), f"🩺【监控健康告警】{job} 连续失败 {n} 次：{exc}")
+
+    fast = [
+        Job("exit_strategy", _runner("退出策略监控", run_exit_strategy_monitor),
+            every("exit_strategy"), run_on_start=True),
+        Job("lp_alert", _runner("LP 仓位 / 池子价格告警", _lp_alert_job),
+            every("lp_alert", offset=15), run_on_start=True),
+    ]
+    crypto = [
+        Job("crypto", _runner("加密货币（OKX）RSI 监控", lambda: runners.run_crypto_monitor(cfg())),
+            every("crypto", offset=5), run_on_start=True),
+        Job("onchain_token", _runner("链上代币 RSI 监控", lambda: runners.run_onchain_token_monitor(cfg())),
+            every("onchain_token", offset=10), run_on_start=True),
+        Job("meme_underval", _runner("Meme 低估监控", run_meme_underval_monitor),
+            every("meme_underval", offset=20)),
+        Job("meme_rsi_batch", _runner("批量 Meme 超卖超买监控", run_batch_meme_rsi_monitor),
+            every("meme_rsi_batch", offset=40)),
+        Job("lp_apr", _runner("LP 区间 APR 监控", run_lp_apr_monitor), every("lp_apr", offset=50)),
+        Job("meteora_scan", _runner("Meteora DLMM 全池扫描", _run_meteora_scan),
+            every("meteora_scan", offset=90)),
+        # 价格到达告警：链上代币 7x24、A股/ETF 盘中，一起按 5 分钟节奏检查
+        Job("price", _runner("价格到达告警", _price_alert_job),
+            every("price", offset=0), run_on_start=True),
+    ]
+    close = [
+        Job("rsi", _runner("RSI 监控", lambda: runners.run_rsi_monitor(cfg())),
+            DailyAtPolicy(dtime(15, 5), is_trading_day=a_share_trading_day)),
+        Job("etf_rsi", _runner("ETF 周线 RSI 监控", lambda: runners.run_etf_monitor(cfg())),
+            DailyAtPolicy(dtime(15, 10), weekdays=frozenset({4}), is_trading_day=a_share_trading_day)),
+    ]
+    store = MemoryStateStore() if once else DbStateStore(get_db_client)
+    return LaneScheduler([
+        Lane("fast", fast, store, enabled, on_unhealthy, tick=1.0),
+        Lane("crypto", crypto, store, enabled, on_unhealthy, tick=5.0),
+        Lane("close", close, store, enabled, on_unhealthy, tick=10.0),
+    ])
+
+
 # ================= 主程序逻辑 =================
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="市场与链上资产监控调度器")
-    parser.add_argument(
-        "--once", action="store_true",
-        help="每个已启用模块立即执行一轮后退出",
-    )
+    parser = argparse.ArgumentParser(description="市场与链上资产监控调度器（分通道）")
+    parser.add_argument("--once", action="store_true", help="每个已启用模块立即执行一轮后退出")
+    parser.add_argument("--legacy", action="store_true", help="使用旧版单线程调度器（回退用）")
     args = parser.parse_args()
 
     if not LIBSQL_URL or not LIBSQL_TOKEN:
@@ -180,56 +257,41 @@ if __name__ == "__main__":
     if not FEISHU_WEBHOOK:
         print("⚠️ 未配置 FEISHU_WEBHOOK；需要飞书告警的模块不会发送通知。")
     try:
-        config = load_instruments()
+        load_instruments()
     except Exception as exc:
         print(f"停止运行：读取后台资产配置失败：{exc}")
         raise SystemExit(2) from exc
 
-    # 界面增删改资产后，常驻进程需周期性重载配置才会生效
-    CONFIG_REFRESH_SECONDS = 60
-    last_config_refresh = time.time()
+    if args.legacy:
+        import runpy
+        runpy.run_path(__file__.replace("main.py", "main.py.bak"), run_name="__main__")
+        raise SystemExit(0)
 
-    # 各子任务上次执行时间（初始化为 0，让程序启动时立即执行一轮）
-    last_run: dict[str, float] = {key: 0.0 for key in DEFAULT_INTERVALS}
+    scheduler = build_lanes(once=args.once)
 
-    intervals = refresh_intervals(force=True)
+    if args.once:
+        scheduler.run_all_once()
+        if _meteora_scan_thread is not None:
+            _meteora_scan_thread.join()
+        print("✅ 单轮监控完成，退出。")
+        raise SystemExit(0)
 
-    print("🚀 启动监控调度器" + ("（单轮模式）" if args.once else "（常驻模式）") + "，各子程序间隔：")
-    for name in DEFAULT_INTERVALS:
-        print(f"   {name}: 每 {intervals[name] // 60} 分钟执行一次")
+    stop_evt = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop_evt.set())
+    signal.signal(signal.SIGINT, lambda *_: stop_evt.set())
 
-    def _current_config() -> dict:
-        """由主循环周期性刷新；闭包读全局，保证 runner 每轮拿到最新标的。"""
-        return config
+    scheduler.start()
+    print("🚀 分通道调度器已启动：fast / crypto / close")
+    for lane in scheduler.lanes:
+        for job in lane.jobs:
+            due = time.strftime("%m-%d %H:%M:%S", time.localtime(lane.next_due[job.name]))
+            print(f"   [{lane.name}] {job.name}: 下次执行 {due}")
 
-    scheduler = build_scheduler(_current_config)
-
-    while True:
-        now = time.time()
-        # 定期重载资产配置：让界面上的删除/新增在 60 秒内生效
-        if now - last_config_refresh >= CONFIG_REFRESH_SECONDS:
-            try:
-                config = load_instruments()
-            except Exception as e:
-                print(f"⚠️ 刷新资产配置失败，沿用上一次配置: {e}")
-            last_config_refresh = now
-
-        module_settings = get_module_settings()
-        intervals = refresh_intervals()
-
-        # 到期任务由 MonitoringScheduler 统一判定，注册顺序即执行顺序
-        for spec in scheduler.due(last_run, module_settings, intervals, now):
-            spec.runner()
-            last_run[spec.interval_key] = time.time()
-
-        if args.once:
-            # 单轮模式也必须等全池扫描完成，避免 daemon 线程随进程退出被中断。
-            if _meteora_scan_thread is not None:
-                _meteora_scan_thread.join()
-            print("✅ 单轮监控完成，退出。")
-            break
-
-        # 计算距离下一个最近到期任务还有多少秒，精准 sleep
-        sleep_secs = scheduler.sleep_seconds(intervals, module_settings, last_run, now)
-        print(f"\n💤 [{time.strftime('%H:%M:%S')}] 等待 {sleep_secs:.0f} 秒后检查下一轮...")
-        time.sleep(sleep_secs)
+    while not stop_evt.is_set():
+        for lane in scheduler.lanes:
+            if not lane.is_alive():
+                send_feishu_msg(resolve_webhook("health"), f"🩺 调度通道 {lane.name} 已停止，进程退出待重启")
+                stop_evt.set()
+        stop_evt.wait(30)
+    scheduler.stop()
+    print("👋 调度器已退出")

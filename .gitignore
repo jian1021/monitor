@@ -47,3 +47,7 @@ modules/meteora-lp/meteora-radar/data/*
 modules/meteora-lp/meteora-radar/logs/*
 !modules/meteora-lp/meteora-radar/logs/.gitkeep
 modules/token-reversal-monitor/monitor_state.json
+
+# 重构备份 / 运行时数据
+*.bak
+app/application/meteora_scanner/data/

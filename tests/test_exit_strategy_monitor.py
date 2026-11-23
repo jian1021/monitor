@@ -11,8 +11,9 @@ def test_pool_floor_is_checked_with_insufficient_candle_history():
     assert hits["bollinger_upper"] is False
 
 
-def test_rsi_three_is_available_without_bollinger_history():
-    candles = [{"close": price} for price in (1.0, 1.1, 1.2, 1.3)]
+def test_rsi_is_available_without_bollinger_history():
+    """RSI 默认周期 6 + 连续 2 根确认共需 8 根；仍少于布林带的 20 根窗口。"""
+    candles = [{"close": 1.0 + i * 0.1} for i in range(10)]
 
     values, hits = _evaluate(candles, None, 0.0, 90.0)
 

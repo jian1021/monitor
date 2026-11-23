@@ -30,7 +30,7 @@ def get_module_settings() -> dict:
     defaults = {"rsi": True, "etf_rsi": True, "crypto": True, "onchain_token": True, "meme_underval": True,
                 "meme_rsi_batch": True, "lp_alert": True,
                 "lp_apr": True,
-                "meteora_scan": True, "exit_strategy": True}
+                "meteora_scan": True, "exit_strategy": True, "price": True}
     if not client:
         return defaults
     try:

@@ -83,8 +83,14 @@ for rh_pool in rh_pools:
 
 c1, c2, c3 = st.columns(3)
 with c1:
-    rsi_high = st.number_input("RSI(3) 告警阈值", min_value=1.0, max_value=100.0,
+    rsi_high = st.number_input("RSI 告警阈值", min_value=1.0, max_value=100.0,
                                value=float(saved.get("rsi_high", 90.0)), step=1.0)
+    rsi_period = st.number_input("RSI 周期", min_value=2, max_value=50,
+                                 value=int(saved.get("rsi_period", 6)), step=1,
+                                 help="原为 3；5m 周期上建议 6~14 以减少噪声")
+    rsi_confirm_bars = st.number_input("连续确认 K 线数", min_value=1, max_value=10,
+                                       value=int(saved.get("rsi_confirm_bars", 2)), step=1,
+                                       help="最近 N 根 K 线 RSI 都 ≥ 阈值才告警")
 with c2:
     timeframe = st.selectbox("指标周期", ["5m", "1h"],
                              index=0 if saved.get("timeframe", "5m") == "5m" else 1)
@@ -94,7 +100,8 @@ with c3:
 st.caption("布林带使用 20 根收盘价、2 倍标准差；价格下穿人工填写的池子下限、RSI(3) 达到阈值、价格上穿中轨或上轨，任一项触发飞书。")
 if st.button("💾 保存退出策略", type="primary"):
     config = {"enabled": enabled, "pools": selected_pools,
-              "rsi_high": float(rsi_high), "timeframe": timeframe}
+              "rsi_high": float(rsi_high), "timeframe": timeframe,
+              "rsi_period": int(rsi_period), "rsi_confirm_bars": int(rsi_confirm_bars)}
     if save_exit_strategy(config):
         st.toast("退出策略已保存，后台监控循环将按配置间隔检查并推送飞书。", icon="✅")
         st.rerun()

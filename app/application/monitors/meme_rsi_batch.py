@@ -13,6 +13,7 @@ from app.infrastructure.db.meme_watchlist import (
 )
 from app.infrastructure.db.pump_alerts import clear_pushed, filter_unpushed, mark_pushed
 from app.infrastructure.notifications.sender import send_feishu_msg
+from app.infrastructure.db.module_webhooks import resolve_webhook
 
 MODULE_NAME = "meme_rsi_batch"
 ALERT_MODULE = "meme_rsi_batch"
@@ -162,7 +163,7 @@ def run_batch_meme_rsi_monitor():
     text = ("🚀【批量 Meme 超卖超买监控】\n" + "=" * 40 + "\n\n"
             + build_alert_message(hits, rsi_low=rsi_low, rsi_high=rsi_high,
                                   period=RSI_PERIOD, timeframe=timeframe))
-    if not send_feishu_msg(FEISHU_WEBHOOK, text):
+    if not send_feishu_msg(resolve_webhook("meme_rsi_batch"), text):
         # 发送失败不记去重，否则这批会被压制 7 天
         print("❌ [批量 Meme RSI] 飞书推送失败，本轮不写入去重记录，下轮重试")
         return []

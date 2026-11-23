@@ -3,6 +3,7 @@
 import traceback
 
 from app.infrastructure.notifications.sender import send_feishu_msg
+from app.infrastructure.db.module_webhooks import resolve_webhook
 
 from app.core.settings import FEISHU_WEBHOOK
 from app.domain.lp_alert.evaluator import (
@@ -43,15 +44,32 @@ from app.infrastructure.market_data.meteora import (
 )
 
 
+# 仓位「未出现在开放列表」的连续次数（进程内计数）。
+# 接口限流 / 返回不完整时可能临时缺项，单次缺失就判定关闭会把规则永久停用。
+CLOSE_CONFIRM_MISSES = 3
+_dlmm_miss_counts: dict = {}
+
+
 def _cur_dlmm(rule):
     positions = fetch_meteora_positions(rule["pool_address"], rule["wallet"])
     if positions is None:
         return None, STATUS_ERROR
+    key = rule.get("id")
     for pos in positions:
         if pos.get("position_address") == rule.get("position_address"):
             if pos.get("is_closed"):
+                # 接口显式标记关闭：可信，立即判定
+                _dlmm_miss_counts.pop(key, None)
                 return None, STATUS_CLOSED
+            _dlmm_miss_counts.pop(key, None)
             return pos, STATUS_OPEN
+    misses = _dlmm_miss_counts.get(key, 0) + 1
+    _dlmm_miss_counts[key] = misses
+    if misses < CLOSE_CONFIRM_MISSES:
+        print(f"⚠️ 规则 {key} 仓位未出现在开放列表（{misses}/{CLOSE_CONFIRM_MISSES}），"
+              f"暂按取数失败处理，不停用规则")
+        return None, STATUS_ERROR
+    _dlmm_miss_counts.pop(key, None)
     return None, STATUS_CLOSED
 
 
@@ -236,7 +254,7 @@ def run_once():
             text = result["message"]
             sent = True
             if text:
-                sent = send_feishu_msg(FEISHU_WEBHOOK, text)
+                sent = send_feishu_msg(resolve_webhook("lp_alert"), text)
             if not sent:
                 # 发送失败时不能写 target_alerted / floor_alerted，否则要等价格回中枢
                 # 才会重新武装，等于这条告警永久丢失。

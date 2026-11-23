@@ -53,7 +53,8 @@ GMGN_API_KEY = _setting("GMGN_API_KEY")
 
 # ========== Streamlit 后台管理员账号 ==========
 ADMIN_USER = _setting("ADMIN_USER", "admin")
-ADMIN_PASS = _setting("ADMIN_PASS", "123456")
+ADMIN_PASS = _setting("ADMIN_PASS", "")  # 不再提供默认密码；未配置时禁止登录
+WEAK_ADMIN_PASSWORDS = {"", "123456", "admin", "password", "12345678", "111111"}
 
 # ========== Robinhood 链 RPC（可选，换付费节点可放宽 eth_getLogs 范围限制） ==========
 ROBINHOOD_RPC = _setting("ROBINHOOD_RPC", "")

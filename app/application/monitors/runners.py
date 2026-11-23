@@ -39,7 +39,7 @@ def _scan_a_share(items, settings, tag, batch: AlertBatch) -> None:
 
 def run_rsi_monitor(config: dict) -> None:
     """Meteora 池 + 可转债；ETF 由 run_etf_monitor 独立按周执行。"""
-    batch = AlertBatch(empty_note="所有标的 RSI 均处于正常区间，不触发推送。")
+    batch = AlertBatch(webhook=webhook_for("rsi"), empty_note="所有标的 RSI 均处于正常区间，不触发推送。")
     m_set = monitor_rsi.DEFAULT_SETTINGS["meteora"]
     b_set = monitor_rsi.DEFAULT_SETTINGS["bond"]
 
@@ -61,7 +61,7 @@ def run_etf_monitor(config: dict) -> None:
 def run_crypto_monitor(config: dict) -> None:
     """OKX 主流加密货币 RSI。"""
     c_set = monitor_rsi.DEFAULT_SETTINGS["crypto"]
-    batch = AlertBatch(empty_note="所有加密货币 RSI 均处于正常区间，不触发推送。")
+    batch = AlertBatch(webhook=webhook_for("crypto"), empty_note="所有加密货币 RSI 均处于正常区间，不触发推送。")
     scan_okx_symbols(config.get("crypto_okx", []), c_set, batch)
     batch.flush()
 
@@ -69,6 +69,6 @@ def run_crypto_monitor(config: dict) -> None:
 def run_onchain_token_monitor(config: dict) -> None:
     """链上代币 RSI；每只标的的 chain / timeframe 各自生效。"""
     t_set = monitor_rsi.DEFAULT_SETTINGS["token"]
-    batch = AlertBatch(empty_note="所有链上代币 RSI 均处于正常区间，不触发推送。")
+    batch = AlertBatch(webhook=webhook_for("onchain_token"), empty_note="所有链上代币 RSI 均处于正常区间，不触发推送。")
     scan_onchain_tokens(config.get("tokens", []), t_set, batch)
     batch.flush()

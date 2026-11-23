@@ -18,6 +18,7 @@ import traceback
 from app.infrastructure.db.client import get_db_client
 from app.core.settings import FEISHU_WEBHOOK
 from app.infrastructure.notifications.sender import send_feishu_msg
+from app.infrastructure.db.module_webhooks import resolve_webhook
 from app.infrastructure.market_data.dexscreener import fetch_token_info
 
 # Windows 控制台默认 cp1252 无法打印 emoji，强制 UTF-8 输出
@@ -48,8 +49,9 @@ def normalize_chain(chain: str) -> str:
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS price_alert (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    address       TEXT NOT NULL,
-    chain         TEXT NOT NULL DEFAULT 'sol',
+    address       TEXT NOT NULL,                 -- token: 合约地址 / ashare: 6 位代码
+    chain         TEXT NOT NULL DEFAULT 'sol',   -- ashare 规则不使用
+    asset_type    TEXT NOT NULL DEFAULT 'token', -- token=链上代币 / ashare=A股・场内ETF
     symbol        TEXT,
     target_price  REAL NOT NULL,
     direction     TEXT NOT NULL DEFAULT 'gte',   -- gte: 价格>=目标; lte: 价格<=目标
@@ -60,6 +62,11 @@ CREATE TABLE IF NOT EXISTS price_alert (
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
+
+# 老库补列：CREATE TABLE IF NOT EXISTS 不会改动已存在的表，必须单独 ALTER
+_MIGRATIONS = (
+    "ALTER TABLE price_alert ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'token'",
+)
 CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);"
 
 
@@ -71,6 +78,12 @@ def ensure_table():
     try:
         # pipeline API 的每个 batch 元素必须是单条语句
         client.batch([CREATE_TABLE_SQL, CREATE_INDEX_SQL])
+        for ddl in _MIGRATIONS:
+            try:
+                client.execute(ddl)
+                print(f"✅ price_alert 结构升级: {ddl.split('ADD COLUMN')[-1].strip()[:40]}")
+            except Exception:
+                pass  # 列已存在
         print("✅ price_alert 表已就绪")
         return True
     except Exception as e:
@@ -83,11 +96,17 @@ def ensure_table():
 # ============================================================
 # 查询价格 (Dexscreener)
 # ============================================================
-def fetch_price(chain: str, address: str):
+def fetch_price(chain: str, address: str, asset_type: str = "token"):
     """拉取当前价格, 返回 (price, symbol) 或 (None, None).
 
-    Dexscreener 无需 API Key, 直接 HTTP 调用。
+    asset_type='ashare' 走腾讯实时行情（A 股 / 场内 ETF）；
+    其余走 Dexscreener（链上代币，无需 API Key）。
     """
+    if asset_type == "ashare":
+        from app.infrastructure.market_data.a_share import fetch_realtime_price
+
+        return fetch_realtime_price(address)
+
     data, source = fetch_token_info(chain, address)
     if data is None:
         print(f"❌ 拉取失败 ({source})")
@@ -118,18 +137,19 @@ def load_enabled_rules():
     rules = []
     try:
         res = client.execute(
-            "SELECT id, address, chain, symbol, target_price, direction, alerted, created_at"
-            " FROM price_alert WHERE enabled = 1 ORDER BY id"
+            "SELECT id, address, chain, asset_type, symbol, target_price, direction, alerted,"
+            " created_at FROM price_alert WHERE enabled = 1 ORDER BY id"
         )
         for row in res.rows:
             rules.append({
                 "id": row[0],
                 "address": row[1],
                 "chain": row[2],
-                "symbol": row[3],
-                "target_price": float(row[4]),
-                "direction": row[5],
-                "alerted": bool(row[6]),
+                "asset_type": row[3] or "token",
+                "symbol": row[4],
+                "target_price": float(row[5]),
+                "direction": row[6],
+                "alerted": bool(row[7]),
             })
         return rules
     except Exception as e:
@@ -199,7 +219,7 @@ def clear_alerted(rule_id: int):
 # ============================================================
 # 规则维护（页面 CRUD 的唯一实现；页面不得再自己拼 SQL）
 # ============================================================
-RULE_COLUMNS = ("id", "address", "chain", "symbol", "target_price", "direction",
+RULE_COLUMNS = ("id", "address", "chain", "asset_type", "symbol", "target_price", "direction",
                 "enabled", "last_price", "last_checked_at", "alerted", "created_at")
 
 
@@ -210,16 +230,17 @@ def load_all_rules() -> list[dict]:
         return []
     try:
         rows = client.execute(
-            "SELECT id, address, chain, symbol, target_price, direction, enabled,"
+            "SELECT id, address, chain, asset_type, symbol, target_price, direction, enabled,"
             " last_price, last_checked_at, alerted, created_at"
             " FROM price_alert ORDER BY id DESC"
         ).rows
         return [
             {
-                "id": row[0], "address": row[1], "chain": row[2], "symbol": row[3] or "",
-                "target_price": row[4], "direction": row[5], "enabled": bool(row[6]),
-                "last_price": row[7], "last_checked_at": row[8],
-                "alerted": bool(row[9]), "created_at": row[10],
+                "id": row[0], "address": row[1], "chain": row[2] or "",
+                "asset_type": row[3] or "token", "symbol": row[4] or "",
+                "target_price": row[5], "direction": row[6], "enabled": bool(row[7]),
+                "last_price": row[8], "last_checked_at": row[9],
+                "alerted": bool(row[10]), "created_at": row[11],
             }
             for row in rows
         ]
@@ -231,16 +252,20 @@ def load_all_rules() -> list[dict]:
 
 
 def add_rule(address: str, chain: str, symbol: str, target_price: float,
-             direction: str) -> bool:
-    """新增价格规则；参数由调用方校验后传入。"""
+             direction: str, asset_type: str = "token") -> bool:
+    """新增价格规则；参数由调用方校验后传入。
+
+    asset_type='ashare' 时 address 存 6 位代码、chain 留空。
+    """
     client = get_db_client()
     if not client:
         return False
     try:
         client.execute(
-            "INSERT INTO price_alert (address, chain, symbol, target_price, direction, enabled)"
-            " VALUES (?, ?, ?, ?, ?, 1)",
-            [address.strip(), chain, (symbol or "").strip(), target_price, direction],
+            "INSERT INTO price_alert (address, chain, asset_type, symbol, target_price,"
+            " direction, enabled) VALUES (?, ?, ?, ?, ?, ?, 1)",
+            [address.strip(), chain or "", asset_type,
+             (symbol or "").strip(), target_price, direction],
         )
         return True
     except Exception as e:
@@ -291,24 +316,32 @@ def run_once():
     print(f"🔍 本轮检查 {len(rules)} 条价格规则 ...")
     ok, fail = 0, 0
     for rule in rules:
+        asset_type = rule.get("asset_type") or "token"
         chain = normalize_chain(rule["chain"])
         addr = rule["address"]
-        # 跳过 0 地址(如 GMGN 分页占位)
-        if len(addr) < 20:
-            print(f"⚠️ 跳过疑似无效地址: {addr}")
-            continue
 
-        price, symbol = fetch_price(chain, addr)
+        if asset_type == "ashare":
+            # A 股 / 场内 ETF：按代码走腾讯行情，没有合约地址可校验
+            price, symbol = fetch_price("", addr, asset_type="ashare")
+            source_label = addr
+        else:
+            # 跳过 0 地址(如 GMGN 分页占位)
+            if len(addr) < 20:
+                print(f"⚠️ 跳过疑似无效地址: {addr}")
+                continue
+            price, symbol = fetch_price(chain, addr)
+            source_label = chain
+
         if price is None:
             fail += 1
             continue
         ok += 1
         if not rule["symbol"] and symbol:
             update_rule_symbol(rule["id"], symbol)
-            print(f"🏷️ 已自动补全代币符号: {symbol}")
+            print(f"🏷️ 已自动补全标的名称: {symbol}")
         sym = rule["symbol"] or symbol or addr[:8] + "..."
 
-        print(f"✅ [{sym}] {chain} 现价: {price}")
+        print(f"✅ [{sym}] {source_label} 现价: {price}")
         update_rule_price(rule["id"], price)
 
         target = rule["target_price"]
@@ -323,14 +356,22 @@ def run_once():
                 print(f"⏹️ [{sym}] 已达目标价，已告警过，跳过重复推送")
                 continue
             direction_cn = "上涨达到" if rule["direction"] == "gte" else "下跌达到"
-            msg = (
-                f"🚨 【价格报警】{sym} ({chain})\n"
-                f"当前价格: {price}\n"
-                f"目标价({direction_cn}): {target}\n"
-                f"地址: {addr}\n"
-                f"监控地址: https://gmgn.ai/{chain.lower()}/token/{addr}"
-            )
-            if not send_feishu_msg(FEISHU_WEBHOOK, msg):
+            if asset_type == "ashare":
+                msg = (
+                    f"🚨 【价格报警】{sym} ({addr})\n"
+                    f"当前价格: {price}\n"
+                    f"目标价({direction_cn}): {target}\n"
+                    f"标的: {addr}（A股/场内ETF）"
+                )
+            else:
+                msg = (
+                    f"🚨 【价格报警】{sym} ({chain})\n"
+                    f"当前价格: {price}\n"
+                    f"目标价({direction_cn}): {target}\n"
+                    f"地址: {addr}\n"
+                    f"监控地址: https://gmgn.ai/{chain.lower()}/token/{addr}"
+                )
+            if not send_feishu_msg(resolve_webhook("price"), msg):
                 # 发送失败不标记已告警，否则这条规则以后不会再推（要等价格离开目标价才重置）
                 print(f"❌ [{sym}] 飞书推送失败，保留未告警状态，下轮重试")
                 continue

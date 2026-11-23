@@ -13,6 +13,7 @@ DEFAULT_INTERVALS = {
     "lp_alert":           60,   # LP 仓位 / 池子价格告警：60 分钟
     "lp_apr":             60,   # LP 区间 APR 估算（robinhood-chain-lp-tools）：60 分钟
     "meteora_scan":       60,   # Meteora DLMM 全池扫描：60 分钟
+    "price":               5,   # 价格到达告警（链上代币 / A股ETF）：5 分钟
     "exit_strategy": 1,
 }
 

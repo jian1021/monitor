@@ -50,6 +50,16 @@ def get_module_webhook(module_name: str, fallback: str = "") -> str:
         client.close()
 
 
+def resolve_webhook(module_name: str) -> str:
+    """模块专属 Webhook，未配置/读取失败回落到全局 FEISHU_WEBHOOK。"""
+    from app.core.settings import FEISHU_WEBHOOK
+    try:
+        return get_module_webhook(module_name, FEISHU_WEBHOOK)
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ 读取模块 Webhook 失败（{module_name}），使用全局: {e}")
+        return FEISHU_WEBHOOK
+
+
 def set_module_webhook(module_name: str, webhook: str | None) -> bool:
     """写入/清除模块 Webhook；传空串或 None 表示删除，恢复使用全局。"""
     if not ensure_table():

@@ -16,6 +16,7 @@ from app.core.settings import FEISHU_WEBHOOK
 from app.application.monitors import price as price_service
 from app.application.monitors.price import RULE_COLUMNS
 from app.infrastructure.market_data.dexscreener import fetch_token_info
+from app.infrastructure.market_data.a_share import fetch_realtime_price
 from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
 from app.interfaces.timefmt import to_local_display
 
@@ -45,8 +46,9 @@ def fetch_rules() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=list(RULE_COLUMNS))
 
 
-def add_rule(address: str, chain: str, symbol: str, target_price: float, direction: str) -> bool:
-    if price_service.add_rule(address, chain, symbol, target_price, direction):
+def add_rule(address: str, chain: str, symbol: str, target_price: float,
+             direction: str, asset_type: str = "token") -> bool:
+    if price_service.add_rule(address, chain, symbol, target_price, direction, asset_type):
         return True
     st.error("❌ 新增规则失败，请检查数据库连接。")
     return False
@@ -71,7 +73,7 @@ def delete_rule(rule_id: int) -> bool:
 # ============================================================
 st.set_page_config(page_title="价格监控", page_icon="📈", layout="wide")
 st.title("📈 价格监控")
-st.caption("按 Token 地址 + 公链监控实时价格，到达目标价时通过飞书推送告警。")
+st.caption("按 Token 地址 + 公链，或 A股 / 场内 ETF 代码监控实时价格，到达目标价时通过飞书推送告警。")
 
 if not ensure_table():
     st.stop()
@@ -82,58 +84,106 @@ if FEISHU_WEBHOOK:
 else:
     st.warning("⚠️ 未配置 FEISHU_WEBHOOK，告警仅打印到控制台", icon="🔕")
 
-st.caption("数据源: Dexscreener API (无需代理/API Key)")
+st.caption("数据源: 链上代币走 Dexscreener；A股 / ETF 走腾讯行情（盘中实时，收盘后为最新收盘价）")
 
 st.divider()
 
 # ================= 新增规则表单 =================
 with st.expander("➕ 新增价格监控规则", expanded=True):
-    with st.form("add_price_rule_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            new_address = st.text_input(
-                "Token 合约地址 *",
-                placeholder="例如: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                help="Solana / BSC / Base / ETH 上的 token 合约地址",
-            )
-            new_chain = st.selectbox(
-                "所属公链",
-                options=CHAIN_OPTIONS,
-                format_func=lambda x: CHAIN_LABELS[x],
-            )
-        with c2:
-            new_target = st.number_input(
-                "目标价格 *",
-                min_value=0.0,
-                step=0.000001,
-                format="%.8f",
-                value=0.0,
-            )
-            new_direction = st.radio(
-                "触发条件",
-                options=["gte", "lte"],
-                format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
-                horizontal=True,
-            )
-            new_symbol = st.text_input("代币符号 (留空则自动获取)", placeholder="留空即自动识别")
+    tab_token, tab_ashare = st.tabs(["🪙 链上代币", "📈 A股 / 场内 ETF"])
 
-        submitted = st.form_submit_button("✅ 添加规则", type="primary")
-        if submitted:
-            if not new_address.strip() or len(new_address.strip()) < 20:
-                st.warning("⚠️ 请输入有效的 Token 合约地址")
-            elif new_target <= 0:
-                st.warning("⚠️ 目标价格必须大于 0")
-            else:
-                symbol = new_symbol.strip()
-                if not symbol:
-                    with st.spinner("正在自动获取代币符号 ..."):
-                        info, _source = fetch_token_info(new_chain, new_address.strip())
-                        symbol = str((info or {}).get("symbol") or "").strip()
-                if add_rule(new_address, new_chain, symbol, new_target, new_direction):
-                    st.toast(f"已添加规则: {new_address[:10]}... "
-                             f"({CHAIN_LABELS[new_chain]}) 符号 {symbol or '未识别'} "
-                             f"目标 {new_target}", icon="✅")
-                    st.rerun()
+    with tab_token:
+        with st.form("add_price_rule_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                new_address = st.text_input(
+                    "Token 合约地址 *",
+                    placeholder="例如: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                    help="Solana / BSC / Base / ETH 上的 token 合约地址",
+                )
+                new_chain = st.selectbox(
+                    "所属公链",
+                    options=CHAIN_OPTIONS,
+                    format_func=lambda x: CHAIN_LABELS[x],
+                )
+            with c2:
+                new_target = st.number_input(
+                    "目标价格 *",
+                    min_value=0.0,
+                    step=0.000001,
+                    format="%.8f",
+                    value=0.0,
+                )
+                new_direction = st.radio(
+                    "触发条件",
+                    options=["gte", "lte"],
+                    format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
+                    horizontal=True,
+                    key="token_direction",
+                )
+                new_symbol = st.text_input("代币符号 (留空则自动获取)", placeholder="留空即自动识别")
+
+            submitted = st.form_submit_button("✅ 添加规则", type="primary")
+            if submitted:
+                if not new_address.strip() or len(new_address.strip()) < 20:
+                    st.warning("⚠️ 请输入有效的 Token 合约地址")
+                elif new_target <= 0:
+                    st.warning("⚠️ 目标价格必须大于 0")
+                else:
+                    symbol = new_symbol.strip()
+                    if not symbol:
+                        with st.spinner("正在自动获取代币符号 ..."):
+                            info, _source = fetch_token_info(new_chain, new_address.strip())
+                            symbol = str((info or {}).get("symbol") or "").strip()
+                    if add_rule(new_address, new_chain, symbol, new_target, new_direction):
+                        st.toast(f"已添加规则: {new_address[:10]}... "
+                                 f"({CHAIN_LABELS[new_chain]}) 符号 {symbol or '未识别'} "
+                                 f"目标 {new_target}", icon="✅")
+                        st.rerun()
+
+    with tab_ashare:
+        with st.form("add_ashare_rule_form", clear_on_submit=True):
+            a1, a2 = st.columns(2)
+            with a1:
+                new_code = st.text_input(
+                    "6 位代码 *",
+                    placeholder="例如: 159967",
+                    help="场内 ETF / 股票代码，如 159967、515790",
+                )
+                new_name = st.text_input("标的名称 (留空自动获取)", placeholder="留空即自动识别")
+            with a2:
+                ash_target = st.number_input(
+                    "目标价格 *",
+                    min_value=0.0,
+                    step=0.001,
+                    format="%.3f",
+                    value=0.0,
+                )
+                ash_direction = st.radio(
+                    "触发条件",
+                    options=["gte", "lte"],
+                    format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
+                    horizontal=True,
+                    key="ashare_direction",
+                )
+
+            ash_submit = st.form_submit_button("✅ 添加规则", type="primary")
+            if ash_submit:
+                code = new_code.strip()
+                if len(code) != 6 or not code.isdigit():
+                    st.warning("⚠️ 请输入 6 位数字代码（如 159967）")
+                elif ash_target <= 0:
+                    st.warning("⚠️ 目标价格必须大于 0")
+                else:
+                    name = new_name.strip()
+                    if not name:
+                        with st.spinner("正在获取标的名称 ..."):
+                            _quote, fetched = fetch_realtime_price(code)
+                            name = fetched or ""
+                    if add_rule(code, "", name, ash_target, ash_direction, asset_type="ashare"):
+                        st.toast(f"已添加 A股规则: {code} {name or '未识别'} 目标 {ash_target}",
+                                 icon="✅")
+                        st.rerun()
 
 st.divider()
 
@@ -163,6 +213,10 @@ view_df["状态"] = view_df.apply(
 view_df["方向"] = view_df["direction"].map(
     {"gte": "📈 ≥", "lte": "📉 ≤"}
 )
+view_df["类型"] = view_df["asset_type"].map(
+    {"ashare": "📈 A股/ETF", "token": "🪙 链上代币"}
+).fillna("🪙 链上代币")
+view_df["chain"] = view_df["chain"].fillna("").replace("", "—")
 view_df["目标价"] = view_df["target_price"]
 view_df["当前价"] = view_df["last_price"].fillna("-")
 view_df["最近检查"] = view_df["last_checked_at"].apply(lambda v: to_local_display(v, fallback="—"))
@@ -170,6 +224,7 @@ view_df["最近检查"] = view_df["last_checked_at"].apply(lambda v: to_local_di
 # 列筛选
 show_cols = {
     "状态": "状态",
+    "类型": "类型",
     "chain": "公链",
     "symbol": "符号",
     "address": "地址",
@@ -215,24 +270,17 @@ with st.expander("🔍 立即检查选中规则价格"):
     if st.button("检查价格"):
         check_id = int(check_sel)
         rule = df[df["id"] == check_id].iloc[0]
-        data, source = fetch_token_info(rule["chain"], rule["address"])
-        if data is None:
-            st.error(f"拉取失败:\n{source}")
+        with st.spinner("正在获取价格 ..."):
+            price, fetched_symbol = price_service.fetch_price(
+                rule["chain"] or "", rule["address"],
+                asset_type=rule.get("asset_type") or "token")
+        if price is None:
+            st.error("❌ 取价失败：链上代币请检查地址/公链；A 股请检查代码是否正确（停牌时无报价）")
         else:
-            price = None
-            pobj = data.get("price") or {}
-            raw = pobj.get("price")
-            try:
-                price = float(raw)
-            except (TypeError, ValueError):
-                pass
-            if price is not None:
-                sym = data.get("symbol") or rule["symbol"]
-                st.success(f"✅ {sym} 当前价格: {price}")
-                # 回写最新价格与检查时间（application 层统一实现）
-                price_service.update_rule_price(check_id, price)
-            else:
-                st.error(f"无法解析价格字段: {raw}")
+            sym = fetched_symbol or rule["symbol"] or rule["address"]
+            st.success(f"✅ {sym} 当前价格: {price}")
+            # 回写最新价格与检查时间（application 层统一实现）
+            price_service.update_rule_price(check_id, price)
 
 with st.expander("⚙️ 启用 / 停用 / 删除", expanded=True):
     manage_sel = st.selectbox(

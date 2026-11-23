@@ -10,6 +10,7 @@ from app.infrastructure.db.meme_config import (
 )
 from app.infrastructure.db.pump_alerts import filter_unpushed, mark_pushed
 from app.infrastructure.notifications.sender import send_feishu_msg
+from app.infrastructure.db.module_webhooks import resolve_webhook
 
 DATAPI_BASE = "https://dlmm.datapi.meteora.ag"
 
@@ -345,7 +346,7 @@ def run_meme_underval_monitor(params=None):
         return []
 
     text = "🚀【Meme 低估监控告警】\n========================================\n\n" + build_push_message(hits, rsi_max=rsi_max)
-    if not send_feishu_msg(FEISHU_WEBHOOK, text):
+    if not send_feishu_msg(resolve_webhook("meme_underval"), text):
         # 发送失败不写去重记录，否则这批标的会被压制 24 小时 → 直接漏报
         print("❌ 飞书推送失败，本轮不写入去重记录，下轮重试")
         return []
