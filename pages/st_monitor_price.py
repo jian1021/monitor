@@ -1,17 +1,16 @@
-"""价格监控配置页 (st_monitor_price)
+"""价格监控 (st_monitor_price)
 
-功能:
-  - 新增价格监控规则: 输入 token 地址 + 所属公链 + 目标价 + 方向
-  - 查看规则列表 / 当前价格 / 最近检查时间 / 是否已触发
-  - 启用/停用/删除规则
-数据表: price_alert (Turso/libSQL)
+一个输入框完成「查询 → 添加」，一张可编辑表格完成「启停 / 改目标价 / 改频率 / 删除」。
+支持：链上代币（Dexscreener）、A股 / 场内 ETF、可转债（腾讯行情）。
 
 分层：建表 / 规则 CRUD / 价格回写全部走 app/application/monitors/price.py，
-本页只负责渲染与交互，不再自己拼 SQL。
+本页只负责渲染与交互，不拼 SQL。
 """
-import streamlit as st
-import pandas as pd
+import math
 from datetime import time as dtime
+
+import pandas as pd
+import streamlit as st
 
 from app.core.settings import FEISHU_WEBHOOK
 from app.application.monitors import price as price_service
@@ -21,432 +20,275 @@ from app.infrastructure.market_data.a_share import fetch_realtime_price, is_conv
 from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
 from app.interfaces.timefmt import to_local_display
 
-# 链选项唯一来源：app/interfaces/asset_config.py（TOKEN_CHAINS / CHAIN_LABELS）
-CHAIN_OPTIONS = TOKEN_CHAINS
+CHAIN_OPTIONS = TOKEN_CHAINS  # 唯一来源：app/interfaces/asset_config.py
+TYPE_LABELS = {"token": "🪙 代币", "ashare": "📈 A股/ETF", "cbond": "💴 可转债"}
+DIR_LABELS = {"gte": "≥", "lte": "≤"}
 
 
 # ============================================================
-# 数据访问：全部委托 application 层，页面只做错误呈现
+# 工具
 # ============================================================
-def ensure_table() -> bool:
-    try:
-        if price_service.ensure_table():
-            return True
-        st.error("❌ 初始化 price_alert 表失败：数据库连接不可用")
-    except Exception as e:
-        st.error(f"❌ 初始化 price_alert 表失败: {e}")
-    return False
+def detect_type(text: str) -> str:
+    """6 位数字 → 可转债 / A股ETF；其余视为链上代币地址。"""
+    t = (text or "").strip()
+    if len(t) == 6 and t.isdigit():
+        return "cbond" if is_convertible_bond(t) else "ashare"
+    return "token"
 
 
-def fetch_rules() -> pd.DataFrame:
-    try:
-        rows = price_service.load_all_rules()
-    except Exception as e:
-        st.error(f"❌ 读取规则失败: {e}")
-        return pd.DataFrame(columns=list(RULE_COLUMNS))
-    return pd.DataFrame(rows, columns=list(RULE_COLUMNS))
-
-
-def add_rule(address: str, chain: str, symbol: str, target_price: float,
-             direction: str, asset_type: str = "token",
-             daily_check_at: str | None = None) -> bool:
-    if price_service.add_rule(address, chain, symbol, target_price, direction,
-                              asset_type, daily_check_at=daily_check_at):
-        return True
-    st.error("❌ 新增规则失败，请检查数据库连接。")
-    return False
-
-
-def update_rule_status(rule_id: int, enabled: bool) -> bool:
-    if price_service.set_rule_enabled(rule_id, enabled):
-        return True
-    st.error("❌ 更新规则状态失败，请检查数据库连接。")
-    return False
-
-
-def delete_rule(rule_id: int) -> bool:
-    if price_service.delete_rule(rule_id):
-        return True
-    st.error("❌ 删除规则失败，请检查数据库连接。")
-    return False
-
-
-# ============================================================
-# 界面
-# ============================================================
-st.set_page_config(page_title="价格监控", page_icon="📈", layout="wide")
-st.title("📈 价格监控")
-st.caption("按 Token 地址 + 公链，或 A股 / 场内 ETF / 可转债代码监控实时价格，到达目标价时通过飞书推送告警。")
-
-if not ensure_table():
-    st.stop()
-
-# ---- 顶部告警通道状态 ----
-if FEISHU_WEBHOOK:
-    st.success("✅ 飞书告警通道已配置", icon="🔔")
-else:
-    st.warning("⚠️ 未配置 FEISHU_WEBHOOK，告警仅打印到控制台", icon="🔕")
-
-st.caption("数据源: 链上代币走 Dexscreener；A股 / ETF 走腾讯行情（盘中实时，收盘后为最新收盘价）")
-
-st.divider()
-
-# ================= 新增规则：先查询，再添加 =================
-def _token_lookup(chain: str, address: str) -> dict | None:
-    """链上代币：返回 {name, symbol, price}；取不到返回 None。"""
-    info, _source = fetch_token_info(chain, address)
-    if not info:
+def lookup(text: str, chain: str) -> dict | None:
+    """统一查询：返回 {type, code, chain, name, price}；查不到返回 None。"""
+    code = (text or "").strip()
+    kind = detect_type(code)
+    if kind == "token":
+        if len(code) < 20:
+            return None
+        info, _src = fetch_token_info(chain, code)
+        if not info:
+            return None
+        raw = (info.get("price") or {}).get("price") or info.get("price_usd")
+        try:
+            px = float(raw)
+        except (TypeError, ValueError):
+            px = None
+        name = str(info.get("symbol") or info.get("name") or "").strip()
+        return {"type": kind, "code": code, "chain": chain, "name": name, "price": px}
+    px, name = fetch_realtime_price(code)
+    if not name:
         return None
-    raw = (info.get("price") or {}).get("price")
-    if raw is None:
-        raw = info.get("price_usd")
-    try:
-        px = float(raw)
-    except (TypeError, ValueError):
-        px = None
-    return {"name": str(info.get("name") or "").strip(),
-            "symbol": str(info.get("symbol") or "").strip(),
-            "price": px}
+    return {"type": kind, "code": code, "chain": "", "name": name, "price": px}
 
 
-def _price_step(px: float | None) -> tuple[float, str]:
-    """按价格量级给出步长（约千分之一价格）与显示精度。"""
-    import math
+def price_fmt(px: float | None) -> tuple[float, str]:
+    """number_input 的步长（约千分之一价格）与显示精度。"""
     if not px or px <= 0:
         return 0.000001, "%.8f"
     exp = math.floor(math.log10(px)) - 3
-    step = 10.0 ** exp
-    decimals = max(2, -exp)
-    return step, f"%.{decimals}f"
+    return 10.0 ** exp, f"%.{max(2, -exp)}f"
 
 
-with st.expander("➕ 新增价格监控规则", expanded=True):
-    tab_token, tab_ashare, tab_cbond = st.tabs(["🪙 链上代币", "📈 A股 / 场内 ETF", "💴 可转债"])
+def fmt_px(v) -> str:
+    try:
+        return f"{float(v):.6g}"
+    except (TypeError, ValueError):
+        return "—"
 
-    # ---------------- 链上代币 ----------------
-    with tab_token:
-        q1, q2, q3 = st.columns([3, 1, 1])
-        q_address = q1.text_input(
-            "Token 合约地址 *",
-            placeholder="例如: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-            key="tok_q_address",
-        )
-        q_chain = q2.selectbox("所属公链", options=CHAIN_OPTIONS,
-                               format_func=lambda x: CHAIN_LABELS[x], key="tok_q_chain")
-        q3.write("")
-        q3.write("")
-        if q3.button("🔍 查询", key="tok_q_btn", width="stretch"):
-            addr = q_address.strip()
-            if len(addr) < 20:
-                st.warning("⚠️ 请输入有效的 Token 合约地址")
-                st.session_state.pop("tok_lookup", None)
-            else:
-                with st.spinner("正在查询 ..."):
-                    res = _token_lookup(q_chain, addr)
-                if not res or res["price"] is None:
-                    st.error("❌ 查询失败：请核对地址与所属公链")
-                    st.session_state.pop("tok_lookup", None)
-                else:
-                    st.session_state["tok_lookup"] = {**res, "address": addr, "chain": q_chain}
 
-        found = st.session_state.get("tok_lookup")
-        # 地址或公链改了，旧查询结果作废
-        if found and (found["address"] != q_address.strip() or found["chain"] != q_chain):
-            found = None
-            st.session_state.pop("tok_lookup", None)
+def parse_hhmm(text: str | None) -> str | None:
+    return price_service.normalize_daily_check(text)
 
-        if found:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("名称", found["name"] or "—")
-            m2.metric("符号", found["symbol"] or "—")
-            m3.metric("当前价格 (USD)", f"{found['price']:.10g}")
 
-            step, fmt = _price_step(found["price"])
-            with st.form("add_price_rule_form"):
-                f1, f2 = st.columns(2)
-                with f1:
-                    new_target = st.number_input(
-                        "目标价格 *", min_value=0.0, value=float(found["price"]),
-                        step=step, format=fmt,
-                        key=f"tok_target_{found['address']}_{found['chain']}")
-                    new_direction = st.radio(
-                        "触发条件", options=["gte", "lte"],
-                        format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
-                        horizontal=True, key="token_direction")
-                with f2:
-                    new_symbol = st.text_input("显示名称", value=found["symbol"] or found["name"])
-                    tok_daily = st.checkbox("每天定时检查一次（不勾选则跟随轮询间隔）",
-                                            value=False, key="token_daily_check")
-                    tok_check_time = st.time_input("每日检查时刻（北京时间）", value=dtime(9, 30),
-                                                   key="token_check_time")
-                if new_target > 0 and found["price"]:
-                    pct = (new_target / found["price"] - 1) * 100
-                    st.caption(f"目标价较现价 {pct:+.2f}%")
+def fail(msg: str) -> None:
+    st.error(f"❌ {msg}，请检查数据库连接。")
 
-                if st.form_submit_button("✅ 添加到监控列表", type="primary"):
-                    if new_target <= 0:
-                        st.warning("⚠️ 目标价格必须大于 0")
-                    else:
-                        daily_check = tok_check_time.strftime("%H:%M") if tok_daily else None
-                        if add_rule(found["address"], found["chain"], new_symbol.strip(),
-                                    new_target, new_direction, daily_check_at=daily_check):
-                            st.session_state.pop("tok_lookup", None)
-                            st.toast(f"已添加: {new_symbol or found['address'][:10]} "
-                                     f"({CHAIN_LABELS[found['chain']]}) 目标 {new_target}", icon="✅")
-                            st.rerun()
-        else:
-            st.caption("输入地址并选择公链后点「查询」，确认名称和现价后再设置目标价。")
 
-    # ---------------- A股 / 场内 ETF / 可转债（同走腾讯行情） ----------------
-    def _exchange_tab(prefix: str, asset_type: str, placeholder: str, unit_hint: str,
-                      validate=None, invalid_msg: str = "") -> None:
-        a1, a2 = st.columns([4, 1])
-        q_code = a1.text_input("6 位代码 *", placeholder=placeholder, key=f"{prefix}_q_code")
-        a2.write("")
-        a2.write("")
-        if a2.button("🔍 查询", key=f"{prefix}_q_btn", width="stretch"):
-            code = q_code.strip()
-            if len(code) != 6 or not code.isdigit():
-                st.warning("⚠️ 请输入 6 位数字代码")
-                st.session_state.pop(f"{prefix}_lookup", None)
-            elif validate and not validate(code):
-                st.warning(invalid_msg)
-                st.session_state.pop(f"{prefix}_lookup", None)
-            else:
-                with st.spinner("正在查询 ..."):
-                    px, name = fetch_realtime_price(code)
-                if not name:
-                    st.error("❌ 查询失败：代码不存在或行情接口不可用")
-                    st.session_state.pop(f"{prefix}_lookup", None)
-                else:
-                    st.session_state[f"{prefix}_lookup"] = {"code": code, "name": name, "price": px}
+# ============================================================
+# 页面
+# ============================================================
+st.set_page_config(page_title="价格监控", page_icon="📈", layout="wide")
 
-        found = st.session_state.get(f"{prefix}_lookup")
-        if found and found["code"] != q_code.strip():
-            found = None
-            st.session_state.pop(f"{prefix}_lookup", None)
-
-        if not found:
-            st.caption("输入代码后点「查询」，确认名称和现价后再设置目标价。")
-            return
-
-        m1, m2 = st.columns(2)
-        m1.metric("名称", found["name"])
-        m2.metric(f"当前价格 ({unit_hint})",
-                  "停牌 / 无报价" if found["price"] is None else f"{found['price']:.3f}")
-
-        with st.form(f"add_{prefix}_rule_form"):
-            f1, f2 = st.columns(2)
-            with f1:
-                target = st.number_input(
-                    "目标价格 *", min_value=0.0, value=float(found["price"] or 0.0),
-                    step=0.001, format="%.3f", key=f"{prefix}_target_{found['code']}")
-                direction = st.radio(
-                    "触发条件", options=["gte", "lte"],
-                    format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
-                    horizontal=True, key=f"{prefix}_direction")
-            with f2:
-                daily = st.checkbox("每天定时检查一次", value=True, key=f"{prefix}_daily_check",
-                                    help="默认每天开盘 09:30（北京时间）检查一次；"
-                                         "不勾选则跟随调度轮询间隔（默认 5 分钟）")
-                check_time = st.time_input("每日检查时刻（北京时间）", value=dtime(9, 30),
-                                           key=f"{prefix}_check_time")
-            if target > 0 and found["price"]:
-                st.caption(f"目标价较现价 {(target / found['price'] - 1) * 100:+.2f}%")
-
-            if st.form_submit_button("✅ 添加到监控列表", type="primary"):
-                if target <= 0:
-                    st.warning("⚠️ 目标价格必须大于 0")
-                else:
-                    daily_check = check_time.strftime("%H:%M") if daily else None
-                    if add_rule(found["code"], "", found["name"], target, direction,
-                                asset_type=asset_type, daily_check_at=daily_check):
-                        st.session_state.pop(f"{prefix}_lookup", None)
-                        freq = f"每天 {daily_check}" if daily_check else "跟随轮询"
-                        st.toast(f"已添加: {found['code']} {found['name']} 目标 {target}（{freq}）",
-                                 icon="✅")
-                        st.rerun()
-
-    with tab_ashare:
-        _exchange_tab("ash", "ashare", "例如: 159967 / 515790 / 600519", "元")
-
-    with tab_cbond:
-        st.caption("沪市 110/111/113/118 开头，深市 123/127/128 开头；价格单位为元/张（面值 100）。")
-        _exchange_tab("cb", "cbond", "例如: 113052 / 127045", "元/张",
-                      validate=is_convertible_bond,
-                      invalid_msg="⚠️ 不是可转债代码（沪市 110/111/113/118，深市 123/127/128 开头）")
-
-st.divider()
-
-# ================= 现有规则列表 =================
-df = fetch_rules()
-if df.empty:
-    st.info("ℹ️ 暂无价格监控规则，请在上方新增。")
+try:
+    if not price_service.ensure_table():
+        st.error("❌ 数据库不可用，无法加载价格监控。")
+        st.stop()
+except Exception as e:
+    st.error(f"❌ 初始化 price_alert 表失败: {e}")
     st.stop()
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("总规则数", len(df))
-col2.metric("启用中", len(df[df["enabled"] == True]))
-col3.metric("已触发", len(df[df["alerted"] == True]))
-col4.metric("待触发", len(df[(df["enabled"] == True) & (df["alerted"] == False)]))
+head_l, head_r = st.columns([4, 1])
+head_l.title("📈 价格监控")
+head_l.caption("输入代码或合约地址查询，设定目标价后加入监控；到价通过飞书推送。")
+if not FEISHU_WEBHOOK:
+    head_r.warning("未配置飞书 Webhook，告警仅打印日志", icon="🔕")
 
-st.divider()
+# ---------------- 查询 + 添加 ----------------
+with st.container(border=True):
+    with st.form("lookup_form", border=False):
+        c_in, c_chain, c_btn = st.columns([5, 2, 1], vertical_alignment="bottom")
+        q_text = c_in.text_input(
+            "代码 / 合约地址",
+            placeholder="A股/ETF 如 159967 · 可转债 如 113052 · 链上代币粘贴合约地址",
+        )
+        q_chain = c_chain.selectbox("公链（仅代币）", CHAIN_OPTIONS,
+                                    format_func=lambda x: CHAIN_LABELS[x])
+        go = c_btn.form_submit_button("🔍 查询", type="primary", width="stretch")
 
-# 展示用副本（隐藏内部字段 id/alerted）
-view_df = df.copy()
+    if go:
+        with st.spinner("查询中 ..."):
+            res = lookup(q_text, q_chain)
+        if not res:
+            kind = detect_type(q_text)
+            st.session_state.pop("found", None)
+            st.error("❌ 未查到：" + ("请核对合约地址与公链" if kind == "token"
+                                   else "代码不存在或行情接口不可用"))
+        else:
+            st.session_state["found"] = res
 
-# 状态列文本化
-view_df["状态"] = view_df.apply(
-    lambda r: "🟢 监控中" if (r["enabled"] and not r["alerted"])
-    else ("🔔 已触发" if (r["enabled"] and r["alerted"]) else "⏸️ 已停用"),
-    axis=1,
-)
-view_df["方向"] = view_df["direction"].map(
-    {"gte": "📈 ≥", "lte": "📉 ≤"}
-)
-view_df["类型"] = view_df["asset_type"].map(
-    {"ashare": "📈 A股/ETF", "cbond": "💴 可转债", "token": "🪙 链上代币"}
-).fillna("🪙 链上代币")
-view_df["chain"] = view_df["chain"].fillna("").replace("", "—")
-view_df["目标价"] = view_df["target_price"]
-view_df["当前价"] = view_df["last_price"].fillna("-")
-view_df["最近检查"] = view_df["last_checked_at"].apply(lambda v: to_local_display(v, fallback="—"))
-view_df["检查频率"] = view_df["daily_check_at"].apply(
-    lambda v: f"每天 {v}" if v else "跟随轮询"
-)
+    found = st.session_state.get("found")
+    if found:
+        unit = "USD" if found["type"] == "token" else ("元/张" if found["type"] == "cbond" else "元")
+        where = CHAIN_LABELS.get(found["chain"], "") if found["type"] == "token" else found["code"]
+        px_text = "停牌 / 无报价" if found["price"] is None else f"{found['price']:.10g} {unit}"
+        st.markdown(f"**{found['name'] or '未知'}** · {TYPE_LABELS[found['type']]} · {where}"
+                    f"　现价 **{px_text}**")
 
-# 列筛选
-show_cols = {
-    "状态": "状态",
-    "类型": "类型",
-    "chain": "公链",
-    "symbol": "符号",
-    "address": "地址",
-    "方向": "方向",
-    "目标价": "目标价",
-    "当前价": "当前价",
-    "检查频率": "检查频率",
-    "最近检查": "最近检查",
-    "created_at": "创建时间",
-}
-columns_cfg = {
-    "id": None,
-    "chain": st.column_config.TextColumn("公链", disabled=True, width="small"),
-    "symbol": st.column_config.TextColumn("符号", disabled=True),
-    "address": st.column_config.TextColumn("地址", disabled=True, width="large"),
-    "direction": None,
-    "target_price": st.column_config.NumberColumn("目标价", disabled=True, format="%.8f"),
-    "enabled": None,
-    "alerted": None,
-    "last_price": st.column_config.NumberColumn("当前价", disabled=True, format="%.8f"),
-    "last_checked_at": st.column_config.TextColumn("最近检查", disabled=True),
-    "created_at": st.column_config.DatetimeColumn("创建时间", disabled=True, format="YYYY-MM-DD HH:mm"),
-}
+        step, fmt = price_fmt(found["price"])
+        with st.form("add_form", border=False):
+            f1, f2, f3, f4 = st.columns([2, 2, 2, 1], vertical_alignment="bottom")
+            target = f1.number_input("目标价", min_value=0.0, value=float(found["price"] or 0.0),
+                                     step=step, format=fmt,
+                                     key=f"tgt_{found['type']}_{found['code']}")
+            direction = f2.segmented_control("触发", options=["gte", "lte"], default="gte",
+                                             format_func=lambda x: "📈 涨到" if x == "gte" else "📉 跌到")
+            default_daily = found["type"] != "token"
+            check_at = f3.text_input("每日检查（留空=轮询）",
+                                     value="09:30" if default_daily else "",
+                                     placeholder="HH:MM")
+            add = f4.form_submit_button("➕ 添加", type="primary", width="stretch")
+            if target > 0 and found["price"]:
+                st.caption(f"目标较现价 {(target / found['price'] - 1) * 100:+.2f}%")
 
-st.dataframe(
-    view_df[list(show_cols.keys())].rename(columns=show_cols),
-    column_config=columns_cfg,
-    width="stretch",
+        if add:
+            if target <= 0:
+                st.warning("目标价必须大于 0")
+            elif check_at.strip() and not parse_hhmm(check_at):
+                st.warning("每日检查时刻格式应为 HH:MM，如 09:30")
+            elif price_service.add_rule(found["code"], found["chain"], found["name"], target,
+                                        direction or "gte", asset_type=found["type"],
+                                        daily_check_at=parse_hhmm(check_at)):
+                st.session_state.pop("found", None)
+                st.toast(f"已添加 {found['name'] or found['code']}  "
+                         f"{DIR_LABELS[direction or 'gte']} {target:g}", icon="✅")
+                st.rerun()
+            else:
+                fail("添加失败")
+
+# ---------------- 监控列表 ----------------
+try:
+    df = pd.DataFrame(price_service.load_all_rules(), columns=list(RULE_COLUMNS))
+except Exception as e:
+    st.error(f"❌ 读取规则失败: {e}")
+    st.stop()
+
+if df.empty:
+    st.info("还没有监控规则，在上方查询后添加。")
+    st.stop()
+
+n_on = int(df["enabled"].sum())
+n_hit = int((df["enabled"] & df["alerted"]).sum())
+bar_l, bar_r = st.columns([4, 1], vertical_alignment="bottom")
+bar_l.subheader(f"监控列表　{n_on}/{len(df)} 启用 · {n_hit} 已触发")
+refresh = bar_r.button("🔄 刷新现价", width="stretch",
+                       help="立即查询所有启用规则的现价（不影响每日定时检查）")
+
+if refresh:
+    with st.spinner("刷新中 ..."):
+        bad = 0
+        for _, r in df[df["enabled"]].iterrows():
+            px, _ = price_service.fetch_price(r["chain"] or "", r["address"],
+                                              asset_type=r["asset_type"] or "token")
+            if px is None:
+                bad += 1
+                continue
+            price_service.update_rule_price(int(r["id"]), px, touch_checked=False)
+    st.toast("现价已刷新" + (f"，{bad} 条取价失败" if bad else ""), icon="🔄")
+    st.rerun()
+
+
+def _gap(r) -> float | None:
+    try:
+        last, tgt = float(r["last_price"]), float(r["target_price"])
+    except (TypeError, ValueError):
+        return None
+    if not last or math.isnan(last):
+        return None
+    return (tgt / last - 1) * 100
+
+
+view = pd.DataFrame({
+    "id": df["id"],
+    "启用": df["enabled"].astype(bool),
+    "名称": df["symbol"].where(df["symbol"].astype(bool), df["address"].str[:10] + "…"),
+    "类型": df["asset_type"].map(TYPE_LABELS).fillna(TYPE_LABELS["token"]),
+    "代码/地址": df["address"],
+    "条件": df["direction"].map({"gte": "📈 ≥", "lte": "📉 ≤"}),
+    "目标价": df["target_price"].astype(float),
+    "现价": df["last_price"].apply(fmt_px),
+    "距目标": df.apply(_gap, axis=1),
+    "状态": df.apply(lambda r: "🔔 已触发" if r["enabled"] and r["alerted"]
+                     else ("🟢 监控中" if r["enabled"] else "⏸️ 停用"), axis=1),
+    "每日检查": df["daily_check_at"].fillna(""),
+    "最近检查": df["last_checked_at"].apply(lambda v: to_local_display(v, fallback="—")),
+    "删除": False,
+})
+
+edited = st.data_editor(
+    view,
+    key="rules_editor",
     hide_index=True,
+    width="stretch",
+    column_order=["启用", "名称", "类型", "条件", "目标价", "现价", "距目标", "状态",
+                  "每日检查", "最近检查", "代码/地址", "删除"],
+    disabled=["名称", "类型", "现价", "距目标", "状态", "最近检查", "代码/地址"],
+    column_config={
+        "id": None,
+        "启用": st.column_config.CheckboxColumn(width="small"),
+        "条件": st.column_config.SelectboxColumn(options=["📈 ≥", "📉 ≤"], width="small",
+                                               required=True),
+        "目标价": st.column_config.NumberColumn(format="%.6g", min_value=0.0),
+        "距目标": st.column_config.NumberColumn(format="%+.2f%%", width="small",
+                                              help="目标价相对现价的涨跌幅"),
+        "每日检查": st.column_config.TextColumn(help="HH:MM 每天定时检查一次；留空跟随轮询",
+                                              width="small"),
+        "代码/地址": st.column_config.TextColumn(width="medium"),
+        "删除": st.column_config.CheckboxColumn(width="small"),
+    },
 )
 
-st.divider()
+# ---------------- 保存修改 ----------------
+orig = view.set_index("id")
+new = edited.set_index("id")
+changes = []
+for rid in new.index:
+    a, b = orig.loc[rid], new.loc[rid]
+    if b["删除"]:
+        changes.append(("delete", rid, None))
+        continue
+    if bool(a["启用"]) != bool(b["启用"]):
+        changes.append(("enabled", rid, bool(b["启用"])))
+    dir_new = "gte" if b["条件"] == "📈 ≥" else "lte"
+    if a["条件"] != b["条件"] or float(a["目标价"]) != float(b["目标价"] or 0):
+        changes.append(("target", rid, (float(b["目标价"] or 0), dir_new)))
+    if (a["每日检查"] or "") != (b["每日检查"] or ""):
+        changes.append(("schedule", rid, b["每日检查"]))
 
-# ================= 管理操作 =================
-st.subheader("🛠️ 规则管理")
-
-# 手动触发一次查价 (Dexscreener)
-with st.expander("🔍 立即检查选中规则价格"):
-    check_sel = st.selectbox(
-        "选择要检查的规则",
-        options=df["id"].tolist(),
-        format_func=lambda i: f"[{i}] {df.loc[df['id']==i,'symbol'].iloc[0] or df.loc[df['id']==i,'address'].iloc[0][:16]}... ({df.loc[df['id']==i,'chain'].iloc[0]})",
-    )
-    if st.button("检查价格"):
-        check_id = int(check_sel)
-        rule = df[df["id"] == check_id].iloc[0]
-        with st.spinner("正在获取价格 ..."):
-            price, fetched_symbol = price_service.fetch_price(
-                rule["chain"] or "", rule["address"],
-                asset_type=rule.get("asset_type") or "token")
-        if price is None:
-            st.error("❌ 取价失败：链上代币请检查地址/公链；A 股请检查代码是否正确（停牌时无报价）")
+if changes:
+    n_del = sum(1 for c in changes if c[0] == "delete")
+    s_l, s_r = st.columns([4, 1], vertical_alignment="center")
+    s_l.info(f"有 {len(changes)} 项未保存的修改" + (f"，其中删除 {n_del} 条（不可恢复）" if n_del else ""))
+    if s_r.button("💾 保存修改", type="primary", width="stretch"):
+        errors = []
+        for kind, rid, val in changes:
+            rid = int(rid)
+            if kind == "delete":
+                ok = price_service.delete_rule(rid)
+            elif kind == "enabled":
+                ok = price_service.set_rule_enabled(rid, val)
+            elif kind == "target":
+                ok = price_service.update_rule_target(rid, *val)
+            else:
+                if (val or "").strip() and not parse_hhmm(val):
+                    errors.append(f"#{rid} 每日检查格式应为 HH:MM")
+                    continue
+                ok = price_service.update_rule_schedule(rid, parse_hhmm(val))
+            if not ok:
+                errors.append(f"#{rid} {kind} 保存失败")
+        st.session_state.pop("rules_editor", None)
+        if errors:
+            st.error("；".join(errors))
         else:
-            sym = fetched_symbol or rule["symbol"] or rule["address"]
-            st.success(f"✅ {sym} 当前价格: {price}")
-            # 回写最新价格与检查时间（application 层统一实现）
-            # 手动查价只更新价格，不推进 last_checked_at，避免吃掉当天的定时检查
-            price_service.update_rule_price(check_id, price, touch_checked=False)
-
-with st.expander("⚙️ 启用 / 停用 / 删除 / 检查频率", expanded=True):
-    manage_sel = st.selectbox(
-        "选择规则 ID",
-        options=df["id"].tolist(),
-        key="manage_sel",
-        format_func=lambda i: f"[{i}] {df.loc[df['id']==i,'symbol'].iloc[0] or df.loc[df['id']==i,'address'].iloc[0][:16]}...",
-    )
-    manage_id = int(manage_sel)
-    rule_row = df[df["id"] == manage_id].iloc[0]
-
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        if rule_row["enabled"]:
-            if st.button("⏸️ 停用", width="stretch"):
-                if update_rule_status(manage_id, False):
-                    st.toast("已停用", icon="⏸️")
-                    st.rerun()
-        else:
-            if st.button("▶️ 启用", width="stretch"):
-                if update_rule_status(manage_id, True):
-                    st.toast("已启用", icon="▶️")
-                    st.rerun()
-    with m2:
-        st.caption(f"当前: {'已触发' if rule_row['alerted'] else '未触发'} / 目标 {'≥' if rule_row['direction']=='gte' else '≤'} {rule_row['target_price']}")
-    with m3:
-        with st.popover("🗑️ 删除规则", width="stretch"):
-            st.write("⚠️ 删除后不可恢复，确认删除该规则？")
-            if st.button("确认删除", type="primary"):
-                if delete_rule(manage_id):
-                    st.toast("已删除", icon="🗑️")
-                    st.rerun()
-
-    # ---- 检查频率修改 ----
-    cur_daily = rule_row.get("daily_check_at") or None
-    st.caption(f"📅 当前检查频率: {'每天 ' + cur_daily if cur_daily else '跟随轮询间隔'}")
-    edit_daily = st.checkbox("每天定时检查一次", value=bool(cur_daily),
-                             key="edit_daily_check")
-    default_time = (dtime(*[int(x) for x in cur_daily.split(":")])
-                    if cur_daily else dtime(9, 30))
-    edit_time = st.time_input("每日检查时刻（北京时间）", value=default_time,
-                              key="edit_check_time", disabled=not edit_daily)
-    if st.button("💾 保存检查频率"):
-        new_val = edit_time.strftime("%H:%M") if edit_daily else None
-        if price_service.update_rule_schedule(manage_id, new_val):
-            st.toast(f"检查频率已更新: {f'每天 {new_val}' if new_val else '跟随轮询'}",
-                     icon="✅")
+            st.toast("已保存", icon="💾")
             st.rerun()
-        else:
-            st.error("❌ 更新失败，请检查数据库连接。")
 
-# ================= 运行说明 =================
-st.divider()
-with st.expander("📖 运行说明"):
-    st.markdown(
-        """
-**后台监控脚本 (独立运行):**
-
-```bash
-# 手动执行一轮检查:
-python -m scripts.monitor_price
-
-# 本地常驻轮询 (每 60 秒):
-python -m scripts.monitor_price --loop
-python -m scripts.monitor_price --loop --interval 300   # 自定义间隔(秒)
-```
-
-**告警去重**：同一规则达标后标记为「已触发」，避免重复轰炸；
-价格离开目标价后自动重置，再次达标会重新推送。
-
-**数据源**：Dexscreener API，无需配置 API Key 或代理。
-"""
-    )
+st.caption("勾选「启用」「删除」，或直接改目标价 / 条件 / 每日检查后点保存。"
+           "改目标价或条件会重置「已触发」状态。后台由 `python main.py` 调度运行。")

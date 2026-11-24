@@ -330,6 +330,25 @@ def update_rule_schedule(rule_id: int, daily_check_at: str | None) -> bool:
         client.close()
 
 
+def update_rule_target(rule_id: int, target_price: float, direction: str) -> bool:
+    """修改目标价 / 方向；条件变了，旧的「已触发」标志一并清除。"""
+    if direction not in ("gte", "lte") or not target_price or target_price <= 0:
+        return False
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute(
+            "UPDATE price_alert SET target_price = ?, direction = ?, alerted = 0 WHERE id = ?",
+            [float(target_price), direction, rule_id])
+        return True
+    except Exception as e:
+        print(f"❌ 更新目标价失败 (id={rule_id}): {e}")
+        return False
+    finally:
+        client.close()
+
+
 def set_rule_enabled(rule_id: int, enabled: bool) -> bool:
     client = get_db_client()
     if not client:

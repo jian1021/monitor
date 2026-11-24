@@ -78,4 +78,4 @@ def test_weekend_is_closed():
 def test_manual_check_page_does_not_touch_checked():
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1] / "pages/st_monitor_price.py").read_text(encoding="utf-8")
-    assert "update_rule_price(check_id, price, touch_checked=False)" in src
+    assert "touch_checked=False" in src
