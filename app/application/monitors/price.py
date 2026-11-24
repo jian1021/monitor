@@ -168,15 +168,24 @@ def load_enabled_rules():
         client.close()
 
 
-def update_rule_price(rule_id: int, price: float):
-    """回写最新价格与检查时间"""
+def update_rule_price(rule_id: int, price: float, touch_checked: bool = True):
+    """回写最新价格；touch_checked=True 时同时推进 last_checked_at。
+
+    last_checked_at 是「每日定时规则今天是否已检查」的唯一依据，只能在
+    调度检查完整处理完（含告警送达）后推进：
+      - 页面手动查价必须传 False，否则当天 09:30 后手动查一次，定时检查就被跳过；
+      - 告警推送失败时不推进，保证每日规则下一轮重试，而不是拖到明天。
+    """
     client = get_db_client()
     if not client:
         return
     try:
-        client.execute(
-            "UPDATE price_alert SET last_price = ?, last_checked_at = datetime('now') WHERE id = ?",
-            [price, rule_id])
+        if touch_checked:
+            client.execute(
+                "UPDATE price_alert SET last_price = ?, last_checked_at = datetime('now') WHERE id = ?",
+                [price, rule_id])
+        else:
+            client.execute("UPDATE price_alert SET last_price = ? WHERE id = ?", [price, rule_id])
     except Exception as e:
         print(f"❌ 回写价格失败 (id={rule_id}): {e}")
     finally:
@@ -390,6 +399,44 @@ def due_for_daily_check(rule: dict, now: datetime | None = None) -> bool:
     return True
 
 
+# 告警解除迟滞：价格需回撤超过目标价的该比例才重新武装，
+# 避免价格在目标价附近来回抖动时反复推送。
+REARM_PCT = 0.5
+
+
+def is_triggered(direction: str, price: float, target: float) -> bool:
+    if direction == "gte":
+        return price >= target
+    if direction == "lte":
+        return price <= target
+    return False
+
+
+def should_rearm(direction: str, price: float, target: float, pct: float = REARM_PCT) -> bool:
+    """已告警规则是否离开目标价足够远（超过迟滞带）可重新武装。"""
+    band = abs(target) * pct / 100.0
+    if direction == "gte":
+        return price < target - band
+    if direction == "lte":
+        return price > target + band
+    return False
+
+
+def ashare_market_open_day(now: datetime | None = None) -> bool:
+    """A 股是否开市日：周末跳过；节假日走交易日历（失败则仅按周末判断）。"""
+    now = now or datetime.now(BEIJING_TZ)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=BEIJING_TZ)
+    local = now.astimezone(BEIJING_TZ)
+    if local.weekday() >= 5:
+        return False
+    try:
+        from app.infrastructure.market_data.trade_calendar import a_share_trading_day
+        return a_share_trading_day(local.date())
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def run_once():
     rules = load_enabled_rules()
     if not rules:
@@ -405,6 +452,10 @@ def run_once():
 
         # 每日定时规则（如 A股/ETF 每天 09:30）：未到时刻或今天已查过则跳过
         if not due_for_daily_check(rule):
+            continue
+
+        if asset_type == "ashare" and not ashare_market_open_day():
+            # 休市日行情是上一交易日收盘价，无新信息；不检查也不推进 last_checked_at
             continue
 
         if asset_type == "ashare":
@@ -429,18 +480,16 @@ def run_once():
         sym = rule["symbol"] or symbol or addr[:8] + "..."
 
         print(f"✅ [{sym}] {source_label} 现价: {price}")
-        update_rule_price(rule["id"], price)
+        # 先只写价格；last_checked_at 等本条规则处理完（告警已送达或无需告警）再推进
+        update_rule_price(rule["id"], price, touch_checked=False)
 
         target = rule["target_price"]
-        triggered = False
-        if rule["direction"] == "gte" and price >= target:
-            triggered = True
-        elif rule["direction"] == "lte" and price <= target:
-            triggered = True
+        triggered = is_triggered(rule["direction"], price, target)
 
         if triggered:
             if rule["alerted"]:
                 print(f"⏹️ [{sym}] 已达目标价，已告警过，跳过重复推送")
+                update_rule_price(rule["id"], price)
                 continue
             direction_cn = "上涨达到" if rule["direction"] == "gte" else "下跌达到"
             if asset_type == "ashare":
@@ -463,10 +512,13 @@ def run_once():
                 print(f"❌ [{sym}] 飞书推送失败，保留未告警状态，下轮重试")
                 continue
             mark_alerted(rule["id"])
+            update_rule_price(rule["id"], price)
             print(f"🚨 已推送告警: [{sym}] {price} {'>=' if rule['direction']=='gte' else '<='} {target}")
-        elif rule["alerted"]:
-            clear_alerted(rule["id"])
-            print(f"🔁 [{sym}] 价格已离开目标价，告警标志自动重置，下次达标将重新推送")
+        else:
+            if rule["alerted"] and should_rearm(rule["direction"], price, target):
+                clear_alerted(rule["id"])
+                print(f"🔁 [{sym}] 价格已离开目标价超过 {REARM_PCT}%，告警标志重置，下次达标将重新推送")
+            update_rule_price(rule["id"], price)
 
     print(f"📊 本轮完成: 成功 {ok}，失败 {fail}")
 

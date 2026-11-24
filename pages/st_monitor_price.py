@@ -91,122 +91,176 @@ st.caption("数据源: 链上代币走 Dexscreener；A股 / ETF 走腾讯行情�
 
 st.divider()
 
-# ================= 新增规则表单 =================
+# ================= 新增规则：先查询，再添加 =================
+def _token_lookup(chain: str, address: str) -> dict | None:
+    """链上代币：返回 {name, symbol, price}；取不到返回 None。"""
+    info, _source = fetch_token_info(chain, address)
+    if not info:
+        return None
+    raw = (info.get("price") or {}).get("price")
+    if raw is None:
+        raw = info.get("price_usd")
+    try:
+        px = float(raw)
+    except (TypeError, ValueError):
+        px = None
+    return {"name": str(info.get("name") or "").strip(),
+            "symbol": str(info.get("symbol") or "").strip(),
+            "price": px}
+
+
+def _price_step(px: float | None) -> tuple[float, str]:
+    """按价格量级给出步长（约千分之一价格）与显示精度。"""
+    import math
+    if not px or px <= 0:
+        return 0.000001, "%.8f"
+    exp = math.floor(math.log10(px)) - 3
+    step = 10.0 ** exp
+    decimals = max(2, -exp)
+    return step, f"%.{decimals}f"
+
+
 with st.expander("➕ 新增价格监控规则", expanded=True):
     tab_token, tab_ashare = st.tabs(["🪙 链上代币", "📈 A股 / 场内 ETF"])
 
+    # ---------------- 链上代币 ----------------
     with tab_token:
-        with st.form("add_price_rule_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                new_address = st.text_input(
-                    "Token 合约地址 *",
-                    placeholder="例如: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                    help="Solana / BSC / Base / ETH 上的 token 合约地址",
-                )
-                new_chain = st.selectbox(
-                    "所属公链",
-                    options=CHAIN_OPTIONS,
-                    format_func=lambda x: CHAIN_LABELS[x],
-                )
-            with c2:
-                new_target = st.number_input(
-                    "目标价格 *",
-                    min_value=0.0,
-                    step=0.000001,
-                    format="%.8f",
-                    value=0.0,
-                )
-                new_direction = st.radio(
-                    "触发条件",
-                    options=["gte", "lte"],
-                    format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
-                    horizontal=True,
-                    key="token_direction",
-                )
-                new_symbol = st.text_input("代币符号 (留空则自动获取)", placeholder="留空即自动识别")
-                tok_daily = st.checkbox("每天定时检查一次（不勾选则跟随轮询间隔）", value=False,
-                                        key="token_daily_check")
-                tok_check_time = st.time_input(
-                    "每日检查时刻（北京时间）", value=dtime(9, 30),
-                    key="token_check_time", disabled=not tok_daily,
-                    help="每天到该时刻后的下一轮调度执行一次检查",
-                )
-
-            submitted = st.form_submit_button("✅ 添加规则", type="primary")
-            if submitted:
-                if not new_address.strip() or len(new_address.strip()) < 20:
-                    st.warning("⚠️ 请输入有效的 Token 合约地址")
-                elif new_target <= 0:
-                    st.warning("⚠️ 目标价格必须大于 0")
+        q1, q2, q3 = st.columns([3, 1, 1])
+        q_address = q1.text_input(
+            "Token 合约地址 *",
+            placeholder="例如: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            key="tok_q_address",
+        )
+        q_chain = q2.selectbox("所属公链", options=CHAIN_OPTIONS,
+                               format_func=lambda x: CHAIN_LABELS[x], key="tok_q_chain")
+        q3.write("")
+        q3.write("")
+        if q3.button("🔍 查询", key="tok_q_btn", width="stretch"):
+            addr = q_address.strip()
+            if len(addr) < 20:
+                st.warning("⚠️ 请输入有效的 Token 合约地址")
+                st.session_state.pop("tok_lookup", None)
+            else:
+                with st.spinner("正在查询 ..."):
+                    res = _token_lookup(q_chain, addr)
+                if not res or res["price"] is None:
+                    st.error("❌ 查询失败：请核对地址与所属公链")
+                    st.session_state.pop("tok_lookup", None)
                 else:
-                    symbol = new_symbol.strip()
-                    if not symbol:
-                        with st.spinner("正在自动获取代币符号 ..."):
-                            info, _source = fetch_token_info(new_chain, new_address.strip())
-                            symbol = str((info or {}).get("symbol") or "").strip()
-                    daily_check = tok_check_time.strftime("%H:%M") if tok_daily else None
-                    if add_rule(new_address, new_chain, symbol, new_target, new_direction,
-                                daily_check_at=daily_check):
-                        st.toast(f"已添加规则: {new_address[:10]}... "
-                                 f"({CHAIN_LABELS[new_chain]}) 符号 {symbol or '未识别'} "
-                                 f"目标 {new_target}", icon="✅")
-                        st.rerun()
+                    st.session_state["tok_lookup"] = {**res, "address": addr, "chain": q_chain}
 
+        found = st.session_state.get("tok_lookup")
+        # 地址或公链改了，旧查询结果作废
+        if found and (found["address"] != q_address.strip() or found["chain"] != q_chain):
+            found = None
+            st.session_state.pop("tok_lookup", None)
+
+        if found:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("名称", found["name"] or "—")
+            m2.metric("符号", found["symbol"] or "—")
+            m3.metric("当前价格 (USD)", f"{found['price']:.10g}")
+
+            step, fmt = _price_step(found["price"])
+            with st.form("add_price_rule_form"):
+                f1, f2 = st.columns(2)
+                with f1:
+                    new_target = st.number_input(
+                        "目标价格 *", min_value=0.0, value=float(found["price"]),
+                        step=step, format=fmt,
+                        key=f"tok_target_{found['address']}_{found['chain']}")
+                    new_direction = st.radio(
+                        "触发条件", options=["gte", "lte"],
+                        format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
+                        horizontal=True, key="token_direction")
+                with f2:
+                    new_symbol = st.text_input("显示名称", value=found["symbol"] or found["name"])
+                    tok_daily = st.checkbox("每天定时检查一次（不勾选则跟随轮询间隔）",
+                                            value=False, key="token_daily_check")
+                    tok_check_time = st.time_input("每日检查时刻（北京时间）", value=dtime(9, 30),
+                                                   key="token_check_time")
+                if new_target > 0 and found["price"]:
+                    pct = (new_target / found["price"] - 1) * 100
+                    st.caption(f"目标价较现价 {pct:+.2f}%")
+
+                if st.form_submit_button("✅ 添加到监控列表", type="primary"):
+                    if new_target <= 0:
+                        st.warning("⚠️ 目标价格必须大于 0")
+                    else:
+                        daily_check = tok_check_time.strftime("%H:%M") if tok_daily else None
+                        if add_rule(found["address"], found["chain"], new_symbol.strip(),
+                                    new_target, new_direction, daily_check_at=daily_check):
+                            st.session_state.pop("tok_lookup", None)
+                            st.toast(f"已添加: {new_symbol or found['address'][:10]} "
+                                     f"({CHAIN_LABELS[found['chain']]}) 目标 {new_target}", icon="✅")
+                            st.rerun()
+        else:
+            st.caption("输入地址并选择公链后点「查询」，确认名称和现价后再设置目标价。")
+
+    # ---------------- A股 / 场内 ETF ----------------
     with tab_ashare:
-        with st.form("add_ashare_rule_form", clear_on_submit=True):
-            a1, a2 = st.columns(2)
-            with a1:
-                new_code = st.text_input(
-                    "6 位代码 *",
-                    placeholder="例如: 159967",
-                    help="场内 ETF / 股票代码，如 159967、515790",
-                )
-                new_name = st.text_input("标的名称 (留空自动获取)", placeholder="留空即自动识别")
-            with a2:
-                ash_target = st.number_input(
-                    "目标价格 *",
-                    min_value=0.0,
-                    step=0.001,
-                    format="%.3f",
-                    value=0.0,
-                )
-                ash_direction = st.radio(
-                    "触发条件",
-                    options=["gte", "lte"],
-                    format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
-                    horizontal=True,
-                    key="ashare_direction",
-                )
-
-            ash_daily = st.checkbox("每天定时检查一次", value=True, key="ashare_daily_check",
-                                    help="默认每天开盘 09:30（北京时间）检查一次并判断是否报警；"
-                                         "不勾选则跟随调度轮询间隔（默认 5 分钟）")
-            ash_check_time = st.time_input(
-                "每日检查时刻（北京时间）", value=dtime(9, 30),
-                key="ashare_check_time", disabled=not ash_daily,
-            )
-
-            ash_submit = st.form_submit_button("✅ 添加规则", type="primary")
-            if ash_submit:
-                code = new_code.strip()
-                if len(code) != 6 or not code.isdigit():
-                    st.warning("⚠️ 请输入 6 位数字代码（如 159967）")
-                elif ash_target <= 0:
-                    st.warning("⚠️ 目标价格必须大于 0")
+        a1, a2 = st.columns([4, 1])
+        q_code = a1.text_input("6 位代码 *", placeholder="例如: 159967 / 515790 / 600519",
+                               key="ash_q_code")
+        a2.write("")
+        a2.write("")
+        if a2.button("🔍 查询", key="ash_q_btn", width="stretch"):
+            code = q_code.strip()
+            if len(code) != 6 or not code.isdigit():
+                st.warning("⚠️ 请输入 6 位数字代码（如 159967）")
+                st.session_state.pop("ash_lookup", None)
+            else:
+                with st.spinner("正在查询 ..."):
+                    px, name = fetch_realtime_price(code)
+                if not name:
+                    st.error("❌ 查询失败：代码不存在或行情接口不可用")
+                    st.session_state.pop("ash_lookup", None)
                 else:
-                    name = new_name.strip()
-                    if not name:
-                        with st.spinner("正在获取标的名称 ..."):
-                            _quote, fetched = fetch_realtime_price(code)
-                            name = fetched or ""
-                    daily_check = ash_check_time.strftime("%H:%M") if ash_daily else None
-                    if add_rule(code, "", name, ash_target, ash_direction, asset_type="ashare",
-                                daily_check_at=daily_check):
-                        freq = f"每天 {daily_check}" if daily_check else "跟随轮询"
-                        st.toast(f"已添加 A股规则: {code} {name or '未识别'} 目标 {ash_target}（{freq}）",
-                                 icon="✅")
-                        st.rerun()
+                    st.session_state["ash_lookup"] = {"code": code, "name": name, "price": px}
+
+        found = st.session_state.get("ash_lookup")
+        if found and found["code"] != q_code.strip():
+            found = None
+            st.session_state.pop("ash_lookup", None)
+
+        if found:
+            m1, m2 = st.columns(2)
+            m1.metric("名称", found["name"])
+            m2.metric("当前价格 (元)", "停牌 / 无报价" if found["price"] is None else f"{found['price']:.3f}")
+
+            with st.form("add_ashare_rule_form"):
+                f1, f2 = st.columns(2)
+                with f1:
+                    ash_target = st.number_input(
+                        "目标价格 *", min_value=0.0, value=float(found["price"] or 0.0),
+                        step=0.001, format="%.3f", key=f"ash_target_{found['code']}")
+                    ash_direction = st.radio(
+                        "触发条件", options=["gte", "lte"],
+                        format_func=lambda x: "📈 价格 ≥ 目标价时报警" if x == "gte" else "📉 价格 ≤ 目标价时报警",
+                        horizontal=True, key="ashare_direction")
+                with f2:
+                    ash_daily = st.checkbox("每天定时检查一次", value=True, key="ashare_daily_check",
+                                            help="默认每天开盘 09:30（北京时间）检查一次；"
+                                                 "不勾选则跟随调度轮询间隔（默认 5 分钟）")
+                    ash_check_time = st.time_input("每日检查时刻（北京时间）", value=dtime(9, 30),
+                                                   key="ashare_check_time")
+                if ash_target > 0 and found["price"]:
+                    st.caption(f"目标价较现价 {(ash_target / found['price'] - 1) * 100:+.2f}%")
+
+                if st.form_submit_button("✅ 添加到监控列表", type="primary"):
+                    if ash_target <= 0:
+                        st.warning("⚠️ 目标价格必须大于 0")
+                    else:
+                        daily_check = ash_check_time.strftime("%H:%M") if ash_daily else None
+                        if add_rule(found["code"], "", found["name"], ash_target, ash_direction,
+                                    asset_type="ashare", daily_check_at=daily_check):
+                            st.session_state.pop("ash_lookup", None)
+                            freq = f"每天 {daily_check}" if daily_check else "跟随轮询"
+                            st.toast(f"已添加: {found['code']} {found['name']} 目标 {ash_target}（{freq}）",
+                                     icon="✅")
+                            st.rerun()
+        else:
+            st.caption("输入代码后点「查询」，确认名称和现价后再设置目标价。")
 
 st.divider()
 
@@ -307,7 +361,8 @@ with st.expander("🔍 立即检查选中规则价格"):
             sym = fetched_symbol or rule["symbol"] or rule["address"]
             st.success(f"✅ {sym} 当前价格: {price}")
             # 回写最新价格与检查时间（application 层统一实现）
-            price_service.update_rule_price(check_id, price)
+            # 手动查价只更新价格，不推进 last_checked_at，避免吃掉当天的定时检查
+            price_service.update_rule_price(check_id, price, touch_checked=False)
 
 with st.expander("⚙️ 启用 / 停用 / 删除 / 检查频率", expanded=True):
     manage_sel = st.selectbox(
