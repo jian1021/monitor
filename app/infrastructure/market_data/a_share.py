@@ -13,13 +13,26 @@ QUOTE_URL = "https://qt.gtimg.cn/q={market_code}"
 
 
 def to_market_code(code: str) -> str:
-    """6 位代码补市场前缀：5/6 开头为沪市，其余（0/1/2/3）为深市。"""
+    """6 位代码补市场前缀。
+
+    沪市：5/6 开头（ETF / 股票）、11 开头（可转债 110/111/113/118）；
+    深市：0/3 开头（股票）、15/16 开头（ETF/LOF）、12 开头（可转债 123/127/128）。
+    """
     raw = str(code or "").strip()
     if raw[:2].lower() in ("sh", "sz"):
         return raw.lower()
     if len(raw) != 6 or not raw.isdigit():
         raise ValueError(f"无法识别的 A 股代码: {code!r}")
-    return ("sh" if raw[0] in "56" else "sz") + raw
+    if raw[0] in "56" or raw[:2] == "11":
+        return "sh" + raw
+    return "sz" + raw
+
+
+def is_convertible_bond(code: str) -> bool:
+    """可转债代码：沪市 110/111/113/118，深市 123/127/128。"""
+    raw = str(code or "").strip()[-6:]
+    return len(raw) == 6 and raw.isdigit() and raw[:3] in {
+        "110", "111", "113", "118", "123", "127", "128"}
 
 
 def fetch_realtime_price(code: str):

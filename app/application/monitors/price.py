@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS price_alert (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     address       TEXT NOT NULL,                 -- token: 合约地址 / ashare: 6 位代码
     chain         TEXT NOT NULL DEFAULT 'sol',   -- ashare 规则不使用
-    asset_type    TEXT NOT NULL DEFAULT 'token', -- token=链上代币 / ashare=A股・场内ETF
+    asset_type    TEXT NOT NULL DEFAULT 'token', -- token=链上代币 / ashare=A股・场内ETF / cbond=可转债
     symbol        TEXT,
     target_price  REAL NOT NULL,
     direction     TEXT NOT NULL DEFAULT 'gte',   -- gte: 价格>=目标; lte: 价格<=目标
@@ -71,6 +71,9 @@ _MIGRATIONS = (
     "ALTER TABLE price_alert ADD COLUMN daily_check_at TEXT",
 )
 CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);"
+
+# 走交易所行情（腾讯）的资产类型：A股/ETF 与可转债
+EXCHANGE_ASSET_TYPES = ("ashare", "cbond")
 
 # A 股 / 场内 ETF 新规则的默认检查频率：每天开盘 09:30（北京时间）检查一次
 ASHARE_DEFAULT_DAILY_CHECK = "09:30"
@@ -106,10 +109,10 @@ def ensure_table():
 def fetch_price(chain: str, address: str, asset_type: str = "token"):
     """拉取当前价格, 返回 (price, symbol) 或 (None, None).
 
-    asset_type='ashare' 走腾讯实时行情（A 股 / 场内 ETF）；
+    asset_type='ashare' / 'cbond' 走腾讯实时行情（A 股 / 场内 ETF / 可转债）；
     其余走 Dexscreener（链上代币，无需 API Key）。
     """
-    if asset_type == "ashare":
+    if asset_type in EXCHANGE_ASSET_TYPES:
         from app.infrastructure.market_data.a_share import fetch_realtime_price
 
         return fetch_realtime_price(address)
@@ -454,13 +457,13 @@ def run_once():
         if not due_for_daily_check(rule):
             continue
 
-        if asset_type == "ashare" and not ashare_market_open_day():
+        if asset_type in EXCHANGE_ASSET_TYPES and not ashare_market_open_day():
             # 休市日行情是上一交易日收盘价，无新信息；不检查也不推进 last_checked_at
             continue
 
-        if asset_type == "ashare":
-            # A 股 / 场内 ETF：按代码走腾讯行情，没有合约地址可校验
-            price, symbol = fetch_price("", addr, asset_type="ashare")
+        if asset_type in EXCHANGE_ASSET_TYPES:
+            # A 股 / 场内 ETF / 可转债：按代码走腾讯行情，没有合约地址可校验
+            price, symbol = fetch_price("", addr, asset_type=asset_type)
             source_label = addr
         else:
             # 跳过 0 地址(如 GMGN 分页占位)
@@ -492,12 +495,13 @@ def run_once():
                 update_rule_price(rule["id"], price)
                 continue
             direction_cn = "上涨达到" if rule["direction"] == "gte" else "下跌达到"
-            if asset_type == "ashare":
+            if asset_type in EXCHANGE_ASSET_TYPES:
+                kind_cn = "可转债" if asset_type == "cbond" else "A股/场内ETF"
                 msg = (
                     f"🚨 【价格报警】{sym} ({addr})\n"
                     f"当前价格: {price}\n"
                     f"目标价({direction_cn}): {target}\n"
-                    f"标的: {addr}（A股/场内ETF）"
+                    f"标的: {addr}（{kind_cn}）"
                 )
             else:
                 msg = (
