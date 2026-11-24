@@ -11,53 +11,38 @@ from app.infrastructure.market_data import dexpaprika_robinhood
 def render_dexpaprika_scan() -> None:
     """Render the DexPaprika Robinhood Uniswap pool scanner."""
     with st.container(border=True):
-        st.subheader("🔎 DexPaprika Robinhood Uniswap 池扫描")
-        st.caption(
-            "直接从 DexPaprika 的 Robinhood Chain 池搜索 API 获取 Uniswap V2/V3/V4 候选池，"
-            "按成交量、流动性（TVL）、交易数、代币市值（FDV）与池费率筛选。"
-        )
-        with st.form("dexpaprika_robinhood_scan_form"):
+        with st.form("dexpaprika_robinhood_scan_form", border=False):
             dex_labels = {
-                "全部 Uniswap（V2/V3/V4）": None,
+                "全部 Uniswap": None,
                 "Uniswap V2": "uniswap_v2",
                 "Uniswap V3": "uniswap_v3",
                 "Uniswap V4": "uniswap_v4",
             }
-            f1, f2, f3, f4 = st.columns([1.4, 1.2, 1.2, 1])
+            f1, f2, f3, f4, f5 = st.columns([1.3, 1.2, 1.2, 1, 1], vertical_alignment="bottom")
             selected_dex = f1.selectbox("协议", list(dex_labels))
-            scan_min_volume = f2.number_input("最低 24h 成交量 ($)", min_value=0.0,
+            scan_min_volume = f2.number_input("24h 成交量 ≥ ($)", min_value=0.0,
                                               value=1_000_000.0, step=100_000.0)
-            scan_min_liquidity = f3.number_input("最低流动性/TVL ($)", min_value=0.0,
+            scan_min_liquidity = f3.number_input("TVL ≥ ($)", min_value=0.0,
                                                  value=10_000.0, step=5_000.0)
-            scan_min_txns = f4.number_input("最低 24h 交易数", min_value=0, value=30, step=10)
-            g1, g2 = st.columns(2)
-            scan_min_fdv = g1.number_input("最低代币市值 FDV ($)", min_value=0.0,
-                                           value=100_000.0, step=50_000.0,
-                                           help="要求池中每个代币的 FDV 都达标；任一代币缺失 FDV 视为不满足。")
-            scan_min_fee_pct = g2.number_input("最低池费率 (%)", min_value=0.0,
-                                               value=0.2, step=0.05,
-                                               help="按 DexPaprika 上报的池费率过滤；V2 等未上报费率的池会被排除。")
-            risk_col1, risk_col2, risk_col3 = st.columns([1.2, 1, 1.5])
-            enable_risk_filter = risk_col1.checkbox("启用基础貔貅风险过滤", value=True)
-            min_token_sells = risk_col2.number_input("每个代币最低 24h 卖出数", min_value=0,
-                                                     value=5, step=1,
-                                                     disabled=not enable_risk_filter)
-            max_buy_sell_ratio = risk_col3.number_input("最大买/卖笔数比", min_value=1.0,
-                                                        value=20.0, step=1.0,
-                                                        disabled=not enable_risk_filter)
-            gmgn_col1, gmgn_col2 = st.columns([1.3, 1])
-            enable_gmgn_check = gmgn_col1.checkbox(
-                "使用 GMGN 检测貔貅合约", value=True,
-                help="按每个唯一代币地址查询一次 GMGN Robinhood 安全接口；查询失败或无结论标为未知。",
-            )
-            max_gmgn_checks = gmgn_col2.selectbox(
-                "GMGN 最多查询合约数", [50, 100, 200, 500], index=1,
-                disabled=not enable_gmgn_check,
-            )
-            if enable_gmgn_check:
-                st.caption("每个唯一代币地址消耗一次 GMGN 查询；超出上限的地址显示为未知并需人工复核。")
-            scan_limit = st.selectbox("最多返回池数", [100, 300, 600], index=1)
-            do_scan = st.form_submit_button("🔎 扫描符合条件的池子", type="primary")
+            scan_min_fdv = f4.number_input("FDV ≥ ($)", min_value=0.0, value=100_000.0, step=50_000.0,
+                                           help="池中每个代币的 FDV 都要达标；缺失视为不满足。")
+            do_scan = f5.form_submit_button("🔎 扫描", type="primary", width="stretch")
+
+            with st.expander("更多条件：交易数 / 费率 / 貔貅风险 / GMGN"):
+                g1, g2, g3 = st.columns(3)
+                scan_min_txns = g1.number_input("24h 交易数 ≥", min_value=0, value=30, step=10)
+                scan_min_fee_pct = g2.number_input("池费率 ≥ (%)", min_value=0.0, value=0.2, step=0.05,
+                                                   help="未上报费率的池（如 V2）会被排除。")
+                scan_limit = g3.selectbox("最多返回池数", [100, 300, 600], index=1)
+                r1, r2, r3 = st.columns(3)
+                enable_risk_filter = r1.checkbox("基础貔貅风险过滤", value=True)
+                min_token_sells = r2.number_input("每个代币 24h 卖出数 ≥", min_value=0, value=5, step=1)
+                max_buy_sell_ratio = r3.number_input("买/卖笔数比 ≤", min_value=1.0, value=20.0, step=1.0)
+                k1, k2 = st.columns([1, 2])
+                enable_gmgn_check = k1.checkbox(
+                    "GMGN 合约检测", value=True,
+                    help="每个唯一代币地址查询一次；失败或无结论标为未知，需人工复核。")
+                max_gmgn_checks = k2.selectbox("GMGN 最多查询合约数", [50, 100, 200, 500], index=1)
 
         if do_scan:
             with st.spinner("正在查询 DexPaprika Robinhood Uniswap 池数据…"):

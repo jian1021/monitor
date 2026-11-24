@@ -53,6 +53,21 @@ def update_asset_timeframe(asset_type: str, old_tf: str, new_tf: str):
         client.close()
 
 
+def set_asset_timeframe(asset_id: int, timeframe: str) -> bool:
+    """修改单个标的的时间级别。"""
+    client = get_db_client()
+    if not client:
+        return False
+    try:
+        client.execute("UPDATE asset_config SET timeframe = ? WHERE id = ?", [timeframe, int(asset_id)])
+        return True
+    except Exception as e:
+        print(f"❌ 更新时间级别失败 (id={asset_id}): {e}")
+        return False
+    finally:
+        client.close()
+
+
 def load_instruments():
     """读取启用中的标的，返回与原 config.json 同构的字典（已增加 meteora / tokens）"""
     cfg = {"crypto_okx": [], "meteora": [], "convertible_bonds": [], "etfs": [], "tokens": []}

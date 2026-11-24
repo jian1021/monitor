@@ -153,26 +153,10 @@ def render_status_bar(embedded: bool = False) -> None:
     if not embedded:
         st.title(f"🌊 {config.APP_TITLE}")
         st.caption(f"版本 {config.APP_VERSION}｜扫描 Meteora DLMM 全池并按保存的筛选条件评估、报警。")
-    c = st.columns(5)
-    c[0].metric("当前扫描类型", current)
-    c[1].metric("DLMM 已发现", f"{dlmm_found:,}")
-    c[2].metric("已处理池数", f"{processed:,}")
-    c[3].metric("API 失败", f"{failures:,}")
-    c[4].metric("最后扫描", last_scan[11:19] if len(last_scan) > 11 else last_scan)
-
-    # 覆盖范围
-    cov = []
-    for pt in config.SUPPORTED_POOL_TYPES:
-        s = status.get(pt, {})
-        avail = s.get("total_available")
-        disc = s.get("pools_discovered")
-        if avail:
-            cov.append(f"{pt}: 已发现 {disc:,} / API 报告 {avail:,}")
-        elif disc:
-            cov.append(f"{pt}: 已发现 {disc:,}")
-    if cov:
-        st.caption("实际数据覆盖范围（以 API 可访问页面为准，不等于链上全部历史/现存池）：" + "；".join(cov))
-    st.divider()
+    when = last_scan[5:16] if len(last_scan) > 11 else last_scan
+    state = f"🔄 扫描中：{current}" if running_types else "⏸️ 空闲"
+    st.markdown(f"{state} · DLMM 已发现 **{dlmm_found:,}** · 已处理 **{processed:,}** · "
+                f"API 失败 {failures:,} · 最后扫描 {when}")
 
 
 # ===========================================================================
@@ -184,28 +168,19 @@ def page_scan() -> None:
     scanner = get_scanner()
     db = get_db()
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        types = st.multiselect("扫描池类型", config.SUPPORTED_POOL_TYPES,
-                               default=list(config.SUPPORTED_POOL_TYPES))
-    with col2:
-        max_pages = st.number_input("最多扫描页数（0=不限，全量）", min_value=0, value=0, step=10)
-    with col3:
-        resume = st.checkbox("断点续扫", value=True, help="从上次中断的页继续")
-    with col4:
-        st.caption("后台扫描需保持 `python main.py` 运行。")
-
-    b1, b2, b3 = st.columns(3)
-    with b1:
-        start = st.button("▶️ 开始扫描", type="primary", width="stretch",
-                          disabled=scanner.is_running())
-    with b2:
-        stop = st.button("⏹ 停止", width="stretch", disabled=not scanner.is_running())
-    with b3:
-        if st.button("🔄 刷新数据缓存", width="stretch"):
-            st.session_state.refresh_counter = st.session_state.get("refresh_counter", 0) + 1
-            st.cache_data.clear()
-            st.rerun()
+    c_types, c_pages, c_resume, c_start, c_stop, c_ref = st.columns(
+        [2.2, 1.3, 0.9, 1, 0.8, 0.8], vertical_alignment="bottom")
+    types = c_types.multiselect("池类型", config.SUPPORTED_POOL_TYPES,
+                                default=list(config.SUPPORTED_POOL_TYPES))
+    max_pages = c_pages.number_input("最多页数（0=全量）", min_value=0, value=0, step=10)
+    resume = c_resume.checkbox("断点续扫", value=True, help="从上次中断的页继续")
+    start = c_start.button("▶️ 开始扫描", type="primary", width="stretch",
+                           disabled=scanner.is_running())
+    stop = c_stop.button("⏹ 停止", width="stretch", disabled=not scanner.is_running())
+    if c_ref.button("🔄", width="stretch", help="刷新数据缓存"):
+        st.session_state.refresh_counter = st.session_state.get("refresh_counter", 0) + 1
+        st.cache_data.clear()
+        st.rerun()
 
     if stop:
         scanner.request_stop()
@@ -249,27 +224,24 @@ def page_scan() -> None:
 
         _progress_fragment()
     else:
-        st.info("未在扫描。点击“开始扫描”以获取全池数据。首次运行会遍历全部可访问页面，需要一定时间。")
+        st.caption("未在扫描。首次全量扫描需要一定时间；后台扫描完成后会按筛选条件自动评估并发飞书。")
 
-    st.divider()
-    st.subheader("扫描状态（持久化）")
     status = db.get_scan_status()
-    if status:
-        st.dataframe(pd.DataFrame(status), width="stretch", hide_index=True)
-    else:
-        st.caption("尚无扫描记录。")
-
-    st.caption("后台扫描完整结束后，会按已保存的筛选条件自动评估结果并发送飞书报警。")
+    with st.expander(f"扫描记录（{len(status)}）"):
+        if status:
+            st.dataframe(pd.DataFrame(status), width="stretch", hide_index=True)
+        else:
+            st.caption("尚无扫描记录。")
 
 
 # ===========================================================================
 # 页面 2：筛选条件
 # ===========================================================================
 def page_filters() -> None:
-    st.caption("以下为默认值，可随时修改并保存。市值筛选为硬性条件，默认在展示前执行。")
     f = get_filters()
 
     with st.form("filter_form"):
+        st.subheader("池子指标")
         c1, c2 = st.columns(2)
         with c1:
             min_mcap = st.number_input("代币市值下限（USD，严格大于）", min_value=0.0,
@@ -298,42 +270,33 @@ def page_filters() -> None:
                                           value=float(f.get("max_fee_rate_pct", 0.0)), format="%.3f")
             st.caption("0 表示不限制")
         
-        # 持仓筛选条件
-        st.subheader("代币持仓筛选")
-        st.caption("数据来自 Meteora 官方池发现接口（随扫描一并获取）；数据缺失的指标会标注"
-                   "「数据不足（已跳过）」而不误杀。")
+        st.subheader("代币风险")
         c5, c6, c7 = st.columns(3)
         with c5:
             min_holders = st.number_input("代币X持仓地址数下限", min_value=0, step=1000,
                                          value=int(f.get("min_token_x_holders", 10000)))
-            st.caption("默认 10K")
         with c6:
             max_top10 = st.number_input("前10持仓占比上限（%）", min_value=0.0, max_value=100.0, step=1.0,
                                         value=float(f.get("max_token_x_top10_holders", 30.0)), format="%.1f")
-            st.caption("默认 30%")
         with c7:
             max_dev = st.number_input("开发方持仓占比上限（%）", min_value=0.0, max_value=100.0, step=1.0,
                                      value=float(f.get("max_token_x_dev_holders", 0.0)), format="%.1f")
-            st.caption("默认 0%（按 2 位小数精度比较，接近 0 的真实值不会被误判）")
         
         c8, c9 = st.columns(2)
         with c8:
             freeze_auth = st.selectbox("冻结授权", ["any", "yes", "no"], 
                                       index=0 if f.get("token_x_freeze_auth", "no") == "any" else 
                                             (1 if f.get("token_x_freeze_auth", "no") == "yes" else 2))
-            st.caption("默认 no")
         with c9:
             mint_auth = st.selectbox("铸币授权", ["any", "yes", "no"], 
                                     index=0 if f.get("token_x_mint_auth", "no") == "any" else 
                                           (1 if f.get("token_x_mint_auth", "no") == "yes" else 2))
-            st.caption("默认 no")
         
         # 开仓人数筛选
         min_open_positions = st.number_input(
             "开仓人数下限", min_value=0, step=10,
             value=int(f.get("min_open_positions", 100)),
             help="数据来自 Meteora 官方池发现接口（open_positions），随扫描一并获取。")
-        st.caption("数据缺失时标记为「数据不足（已跳过）」，不参与淘汰。")
         
         pool_types = st.multiselect("池子类型", config.SUPPORTED_POOL_TYPES,
                                     default=[pt for pt in f.get("pool_types", config.SUPPORTED_POOL_TYPES)
@@ -342,7 +305,8 @@ def page_filters() -> None:
                                        value=bool(f.get("require_complete", True)))
         show_failed = st.checkbox("显示未通过筛选的池子（排查用）",
                                   value=bool(f.get("show_failed", False)))
-        submitted = st.form_submit_button("保存筛选条件", type="primary")
+        st.caption("数据缺失的指标标记为「数据不足（已跳过）」，不参与淘汰。")
+        submitted = st.form_submit_button("💾 保存筛选条件", type="primary")
 
     if submitted:
         f.update({
@@ -366,24 +330,23 @@ def page_filters() -> None:
             "show_failed": show_failed,
         })
         get_db().set_setting("filters", f)
-        st.success("已保存。")
+        st.toast("筛选条件已保存", icon="💾")
 
-    st.divider()
-    st.subheader("评分权重（手续费机会观察评分）")
-    st.caption(formula_text(get_weights()))
     w = get_weights()
-    with st.form("weight_form"):
-        cols = st.columns(5)
+    with st.expander("评分权重（手续费机会观察评分）"):
+        st.caption(formula_text(w))
+        with st.form("weight_form"):
+            cols = st.columns(5)
         
-        keys = list(DEFAULT_WEIGHTS.keys())
-        vals = {}
-        for col, k in zip(cols, keys):
-            vals[k] = col.number_input(COMPONENT_LABELS[k], min_value=0.0, max_value=100.0,
-                                       value=float(w[k]), step=1.0)
-        if st.form_submit_button("保存权重"):
-            get_weights().update(vals)
-            get_db().set_setting("weights", get_weights())
-            st.success("已保存权重。")
+            keys = list(DEFAULT_WEIGHTS.keys())
+            vals = {}
+            for col, k in zip(cols, keys):
+                vals[k] = col.number_input(COMPONENT_LABELS[k], min_value=0.0, max_value=100.0,
+                                           value=float(w[k]), step=1.0)
+            if st.form_submit_button("保存权重"):
+                get_weights().update(vals)
+                get_db().set_setting("weights", get_weights())
+                st.toast("权重已保存", icon="💾")
 
 
 # ===========================================================================
@@ -448,21 +411,21 @@ def page_results() -> None:
         st.info("暂无符合条件的池子。请先执行“全池扫描”，或放宽筛选条件。")
         return
 
-    st.caption(f"共 {len(df):,} 条（{'含未通过' if f.get('show_failed') else '仅通过'}）。"
-               f"市值缺失（默认不通过）需在排查模式查看。")
-    st.caption("数据来源：池行情与代币指标（持仓数 / 前10持仓占比 / 开发方持仓占比 / 冻结与铸币授权 / "
-               "开仓人数）均来自 Meteora 官方池发现接口，随扫描一并获取；缺失字段标记为「数据不足（已跳过）」。")
-    st.caption("行情为上次扫描时的快照。可勾选通过筛选的结果，并在下方导入 Meme 超卖超买监控列表。")
-
-    sort_col = st.selectbox("排序字段", ["评分", "代币X市值", "代币Y市值", "24h成交量", "TVL",
-                                          "24h手续费收入", "24hFeesTVL%"])
-    ascending = st.checkbox("升序", value=False)
+    r_info, r_sort, r_asc, r_size, r_page, r_csv = st.columns(
+        [2.2, 1.4, 0.6, 0.8, 0.8, 0.9], vertical_alignment="bottom")
+    r_info.markdown(f"**{len(df):,}** 条（{'含未通过' if f.get('show_failed') else '仅通过'}）"
+                    " · 行情为上次扫描快照")
+    sort_col = r_sort.selectbox("排序", ["评分", "代币X市值", "代币Y市值", "24h成交量", "TVL",
+                                         "24h手续费收入", "24hFeesTVL%"])
+    ascending = r_asc.checkbox("升序", value=False)
     df_sorted = df.sort_values(by=sort_col, ascending=ascending, na_position="last")
-
-    page_size = st.selectbox("每页行数", [25, 50, 100, 200], index=1)
+    page_size = r_size.selectbox("每页", [25, 50, 100, 200], index=1)
     total_pages = max(1, (len(df_sorted) + page_size - 1) // page_size)
-    page = st.number_input("页码", min_value=1, max_value=total_pages, value=1)
+    page = r_page.number_input(f"页码 /{total_pages}", min_value=1, max_value=total_pages, value=1)
     start = (page - 1) * page_size
+    r_csv.download_button("⬇️ CSV", data=df_sorted.to_csv(index=False).encode("utf-8-sig"),
+                          file_name=f"meteora_filtered_{now_str().replace(':', '')}.csv",
+                          mime="text/csv", width="stretch")
     view = df_sorted.iloc[start:start + page_size].reset_index(drop=True)
 
     event = st.dataframe(
@@ -485,10 +448,6 @@ def page_results() -> None:
     )
 
     selected = event.selection.rows if event and event.selection else []
-    csv = df_sorted.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("⬇️ 导出 CSV", data=csv,
-                       file_name=f"meteora_filtered_{now_str().replace(':', '')}.csv",
-                       mime="text/csv")
 
     selected_pools = {}
     for idx in selected:
@@ -502,23 +461,21 @@ def page_results() -> None:
                  f"{address[:10]}…")
         selected_pools[label] = (address, f"{row.get('代币X') or '?'}-{row.get('代币Y') or '?'}")
 
-    with st.container(border=True):
-        st.subheader("➕ 导入到 Meme 超卖超买监控列表")
-        st.caption("先在上方结果表勾选通过筛选的池子，再选择要导入的池。")
-        labels = st.multiselect(
-            "选择导入池子", options=list(selected_pools),
-            key="scanner_meme_pools_to_import", disabled=not selected_pools,
-        )
-        if not selected_pools:
-            st.info("请先勾选一条或多条通过筛选的结果。")
-        if st.button("添加到 Meme 超卖超买监控", type="primary", disabled=not labels):
-            from app.infrastructure.db.meme_watchlist import add_meme_pools
+    if not selected_pools:
+        st.caption("勾选表格左侧的行，可把通过筛选的池子导入「批量 Meme 超卖超买」监控。")
+        return
+    i_l, i_r = st.columns([5, 1], vertical_alignment="bottom")
+    labels = i_l.multiselect(f"导入到 Meme 超卖超买监控（已勾选 {len(selected_pools)}）",
+                             options=list(selected_pools), default=list(selected_pools),
+                             key="scanner_meme_pools_to_import")
+    if i_r.button("➕ 导入", type="primary", width="stretch", disabled=not labels):
+        from app.infrastructure.db.meme_watchlist import add_meme_pools
 
-            added = add_meme_pools([selected_pools[label] for label in labels])
-            if added:
-                st.success(f"已导入 {added} 个池。可在“全链扫描与链上代币 → 批量 Meme 超卖超买”中查看。")
-            else:
-                st.error("导入失败，请检查数据库配置。")
+        added = add_meme_pools([selected_pools[label] for label in labels])
+        if added:
+            st.toast(f"已导入 {added} 个池子", icon="✅")
+        else:
+            st.error("导入失败，请检查数据库配置。")
 
 
 # ===========================================================================
@@ -598,39 +555,30 @@ def render_price_range(embedded: bool = False) -> None:
     """
     if not embedded:
         st.title("📐 价格区间计算")
-    st.caption("输入 **池地址**（DEX Paprika **池级 K 线**）或 **代币**（CoinGecko 代币 K 线），"
-               "实时获取美元价格与 K 线，用 **ta 库**计算 ATR，按倍数（默认 1.5）计算上下价格区间：")
-    st.markdown("**上价 = 当前价格 + 倍数 × ATR**　｜　**下价 = 当前价格 − 倍数 × ATR**")
+    st.caption("上价 = 现价 + 倍数 × ATR，下价 = 现价 − 倍数 × ATR。")
 
-    source = st.radio("数据源", ["池地址 · DEX Paprika（池级 K 线）", "代币 · CoinGecko（代币 K 线）"],
-                      horizontal=True)
-    is_pool = source.startswith("池地址")
+    with st.form("price_range_form", border=False):
+        c_src, c_sym, c_tf, c_n, c_k, c_go = st.columns([1.1, 3, 0.9, 0.8, 0.8, 0.8],
+                                                       vertical_alignment="bottom")
+        source = c_src.selectbox("数据源", ["池地址", "代币"],
+                                 help="池地址：DEX Paprika 池级 K 线；代币：CoinGecko 代币 K 线")
+        is_pool = source == "池地址"
+        symbol = c_sym.text_input("池地址 / 代币（符号、名称或 ID）", value="",
+                                  placeholder="Solana 池地址，或 SOL / solana / Bitcoin")
+        tfs = [tf for tf in ("15m", "30m", "1h", "1d") if tf in POOL_TIMEFRAMES or tf in TIMEFRAMES]
+        timeframe = c_tf.selectbox("ATR 周期", tfs,
+                                   index=tfs.index(DEFAULT_POOL_TIMEFRAME) if DEFAULT_POOL_TIMEFRAME in tfs else 0,
+                                   help="池地址：15m/30m/1h（未配 Key 仅 1h）；代币：30m/1h/1d")
+        period = c_n.number_input("样本数", min_value=1, max_value=60, value=DEFAULT_ATR_PERIOD, step=1)
+        multiplier = c_k.number_input("倍数", min_value=0.1, max_value=50.0,
+                                      value=float(DEFAULT_MULTIPLIER), step=0.1)
+        go = c_go.form_submit_button("计算", type="primary", width="stretch")
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        if is_pool:
-            symbol = st.text_input("池地址", value="",
-                                   placeholder="Solana 池地址，例：2YaGc2iYZt44B5zn5Tvk59APbAn51xGekzNQAPF2PGn1")
-        else:
-            symbol = st.text_input("代币（符号 / 名称 / ID）", value="", placeholder="例：SOL 或 solana 或 Bitcoin")
-    with col2:
-        if is_pool:
-            timeframe = st.selectbox("ATR 周期", POOL_TIMEFRAMES,
-                                     index=POOL_TIMEFRAMES.index(DEFAULT_POOL_TIMEFRAME),
-                                     help="DEX Paprika **免费注册 Key** 支持 15m/30m/1h（最近 7 天）；"
-                                          "未配置 Key 时仅 1h 可用（最近 24 小时）。")
-        else:
-            timeframe = st.selectbox("ATR 周期", TIMEFRAMES, index=TIMEFRAMES.index(DEFAULT_TIMEFRAME),
-                                     help="CoinGecko 官方不提供 15 分钟粒度：1d 由 4 小时 K 线聚合，1h 由 30 分钟"
-                                          "K 线聚合，30m 为官方原生最细粒度。")
-    with col3:
-        period = st.number_input("ATR 样本数", min_value=1, max_value=60, value=DEFAULT_ATR_PERIOD, step=1,
-                                 help="ta 库 AverageTrueRange 的窗口；超过可用 K 线数时自动使用最大可用样本数。")
-    with col4:
-        multiplier = st.number_input("倍数", min_value=0.1, max_value=50.0, value=float(DEFAULT_MULTIPLIER),
-                                     step=0.1, help="上价 = 当前价格 + 倍数×ATR；下价 = 当前价格 − 倍数×ATR。")
-
-    if st.button("计算", type="primary", disabled=not symbol.strip()):
+    if go and symbol.strip():
+        allowed = POOL_TIMEFRAMES if is_pool else TIMEFRAMES
+        if timeframe not in allowed:
+            st.warning(f"{source}不支持 {timeframe}，可选：{'、'.join(allowed)}")
+            return
         period_i = int(period)
         if is_pool:
             client = get_dexpaprika()
@@ -724,14 +672,11 @@ def render_page(embedded: bool = False) -> None:
     embedded=True（内嵌进「全链扫描与链上代币」工作区）时由外层 tab 提供标题，
     本页不再渲染大标题，避免同屏出现两个标题。
     """
-    if embedded:
-        st.caption("扫描 Meteora DLMM 全池、按保存的筛选条件评估并报警；下方按「扫描 → 筛选 → 结果」的顺序排列。")
     render_status_bar(embedded=embedded)
     tabs = st.tabs(list(PAGES), on_change="rerun", key="meteora_scanner_tabs")
     for (label, render_tab), tab in zip(PAGES.items(), tabs):
         if tab.open:
             with tab:
-                st.caption(PAGE_DESCRIPTIONS[label])
                 render_tab()
 
 

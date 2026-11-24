@@ -8,6 +8,14 @@ from app.infrastructure.db.module_settings import get_module_settings, update_mo
 from app.infrastructure.db.module_webhooks import get_module_webhook, set_module_webhook
 
 
+def _fmt_interval(minutes: int) -> str:
+    if minutes % 1440 == 0:
+        return f"{minutes // 1440} 天"
+    if minutes % 60 == 0:
+        return f"{minutes // 60} 小时"
+    return f"{minutes} 分钟"
+
+
 def render_monitor_controls(module_key: str, label: str, *,
                             webhook_editable: bool = False) -> None:
     """Render the enable switch, polling interval and (optional) dedicated webhook."""
@@ -16,14 +24,14 @@ def render_monitor_controls(module_key: str, label: str, *,
     enabled = bool(settings.get(module_key, True))
     interval = int(intervals.get(module_key, DEFAULT_INTERVALS.get(module_key, 60)))
 
-    with st.container(border=True):
-        st.subheader(f"⚙️ {label}后台监控")
-        left, right = st.columns([1, 2])
+    state = f"🟢 已启用 · 每 {_fmt_interval(interval)}" if enabled else "⏸️ 已停用"
+    with st.expander(f"⚙️ 后台监控：{state}", expanded=False):
+        left, right = st.columns([1, 2], vertical_alignment="bottom")
         new_enabled = left.toggle(
             "启用后台监控", value=enabled, key=f"monitor_enabled_{module_key}"
         )
         new_interval = right.number_input(
-            "后台执行间隔（分钟）", min_value=1, max_value=10080,
+            "执行间隔（分钟）", min_value=1, max_value=10080,
             value=interval, step=5, key=f"monitor_interval_{module_key}"
         )
 
@@ -68,7 +76,5 @@ def render_monitor_controls(module_key: str, label: str, *,
                 f"当前生效：{current_hook or FEISHU_WEBHOOK or '未配置（仅打印日志）'}"
             )
 
-        st.caption(
-            "设置仅控制常驻后台进程 `python main.py`；页面上的手动查询或扫描不受影响。"
-        )
+        st.caption(f"{label}：仅控制常驻进程 `python main.py`，不影响页面上的手动操作。")
 

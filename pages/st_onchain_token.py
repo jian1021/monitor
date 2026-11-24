@@ -1,158 +1,168 @@
 # -*- coding: utf-8 -*-
-"""pages/st_onchain_token.py — 链上代币监控标的配置"""
+"""pages/st_onchain_token.py — 链上代币 RSI 监控标的
+
+一行搜索添加；一张可编辑表格完成启停 / 改时间级别 / 删除，统一保存。
+"""
 import os
 import sys
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pandas as pd
 import streamlit as st
-from app.interfaces.monitor_controls import render_monitor_controls
 
-from app.interfaces.asset_config import ASSET_TYPE_MAP
+from app.infrastructure.db.assets import set_asset_timeframe
 from app.interfaces.asset_config import (
-    add_new_asset, batch_update_status_by_type, delete_asset,
-    ensure_asset_schema, fetch_all_assets, update_asset_status,
+    CHAIN_LABELS, TOKEN_CHAINS, add_new_asset, delete_asset, ensure_asset_schema,
+    fetch_all_assets, format_candidate, token_candidates, update_asset_status,
 )
-from app.interfaces.asset_config import (
-    stale_module_names, token_candidates, format_candidate,
-    TOKEN_CHAINS, CHAIN_LABELS,
-)
-from app.infrastructure.db.client import get_db_client
-from app.interfaces.asset_grid import render_asset_grid
+from app.interfaces.monitor_controls import render_monitor_controls
 from app.interfaces.timefmt import to_local_display
 
 TOKEN_TIMEFRAMES = {"1d": "日线", "4h": "4H", "1h": "1H"}
-TIMEFRAME_LABELS = {v: k for k, v in TOKEN_TIMEFRAMES.items()}
-
-def render_page(embedded: bool = False) -> None:
-    FOCUS_TYPES = ["token"]
-
-    if not embedded:
-        st.title("🔗 链上代币 · 标的管理")
-    st.caption("🔎 当前页面专注 **链上代币** 的添加与管理（按公链搜索或直接粘合约地址）；其他资产类别请前往对应页面配置。")
-    render_monitor_controls("onchain_token", "链上代币")
-    st.caption(
-        "📐 告警口径：RSI(3) 跌破 10 报「超卖」；从 10 下方回升上穿 10 再报一次「反转突破」"
-        "——同一段回升只报一次，不重复轰炸。"
-    )
-
-    _missing = stale_module_names()
-    if _missing:
-        st.warning("⚠️ 检测到当前运行的模块是旧版（缺失：" + "、".join(_missing) +
-                   "），链上代币等新功能不可用。请在 Streamlit Cloud 上重启 / 重新部署后再试。")
+TF_BY_LABEL = {v: k for k, v in TOKEN_TIMEFRAMES.items()}
 
 
-    def render_token_adder():
-        col_chain, col_query = st.columns([1.2, 3])
-        tok_chain = col_chain.selectbox(
-            "所属公链", options=TOKEN_CHAINS,
-            format_func=lambda x: CHAIN_LABELS.get(x, x), key="tok_chain")
-        tok_timeframe = col_chain.selectbox(
-            "时间级别", options=list(TOKEN_TIMEFRAMES.keys()),
-            format_func=lambda x: TOKEN_TIMEFRAMES[x], key="tok_tf")
-        tok_query = col_query.text_input(
-            "代币名称或合约地址", key="tok_query",
-            placeholder="例如 PENGU，或直接粘合约地址")
+def _render_adder() -> None:
+    with st.form("tok_search_form", border=False):
+        c_chain, c_tf, c_q, c_btn = st.columns([1.3, 0.8, 3.5, 0.8], vertical_alignment="bottom")
+        chain = c_chain.selectbox("公链", TOKEN_CHAINS, format_func=lambda x: CHAIN_LABELS.get(x, x),
+                                  key="tok_chain")
+        tf = c_tf.selectbox("级别", list(TOKEN_TIMEFRAMES), format_func=TOKEN_TIMEFRAMES.get,
+                            key="tok_tf")
+        query = c_q.text_input("代币名称或合约地址", placeholder="例如 PENGU，或粘贴合约地址",
+                               key="tok_query")
+        go = c_btn.form_submit_button("🔍 搜索", type="primary", width="stretch")
 
-        if st.button("🔍 解析", key="tok_resolve"):
-            if not tok_query.strip():
-                st.warning("⚠️ 请先填写名称或地址")
-            else:
-                with st.spinner("正在搜索 ..."):
-                    st.session_state["tok_candidates"] = token_candidates(tok_chain, tok_query)
+    if go:
+        if not query.strip():
+            st.warning("请先填写名称或地址")
+        else:
+            with st.spinner("搜索中 ..."):
+                st.session_state["tok_candidates"] = {
+                    "chain": chain, "tf": tf, "items": token_candidates(chain, query)}
 
-        candidates = st.session_state.get("tok_candidates") or []
-        if not candidates:
-            return
-        if not any(c.get("found", True) for c in candidates):
-            st.warning("⚠️ 没查到这个地址的信息，请确认所属公链与合约地址是否正确"
-                       "（仍可继续添加，但价格监控可能取不到数据）。")
-        labels = {c["address"]: format_candidate(c) for c in candidates}
-        picked = st.selectbox("选择要监控的代币", options=list(labels),
-                              format_func=lambda a: labels[a], key="tok_pick")
-        if st.button("✅ 添加该代币", key="tok_add", type="primary"):
-            chosen = next(c for c in candidates if c["address"] == picked)
-            final_name = chosen.get("symbol") or chosen.get("name") or picked[:10]
-            if add_new_asset("token", chosen["address"], final_name, tok_chain, tok_timeframe):
-                st.session_state.pop("tok_candidates", None)
-                st.toast(f"已添加: {final_name}（{picked[:10]}...）", icon="✅")
-                st.rerun()
-            else:
-                st.warning("该代币地址已在监控列表中，未重复添加。")
+    found = st.session_state.get("tok_candidates")
+    if not found:
+        return
+    items = found["items"] or []
+    if not items:
+        st.warning("没有搜到结果，请换个关键词或核对公链。")
+        return
+    if not any(c.get("found", True) for c in items):
+        st.warning("没查到该地址的行情，请核对公链与地址（仍可添加，但可能取不到数据）。")
+
+    labels = {c["address"]: format_candidate(c) for c in items}
+    c_pick, c_add = st.columns([5, 1], vertical_alignment="bottom")
+    picked = c_pick.selectbox(f"搜索结果（{len(items)}）", list(labels), format_func=labels.get,
+                              key="tok_pick")
+    if c_add.button("➕ 添加", type="primary", width="stretch", key="tok_add"):
+        chosen = next(c for c in items if c["address"] == picked)
+        name = chosen.get("symbol") or chosen.get("name") or picked[:10]
+        if add_new_asset("token", chosen["address"], name, found["chain"], found["tf"]):
+            st.session_state.pop("tok_candidates", None)
+            st.toast(f"已添加 {name}（{CHAIN_LABELS.get(found['chain'])} · "
+                     f"{TOKEN_TIMEFRAMES[found['tf']]}）", icon="✅")
+            st.rerun()
+        else:
+            st.warning("该代币已在监控列表中。")
 
 
-    render_token_adder()
-    st.divider()
-
+def _render_table() -> None:
     ensure_asset_schema()
     df = fetch_all_assets()
-    focus_df = df[df["asset_type"].isin(FOCUS_TYPES)] if not df.empty else df
+    df = df[df["asset_type"] == "token"] if not df.empty else df
+    if df.empty:
+        st.info("还没有链上代币，在上方搜索后添加。")
+        return
 
-    for type_key in FOCUS_TYPES:
-        sub_df = focus_df[focus_df["asset_type"] == type_key]
-        type_label = ASSET_TYPE_MAP.get(type_key, type_key)
+    st.subheader(f"监控列表 {int(df['enabled'].sum())}/{len(df)} 启用 · "
+                 f"{int(df['alarm_active'].sum())} 报警中")
 
-        st.subheader(f"{type_label} 列表（{len(sub_df)} 条）")
+    # 链上代币跨多链，必须显示「所属链」，否则分不清同名跨链代币；标签统一取自 CHAIN_LABELS
+    view = pd.DataFrame({
+        "ID": df["id"].astype(int),
+        "启用": df["enabled"].astype(bool),
+        "名称": df["name"],
+        "所属链": df["chain"].apply(lambda c: CHAIN_LABELS.get(c, c or "sol")),
+        "时间级别": df["timeframe"].map(TOKEN_TIMEFRAMES).fillna("日线"),
+        "报警中": df["alarm_active"].map({True: "🔔", False: ""}),
+        "最近报警": df["last_alert_at"].apply(to_local_display),
+        "合约地址": df["code"],
+        "删除": False,
+    })
+    edited = st.data_editor(
+        view, key="token_editor", hide_index=True, width="stretch",
+        disabled=["名称", "所属链", "报警中", "最近报警", "合约地址"],
+        column_config={
+            "ID": None,
+            "启用": st.column_config.CheckboxColumn(width="small"),
+            "时间级别": st.column_config.SelectboxColumn(options=list(TOKEN_TIMEFRAMES.values()),
+                                                     required=True, width="small"),
+            "报警中": st.column_config.TextColumn(width="small"),
+            "删除": st.column_config.CheckboxColumn(width="small"),
+        },
+    )
 
-        if sub_df.empty:
-            st.caption(f"该类别 [{type_label}] 下暂无标的资产。")
+    orig, new = view.set_index("ID"), edited.set_index("ID")
+    changes = []
+    for rid in new.index:
+        a, b = orig.loc[rid], new.loc[rid]
+        if b["删除"]:
+            changes.append(("delete", rid, None))
             continue
+        if bool(a["启用"]) != bool(b["启用"]):
+            changes.append(("enabled", rid, bool(b["启用"])))
+        if a["时间级别"] != b["时间级别"]:
+            changes.append(("tf", rid, TF_BY_LABEL[b["时间级别"]]))
 
-        col_all, col_none = st.columns(2)
-        if col_all.button("✅ 全选启用", key=f"enable_all_{type_key}"):
-            batch_update_status_by_type(type_key, True)
+    tools_l, tools_r = st.columns([4, 1], vertical_alignment="center")
+    with tools_l.popover("批量操作"):
+        b1, b2 = st.columns(2)
+        if b1.button("全部启用", width="stretch"):
+            for rid in orig.index:
+                update_asset_status(int(rid), True)
             st.rerun()
-        if col_none.button("⏸️ 全部停用", key=f"disable_all_{type_key}"):
-            batch_update_status_by_type(type_key, False)
+        if b2.button("全部停用", width="stretch"):
+            for rid in orig.index:
+                update_asset_status(int(rid), False)
+            st.rerun()
+        tf_all = st.segmented_control("全部改为", list(TOKEN_TIMEFRAMES), format_func=TOKEN_TIMEFRAMES.get)
+        if tf_all and st.button(f"应用到全部（{TOKEN_TIMEFRAMES[tf_all]}）", width="stretch"):
+            for rid in orig.index:
+                set_asset_timeframe(int(rid), tf_all)
             st.rerun()
 
-        col_tf1, col_tf2 = st.columns(2)
-        with col_tf1:
-            if st.button("🔄 批量切换为日线", key=f"batch_daily_{type_key}"):
-                client = get_db_client()
-                if client:
-                    try:
-                        client.execute(
-                            "UPDATE asset_config SET timeframe = '1d' WHERE asset_type = 'token' AND timeframe != '1d'"
-                        )
-                        st.toast("已将所有链上代币时间级别更新为日线", icon="✅")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 更新失败: {e}")
-                    finally:
-                        client.close()
-        with col_tf2:
-            if st.button("🔄 批量切换为1H", key=f"batch_1h_{type_key}"):
-                client = get_db_client()
-                if client:
-                    try:
-                        client.execute(
-                            "UPDATE asset_config SET timeframe = '1h' WHERE asset_type = 'token' AND timeframe != '1h'"
-                        )
-                        st.toast("已将所有链上代币时间级别更新为1H", icon="✅")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 更新失败: {e}")
-                    finally:
-                        client.close()
+    if changes:
+        n_del = sum(1 for c in changes if c[0] == "delete")
+        tools_l.info(f"{len(changes)} 项未保存" + (f"，含删除 {n_del} 条（不可恢复）" if n_del else ""))
+        if tools_r.button("💾 保存修改", type="primary", width="stretch"):
+            failed = []
+            for kind, rid, val in changes:
+                rid = int(rid)
+                ok = (delete_asset(rid) if kind == "delete" else
+                      update_asset_status(rid, val) if kind == "enabled" else
+                      set_asset_timeframe(rid, val))
+                if not ok:
+                    failed.append(str(rid))
+            st.session_state.pop("token_editor", None)
+            if failed:
+                st.error("以下 ID 保存失败：" + "、".join(failed))
+            else:
+                st.toast("已保存", icon="💾")
+                st.rerun()
 
-        # 链上代币是唯一跨多条链的类别，必须显示所属链，否则无法区分同名的跨链代币
-        # （如 sol 地址与 base/eth 的 0x 地址）。标签统一取自 CHAIN_LABELS。
-        labeled = sub_df.copy()
-        labeled["chain_label"] = labeled["chain"].apply(lambda c: CHAIN_LABELS.get(c, c or "sol"))
-        table = labeled[["name", "chain_label", "code", "timeframe", "id",
-                         "enabled", "alarm_active", "last_alert_at"]].rename(columns={
-            "name": "名称", "chain_label": "所属链", "code": "合约地址",
-            "timeframe": "时间级别", "id": "ID",
-            "enabled": "启用", "alarm_active": "报警中", "last_alert_at": "最近报警时间",
-        })
-        # 库里存 UTC，直接展示会比北京时间慢 8 小时
-        table["最近报警时间"] = table["最近报警时间"].apply(to_local_display)
-        render_asset_grid(table, key=f"token_table_{type_key}",
-                          delete_asset=delete_asset,
-                          update_asset_status=update_asset_status)
+
+def render_page(embedded: bool = False) -> None:
+    if not embedded:
+        st.title("🔗 链上代币")
+    st.caption("RSI(3) 跌破 10 报「超卖」，回升上穿 10 再报一次「反转突破」。")
+    render_monitor_controls("onchain_token", "链上代币")
+    _render_adder()
+    _render_table()
+
 
 if __name__ == "__main__":
-    st.set_page_config(page_title="链上代币 · 标的管理", page_icon="🔗", layout="wide")
+    st.set_page_config(page_title="链上代币", page_icon="🔗", layout="wide")
     render_page()

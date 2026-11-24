@@ -8,8 +8,7 @@ import streamlit as st
 
 st.set_page_config(page_title="全链扫描与链上代币", page_icon="🌐", layout="wide")
 st.title("🌐 全链扫描与链上代币")
-st.caption("链上代币管理、Meme 批量监控、Meteora / Robinhood 全池扫描与价格区间计算，"
-           "统一在本页的标签页内完成；标签名即当前功能的标题。")
+st.caption("链上代币 RSI、Meme 批量监控、Meteora / Robinhood 全池扫描与价格区间计算。")
 
 # 标签名与各自页面的标题保持一致（emoji + 名称）
 token_tab, meme_tab, meteora_tab, robinhood_tab, price_range_tab = st.tabs([
