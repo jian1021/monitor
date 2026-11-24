@@ -73,6 +73,34 @@ def test_naive_now_treated_as_beijing():
         _rule("09:30"), now=datetime(2026, 11, 23, 8, 0)) is False
 
 
+# ================= add_rule 签名与写入 =================
+class _FakeClient:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, sql, params=None):
+        self.calls.append((sql, params))
+        return type("R", (), {"rows": []})()
+
+    def close(self):
+        pass
+
+
+def test_add_rule_accepts_daily_check_at(monkeypatch):
+    """回归：add_rule 必须接受 daily_check_at 参数并写入（签名漏改会 TypeError）。"""
+    fake = _FakeClient()
+    monkeypatch.setattr(price, "get_db_client", lambda: fake)
+
+    assert price.add_rule("515030", "", "515030", 0.91, "gte",
+                          asset_type="ashare", daily_check_at="9:30") is True
+    sql, params = fake.calls[0]
+    assert "daily_check_at" in sql
+    assert params[-2] == "09:30"  # normalize '9:30' -> '09:30'
+
+    assert price.add_rule("0x" + "a" * 40, "SOL", "TOK", 1.0, "lte") is True
+    assert fake.calls[1][1][-2] is None  # 不传时默认 None（跟随轮询）
+
+
 # ================= 表结构与列 =================
 def test_schema_has_daily_check_at():
     assert "daily_check_at" in price.CREATE_TABLE_SQL

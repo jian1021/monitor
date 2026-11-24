@@ -263,7 +263,8 @@ def load_all_rules() -> list[dict]:
 
 
 def add_rule(address: str, chain: str, symbol: str, target_price: float,
-             direction: str, asset_type: str = "token") -> bool:
+             direction: str, asset_type: str = "token",
+             daily_check_at: str | None = None) -> bool:
     """新增价格规则；参数由调用方校验后传入。
 
     asset_type='ashare' 时 address 存 6 位代码、chain 留空。
