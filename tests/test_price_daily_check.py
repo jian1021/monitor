@@ -95,10 +95,10 @@ def test_add_rule_accepts_daily_check_at(monkeypatch):
                           asset_type="ashare", daily_check_at="9:30") is True
     sql, params = fake.calls[0]
     assert "daily_check_at" in sql
-    assert params[-2] == "09:30"  # normalize '9:30' -> '09:30'
+    assert params[-1] == "09:30"  # normalize '9:30' -> '09:30'
 
     assert price.add_rule("0x" + "a" * 40, "SOL", "TOK", 1.0, "lte") is True
-    assert fake.calls[1][1][-2] is None  # 不传时默认 None（跟随轮询）
+    assert fake.calls[1][1][-1] is None  # 不传时默认 None（跟随轮询）
 
 
 # ================= 表结构与列 =================
