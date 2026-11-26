@@ -146,42 +146,24 @@ def run_streamlit():
 
     st.set_page_config(page_title="池子价格模拟器", page_icon="🧪", layout="wide")
     st.title("🧪 池子价格模拟器")
-    st.caption("输入 Token 地址 + 公链拉取池子实时数据，预设涨跌幅，结合持仓成本预估盈亏。")
+    st.caption("拉取池子实时价格，按预设涨跌幅档位估算持仓盈亏（不含手续费 / 滑点）。")
 
-    # ---- 输入参数 ----
-    with st.form("pool_sim_form", clear_on_submit=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            address = st.text_input(
-                "Token 合约地址 *",
-                placeholder="例如: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-            )
-        with c2:
-            chain = st.selectbox(
-                "所属公链",
-                options=TOKEN_CHAINS,
-                format_func=lambda x: CHAIN_LABELS[x],
-            )
-        c3, c4 = st.columns(2)
-        with c3:
-            qty = st.number_input("持仓数量", min_value=0.0, value=0.0, step=1.0, format="%.6f")
-        with c4:
-            cost = st.number_input("持仓成本价", min_value=0.0, value=0.0, step=0.000001, format="%.8f")
-
-        st.markdown("**预设涨跌幅档位 (%)**（负数=下跌，正数=上涨）")
+    with st.form("pool_sim_form", clear_on_submit=False, border=False):
+        c1, c2, c3, c4, c5 = st.columns([3, 1.3, 1, 1.2, 0.9], vertical_alignment="bottom")
+        address = c1.text_input("Token 合约地址", placeholder="例如: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+        chain = c2.selectbox("公链", options=TOKEN_CHAINS, format_func=lambda x: CHAIN_LABELS[x])
+        qty = c3.number_input("持仓数量", min_value=0.0, value=0.0, step=1.0, format="%.6f")
+        cost = c4.number_input("成本价", min_value=0.0, value=0.0, step=0.000001, format="%.8f")
+        submitted = c5.form_submit_button("🚀 模拟", type="primary", width="stretch")
         steps_input = st.text_input(
-            "用逗号分隔多档，例如: -10,-20,-30,-50,-70",
+            "涨跌幅档位 %（逗号分隔，负数 = 下跌）",
             value=",".join(str(x) for x in DEFAULT_DROP_STEPS),
-            help="可填负数(下跌)或正数(上涨)，如 -30 表示下跌30%后预估盈亏",
         )
-        submitted = st.form_submit_button("🚀 拉取数据并模拟", type="primary")
 
     if submitted:
         if not address.strip():
             st.warning("⚠️ 请输入 Token 合约地址")
             st.stop()
-
-        # ---- 拉取池子数据 ----
         with st.spinner("正在通过 Dexscreener 拉取池子数据 ..."):
             data = fetch_pool(chain, address)
         if "error" in data:
@@ -191,7 +173,7 @@ def run_streamlit():
         st.session_state["sim_addr"] = address
         st.session_state["sim_chain"] = chain
     elif "sim_data" not in st.session_state:
-        st.info("👆 填写上方参数后点击「拉取数据并模拟」。")
+        st.caption("填写参数后点「模拟」。")
         st.stop()
 
     data = st.session_state["sim_data"]
@@ -199,22 +181,14 @@ def run_streamlit():
         st.error("❌ 未取到该池子的当前价格，无法模拟。请检查地址与公链是否匹配。")
         st.stop()
 
-    # ---- 池子关键指标卡片 ----
-    st.divider()
-    st.subheader(f"{data['symbol'] or address[:10]} — 池子实时数据")
-    fee_display = f"{data['fee_ratio']}" + ("%" if data["fee_ratio"] else " (未披露)")
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("现价", f"{data['price']:.8g}" if data["price"] is not None else "-")
-    m2.metric("成交量 24h", f"{data['volume_24h']:,.2f}")
-    m3.metric("费用比率", fee_display)
-    m4.metric("流动性", f"{data['liquidity']:,.2f}")
-    m5.metric("持有人数", f"{data['holders']:,}")
+    fee_display = f"{data['fee_ratio']}%" if data["fee_ratio"] else "未披露"
+    line = (f"**{data['symbol'] or address[:10]}** · 现价 **{data['price']:.8g}** {data['quote'] or ''} · "
+            f"24h 成交 {data['volume_24h']:,.0f} · 流动性 {data['liquidity']:,.0f} · 费率 {fee_display}")
+    if data["holders"]:
+        line += f" · 持有人 {data['holders']:,}"
     if data["ath"] is not None and data["price"]:
-        drop_from_ath = (data["price"] / data["ath"] - 1) * 100
-        st.caption(
-            f"🏔️ 历史最高价 {data['ath']:.8g}（当前距 ATH 回调 {drop_from_ath:.2f}%） | "
-            f"计价单位 {data['quote']} | 交易所 {data['exchange']}"
-        )
+        line += f" · 距 ATH {(data['price'] / data['ath'] - 1) * 100:.1f}%"
+    st.markdown(line)
 
     # ---- 校验持仓/成本 ----
     if qty <= 0 or cost <= 0:
@@ -245,7 +219,6 @@ def run_streamlit():
         })
 
     df = pd.DataFrame(rows)
-    st.divider()
     st.subheader(f"💰 预估盈亏（持仓 {qty:g} @ 成本 {cost:.8g}，当前市值 {qty*data['price']:.4g}）")
 
     def color_pnl(val_str):
@@ -270,7 +243,6 @@ def run_streamlit():
         hide_index=True,
     )
 
-    st.caption("· 负数档位=下跌预估，正数档位=上涨预估 · 盈亏按已实现持仓成本计算，未计入手续费/滑点")
 
 
 # ============================================================

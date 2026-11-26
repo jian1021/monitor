@@ -20,22 +20,21 @@ RES_OPTS = ["30s", "1m", "5m", "15m", "1h", "4h", "1d"]
 st.set_page_config(page_title="LP 区间可视化", page_icon="📶", layout="wide")
 
 st.title("📶 LP 区间可视化")
-st.caption("配置代币与 K 线参数后生成自适应价格区间。")
-with st.container(border=True):
-    st.subheader('⚙️ 分析参数')
-    c1, c2, c3 = st.columns(3)
+st.caption("按 K 线自动分段（BOCPD），给每段生成自适应价格区间。")
+with st.form("lp_bands_form", border=False):
+    c1, c2, c3, c4 = st.columns([3.5, 1.3, 0.9, 0.9], vertical_alignment="bottom")
     token = c1.text_input('Token 地址', placeholder='So11111111111111111111111111111111111111112')
-    chain = c2.selectbox("链", CHAIN_OPTS, index=0,
-                         format_func=lambda key: CHAIN_LABELS[key])
+    chain = c2.selectbox("链", CHAIN_OPTS, index=0, format_func=lambda key: CHAIN_LABELS[key])
     res = c3.selectbox('K线周期', RES_OPTS, index=4)
-    c4, c5, c6, c7 = st.columns([1, 1, 1, 1])
-    days = c4.number_input('天数 (0=按周期自动取满100根)', min_value=0.0, value=0.0, step=1.0)
-    lam = c5.number_input('lam · 期望段长', min_value=10.0, value=120.0, step=10.0)
-    width = c6.number_input('宽度系数 C', min_value=0.1, value=2.0, step=0.1)
-    run = c7.button('生成区间', type='primary', width="stretch")
+    run = c4.form_submit_button('生成区间', type='primary', width="stretch")
+    with st.expander("更多参数"):
+        c5, c6, c7 = st.columns(3)
+        days = c5.number_input('天数（0 = 按周期自动取满 100 根）', min_value=0.0, value=0.0, step=1.0)
+        lam = c6.number_input('lam · 期望段长', min_value=10.0, value=120.0, step=10.0)
+        width = c7.number_input('宽度系数 C', min_value=0.1, value=2.0, step=0.1)
 
 if not run:
-    st.info('请在上方输入 Token 地址并点击「生成区间」')
+    st.caption('输入 Token 地址后点「生成区间」。')
     st.stop()
 if not token.strip():
     st.error('请输入 Token 合约地址')

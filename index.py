@@ -76,6 +76,7 @@ pool_simulator = st.Page("pages/st_pool_simulator.py", title="池子价格模拟
 token_distribution = st.Page("pages/distribution.py", title="池内代币分布图", icon=":material/bar_chart:")
 lp_position_alert_page = st.Page("pages/lp_position_alert.py", title="LP 仓位告警", icon=":material/notifications_active:")
 lp_apr = st.Page("pages/lp_apr.py", title="LP 区间 APR", icon=":material/function:")
+lp_range = st.Page("pages/lp_range.py", title="LP 区间宽度", icon=":material/straighten:")
 exit_strategy = st.Page("pages/exit_strategy.py", title="退出策略", icon=":material/notification_important:")
 monitor_settings = st.Page("pages/monitor_settings.py", title="监控模块设置", icon=":material/tune:")
 
@@ -95,6 +96,7 @@ if st.session_state.logged_in:
         "token_distribution": token_distribution,
         "lp_position_alert": lp_position_alert_page,
         "lp_apr": lp_apr,
+        "lp_range": lp_range,
         "exit_strategy": exit_strategy,
         "onchain_hub": onchain_hub_page,
         "onchain_token": onchain_token,

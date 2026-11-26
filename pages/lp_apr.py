@@ -24,10 +24,8 @@ from app.infrastructure.lp_tools import runner
 from app.interfaces.monitor_controls import render_monitor_controls
 
 st.set_page_config(page_title="LP 区间 APR", page_icon="📐", layout="wide")
-st.title("📐 LP 区间 APR（Uniswap v3/v4 · Robinhood Chain）")
-st.caption("池均 APR 是把所有流动性混在一起的数字，没人真的赚得到；这里算的是"
-           "**你自己选定区间**的 APR。估算秒级但近似，回放分钟级但实测。"
-           "只计手续费收益，不含无常损失与 gas。")
+st.title("📐 LP 区间 APR")
+st.caption("Uniswap v3/v4 · Robinhood Chain：按你自己的区间宽度算手续费 APR（不含无常损失与 gas）。")
 
 # ------------------------- 数据库可用性（观察列表/启停依赖它） -------------------------
 DB_OK = bool(LIBSQL_URL and LIBSQL_TOKEN)
@@ -69,150 +67,144 @@ if not runner.ready():
         )
     st.stop()
 
-st.divider()
-
 # ------------------------- 计算器 -------------------------
-st.subheader("🧮 计算器")
-mode = st.radio("模式", ["APR 估算（秒级）", "APR vs 区间宽度扫描", "精确回放（分钟级）"],
-                horizontal=True)
+MODES = {"估算（秒级）": "apr", "宽度扫描": "sweep", "精确回放（分钟级）": "replay"}
+with st.form("apr_calc_form", border=False):
+    c_m, c_p, c_w, c_c, c_go = st.columns([1.4, 3, 0.9, 1, 0.8], vertical_alignment="bottom")
+    mode_label = c_m.selectbox("模式", list(MODES))
+    pool = c_p.text_input("池子（v3 地址 / v4 poolId）", placeholder="0x…")
+    width = c_w.number_input("宽度 ±%", min_value=0.5, max_value=80.0, value=10.0, step=0.5)
+    capital = c_c.number_input("仓位 ($)", min_value=100.0, value=10000.0, step=1000.0)
+    run = c_go.form_submit_button("▶️ 运行", type="primary", width="stretch")
+    with st.expander("更多参数"):
+        o1, o2, o3 = st.columns(3)
+        window = o1.selectbox("估算窗口", ["h24", "h6", "h1"])
+        hours = o2.number_input("回放窗口（小时）", 1, 72, 24)
+        measure = o3.checkbox("用链上 feeGrowth 交叉验证（估算模式）", value=True)
+mode = MODES[mode_label]
 
-a1, a2, a3 = st.columns(3)
-pool = a1.text_input("池子（v3 地址 40 hex / v4 poolId 64 hex）",
-                     placeholder="0x...")
-width = a2.number_input("区间宽度 ±%", min_value=0.5, max_value=80.0, value=10.0, step=0.5)
-capital = a3.number_input("仓位规模 ($)", min_value=100.0, value=10000.0, step=1000.0)
-
-b1, b2 = st.columns(2)
-window = b1.selectbox("估算窗口", ["h24", "h6", "h1"], index=0) if mode != "精确回放（分钟级）" else None
-hours = b1.number_input("回放窗口（小时）", 1, 72, 24) if mode == "精确回放（分钟级）" else None
-measure = b2.checkbox("用链上 feeGrowth 交叉验证", value=(mode != "APR vs 区间宽度扫描")) \
-    if mode != "精确回放（分钟级）" else None
-
-run = st.button("▶️ 运行", type="primary", disabled=not pool.strip())
 if run:
     p = pool.strip()
-    with st.spinner("执行中" + ("（回放可能需要 1~4 分钟）" if mode == "精确回放（分钟级）" else "") + "..."):
-        if mode == "APR 估算（秒级）":
-            ok, res = runner.run_apr(p, width=width, capital=capital, window=window, measure=measure)
-        elif mode == "APR vs 区间宽度扫描":
-            ok, res = runner.run_apr(p, capital=capital, sweep=True)
-        else:
-            ok, res = runner.run_replay(p, width=width, capital=capital, hours=int(hours))
-    if not ok:
-        st.error(f"执行失败：\n```\n{str(res)[:3000]}\n```")
+    if not p:
+        st.warning("请输入池子地址或 poolId")
     else:
-        st.session_state["apr_result"] = {"mode": mode, "res": res}
-        st.rerun()
+        with st.spinner("执行中" + ("（回放约 1~4 分钟）" if mode == "replay" else "") + " …"):
+            if mode == "apr":
+                ok, res = runner.run_apr(p, width=width, capital=capital, window=window, measure=measure)
+            elif mode == "sweep":
+                ok, res = runner.run_apr(p, capital=capital, sweep=True)
+            else:
+                ok, res = runner.run_replay(p, width=width, capital=capital, hours=int(hours))
+        if not ok:
+            st.error(f"执行失败：\n```\n{str(res)[:3000]}\n```")
+        else:
+            st.session_state["apr_result"] = {"mode": mode, "res": res}
 
 result = st.session_state.get("apr_result")
 if result:
-    mode, res = result["mode"], result["res"]
-    st.markdown(f"**{res.get('name', '?')}** · {res.get('version', '?')} · `{res.get('pool', '')[:14]}…`"
-                + (f" · {res.get('tokens', '')}" if res.get("tokens") else ""))
-
-    if mode == "APR vs 区间宽度扫描":
-        sweep = res.get("sweep") or []
-        if sweep:
-            sdf = pd.DataFrame(sweep)
-            for col in ["share", "apr_in_range", "time_in_range", "vol_adjusted_apr"]:
-                if col in sdf.columns:
-                    sdf[col] = sdf[col].map(lambda v: f"{v:.2%}" if isinstance(v, float) else v)
-            st.dataframe(sdf, width="stretch", hide_index=True)
-    else:
-        metrics = []
-        if mode == "精确回放（分钟级）":
-            metrics = [
-                ("年化 APR（实测）", res.get("annualised_apr"), True),
-                ("窗口收益", res.get("return_pct"), True),
-                ("赚到手续费 ($)", res.get("fees_earned_usd"), False),
-                ("在区间内时间", res.get("time_in_range"), True),
-                ("占全池费用", res.get("share_of_pool_fees"), True),
-                ("成交笔数", res.get("swaps"), False),
-            ]
+    mode_r, res = result["mode"], result["res"]
+    with st.container(border=True):
+        st.markdown(f"**{res.get('name', '?')}** · {res.get('version', '?')} · `{res.get('pool', '')[:14]}…`"
+                    + (f" · {res.get('tokens', '')}" if res.get("tokens") else ""))
+        if mode_r == "sweep":
+            sweep = res.get("sweep") or []
+            if sweep:
+                sdf = pd.DataFrame(sweep)
+                for col in ["share", "apr_in_range", "time_in_range", "vol_adjusted_apr"]:
+                    if col in sdf.columns:
+                        sdf[col] = sdf[col].map(lambda v: f"{v:.2%}" if isinstance(v, float) else v)
+                st.dataframe(sdf, width="stretch", hide_index=True)
         else:
-            metrics = [
-                ("区间内 APR", res.get("apr_in_range"), True),
-                ("波动调整后 APR", res.get("vol_adjusted_apr"), True),
-                ("池均 APR", res.get("pool_avg_apr"), True),
-                ("占活跃流动性", res.get("liquidity_share"), True),
-                ("手续费/天 ($)", res.get("fees_per_day_usd"), False),
-                ("预计在区间内", res.get("time_in_range_modelled"), True),
-            ]
-        cols = st.columns(len(metrics))
-        for col, (label, value, is_pct) in zip(cols, metrics):
-            if value is None:
-                col.metric(label, "n/a")
-            elif is_pct:
-                col.metric(label, f"{value:.2%}")
-            elif isinstance(value, float):
-                col.metric(label, f"{value:,.2f}")
+            if mode_r == "replay":
+                metrics = [("年化 APR（实测）", res.get("annualised_apr"), True),
+                           ("窗口收益", res.get("return_pct"), True),
+                           ("赚到手续费 ($)", res.get("fees_earned_usd"), False),
+                           ("在区间内时间", res.get("time_in_range"), True),
+                           ("占全池费用", res.get("share_of_pool_fees"), True),
+                           ("成交笔数", res.get("swaps"), False)]
             else:
-                col.metric(label, f"{value:,}")
-        if res.get("validation_ratios"):
-            st.caption("回放 vs feeGrowthGlobal 校验比值："
-                       + " / ".join(f"{r:.4f}" for r in res["validation_ratios"])
-                       + "（接近 1.0 说明费用计算正确）")
-        if res.get("validation_warning"):
-            st.warning("校验警告：池子自身的 feeGrowth 没有增长——v4 hook 池通常意味着 "
-                       "hook 拿走了费用，LP 实际赚不到上面的数字。")
-        if res.get("dynamic_fee") or res.get("volume_method") == "unusable_dynamic_fee":
-            st.info("该池为动态费率（volume × feeRate 不可用），APR 来自 feeGrowth 实测。")
-
-    if res.get("raw"):
-        with st.expander("原始输出"):
-            st.code(res["raw"], language=None)
-
-st.divider()
+                metrics = [("区间内 APR", res.get("apr_in_range"), True),
+                           ("波动调整后 APR", res.get("vol_adjusted_apr"), True),
+                           ("池均 APR", res.get("pool_avg_apr"), True),
+                           ("占活跃流动性", res.get("liquidity_share"), True),
+                           ("手续费/天 ($)", res.get("fees_per_day_usd"), False),
+                           ("预计在区间内", res.get("time_in_range_modelled"), True)]
+            cols = st.columns(len(metrics))
+            for col, (label, value, is_pct) in zip(cols, metrics):
+                if value is None:
+                    col.metric(label, "n/a")
+                elif is_pct:
+                    col.metric(label, f"{value:.2%}")
+                elif isinstance(value, float):
+                    col.metric(label, f"{value:,.2f}")
+                else:
+                    col.metric(label, f"{value:,}")
+            if res.get("validation_ratios"):
+                st.caption("回放 vs feeGrowthGlobal 校验比值："
+                           + " / ".join(f"{r:.4f}" for r in res["validation_ratios"])
+                           + "（接近 1.0 说明费用计算正确）")
+            if res.get("validation_warning"):
+                st.warning("池子自身的 feeGrowth 没有增长——v4 hook 池通常意味着 hook 拿走了费用，"
+                           "LP 实际赚不到上面的数字。")
+            if res.get("dynamic_fee") or res.get("volume_method") == "unusable_dynamic_fee":
+                st.info("该池为动态费率（volume × feeRate 不可用），APR 来自 feeGrowth 实测。")
+        if res.get("raw"):
+            with st.expander("原始输出"):
+                st.code(res["raw"], language=None)
 
 # ------------------------- 观察列表 -------------------------
-st.subheader("👀 观察列表（主循环定时估算）")
-st.caption("APR 越过阈值时推飞书（同池同方向 6 小时去重）；阈值留空 = 不告警。")
+rows = list_apr_watchlist()
+st.subheader(f"观察列表（{len(rows)}）")
+st.caption("后台定时估算；APR 越过阈值推飞书（同池同方向 6 小时去重），阈值 0 = 不告警。")
 
-with st.form("add_apr_pool", clear_on_submit=True):
-    f1, f2, f3, f4 = st.columns([3, 2, 1, 1])
-    new_pool = f1.text_input("池子地址", placeholder="0x...")
+with st.form("add_apr_pool", clear_on_submit=True, border=False):
+    f1, f2, f3, f4, f5, f6, f7 = st.columns([2.6, 1.4, 0.8, 1, 0.9, 0.9, 0.8], vertical_alignment="bottom")
+    new_pool = f1.text_input("池子地址", placeholder="0x…")
     new_name = f2.text_input("备注名", placeholder="WETH/USDG")
     new_width = f3.number_input("宽度 ±%", min_value=0.5, value=10.0, step=0.5)
     new_capital = f4.number_input("仓位 ($)", min_value=100.0, value=10000.0, step=1000.0)
-    t1, t2, t3 = st.columns([1, 1, 3])
-    new_min = t1.number_input("APR 下限 (%)", min_value=0.0, value=0.0, step=1.0,
-                              help="0 = 不设下限")
-    new_max = t2.number_input("APR 上限 (%)", min_value=0.0, value=0.0, step=5.0,
-                              help="0 = 不设上限")
-    submitted = t3.form_submit_button("➕ 加入列表", width="stretch")
-    if submitted:
+    new_min = f5.number_input("APR ≥ %", min_value=0.0, value=0.0, step=1.0)
+    new_max = f6.number_input("APR ≤ %", min_value=0.0, value=0.0, step=5.0)
+    if f7.form_submit_button("➕ 加入", type="primary", width="stretch"):
         if not new_pool.strip():
             st.error("❌ 池子地址不能为空")
         elif not DB_OK:
-            st.error("❌ 数据库不可用：先按上方提示配置 LIBSQL_URL / LIBSQL_TOKEN")
-        else:
-            ok = add_apr_pool(
-                new_pool, new_name, width=new_width, capital=new_capital,
-                min_apr=new_min if new_min > 0 else None,
-                max_apr=new_max if new_max > 0 else None,
-            )
-            if ok:
-                st.toast("已加入观察列表", icon="✅")
-                st.rerun()
-            else:
-                st.error("❌ 加入失败（写库异常，看终端日志）")
-
-rows = list_apr_watchlist()
-if not rows:
-    st.info("列表为空——加入池子后，主循环每小时估算一次并在越界时推飞书。")
-else:
-    for row in rows:
-        r1, r2, r3, r4, r5, r6 = st.columns([3, 2, 2, 2, 1, 1])
-        r1.write(f"`{row['pool'][:14]}…` {row.get('name') or ''}")
-        r2.write(f"±{row['width']:.0f}% · ${row['capital']:,.0f}")
-        r3.write(f"阈值 {row['min_apr'] if row['min_apr'] is not None else '—'}%"
-                 f" ~ {row['max_apr'] if row['max_apr'] is not None else '—'}%")
-        last = (f"{row['last_apr']:.2%}" if isinstance(row.get("last_apr"), float) else "未跑")
-        r4.write(f"上次：{last}" + (f"（{row['last_checked_at']}）" if row.get("last_checked_at") else ""))
-        enabled = r5.toggle("启", value=bool(row.get("enabled")), key=f"apr_on_{row['pool']}")
-        if enabled != bool(row.get("enabled")):
-            set_apr_pool_enabled(row["pool"], enabled)
+            st.error("❌ 数据库不可用：先配置 LIBSQL_URL / LIBSQL_TOKEN")
+        elif add_apr_pool(new_pool, new_name, width=new_width, capital=new_capital,
+                          min_apr=new_min if new_min > 0 else None,
+                          max_apr=new_max if new_max > 0 else None):
+            st.toast("已加入观察列表", icon="✅")
             st.rerun()
-        if r6.button("🗑️", key=f"apr_del_{row['pool']}"):
-            remove_apr_pool(row["pool"])
+        else:
+            st.error("❌ 加入失败（写库异常，看终端日志）")
+
+if rows:
+    view = pd.DataFrame([{
+        "pool": r["pool"], "启用": bool(r.get("enabled")), "名称": r.get("name") or r["pool"][:10] + "…",
+        "宽度": f"±{r['width']:.0f}%", "仓位": f"${r['capital']:,.0f}",
+        "阈值": f"{r['min_apr'] if r['min_apr'] is not None else '—'}% ~ "
+                f"{r['max_apr'] if r['max_apr'] is not None else '—'}%",
+        "上次 APR": f"{r['last_apr']:.2%}" if isinstance(r.get("last_apr"), float) else "未跑",
+        "上次检查": r.get("last_checked_at") or "—", "删除": False,
+    } for r in rows])
+    edited = st.data_editor(
+        view, key="apr_wl_editor", hide_index=True, width="stretch",
+        disabled=["名称", "宽度", "仓位", "阈值", "上次 APR", "上次检查"],
+        column_config={"pool": None, "启用": st.column_config.CheckboxColumn(width="small"),
+                       "删除": st.column_config.CheckboxColumn(width="small")},
+    )
+    orig, new = view.set_index("pool"), edited.set_index("pool")
+    changes = [(pl, "rm" if new.loc[pl, "删除"] else "on") for pl in new.index
+               if new.loc[pl, "删除"] or bool(orig.loc[pl, "启用"]) != bool(new.loc[pl, "启用"])]
+    if changes:
+        i_l, i_r = st.columns([4, 1], vertical_alignment="center")
+        i_l.info(f"{len(changes)} 项未保存")
+        if i_r.button("💾 保存修改", type="primary", width="stretch"):
+            for pl, kind in changes:
+                if kind == "rm":
+                    remove_apr_pool(pl)
+                else:
+                    set_apr_pool_enabled(pl, bool(new.loc[pl, "启用"]))
+            st.session_state.pop("apr_wl_editor", None)
+            st.toast("已保存", icon="💾")
             st.rerun()

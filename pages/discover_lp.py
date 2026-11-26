@@ -10,7 +10,7 @@ from app.application.monitors.rsi import get_meteora_native_rsi
 
 st.set_page_config(page_title="Meme 低估监控", page_icon="🧲", layout="wide")
 st.title("🧲 Meme 低估监控")
-st.caption("直连 Meteora Top Performers（按 24h 费 / TVL 排序），经市值 / TVL / bin_step / 基础费率预筛后，对头部候选计算 RSI(3, 1h)，只保留超卖钝化标的。")
+st.caption("Meteora Top Performers（按 24h 费/TVL 排序）预筛后，找 RSI(3, 1h) 超卖或现价接近 48h 高点的池子。")
 render_monitor_controls("meme_underval", "Meme 低估监控")
 
 saved = get_meme_underval_params()
@@ -33,78 +33,48 @@ def _cached_price_position(pool_address):
 
 SCAN_MODE_RSI = "RSI 超卖"
 SCAN_MODE_48H = "现价 ≥ 48h高点80%"
-scan_mode = st.segmented_control(
-    "扫描模式",
-    [SCAN_MODE_RSI, SCAN_MODE_48H],
-    default=SCAN_MODE_RSI,
-) or SCAN_MODE_RSI
-st.caption(
-    "只保留「现价 ÷ 48 小时最高价 ≥ 阈值」的价格强度标的。"
-    if scan_mode == SCAN_MODE_48H
-    else "只保留「RSI(3, 1h) ≤ 上限」的超卖钝化标的。"
-)
 
-f1, f2, f3, f4, f5 = st.columns(5)
-with f1:
-    min_market_cap = st.number_input("市值下限 (USD)", min_value=0.0,
+scan_mode = st.segmented_control("扫描模式", [SCAN_MODE_RSI, SCAN_MODE_48H], default=SCAN_MODE_RSI,
+                                 label_visibility="collapsed") or SCAN_MODE_RSI
+is_48h = scan_mode == SCAN_MODE_48H
+
+with st.form("meme_scan_form", border=False):
+    f1, f2, f3, f4, f5, f6 = st.columns([1.2, 1.1, 0.8, 0.9, 1.1, 0.9], vertical_alignment="bottom")
+    min_market_cap = f1.number_input("市值 ≥ ($)", min_value=0.0,
                                      value=float(saved["min_market_cap"]), step=100_000.0)
-with f2:
-    min_tvl = st.number_input("TVL 下限 (USD)", min_value=0.0,
-                              value=float(saved["min_tvl_usd"]), step=5_000.0)
-with f3:
-    min_bin_step = st.number_input("bin_step 下限", min_value=0,
-                                   value=int(saved["min_bin_step"]), step=1)
-with f4:
-    min_base_fee = st.number_input("基础费率下限 (Fee %)", min_value=0.0,
+    min_tvl = f2.number_input("TVL ≥ ($)", min_value=0.0, value=float(saved["min_tvl_usd"]), step=5_000.0)
+    min_bin_step = f3.number_input("bin_step ≥", min_value=0, value=int(saved["min_bin_step"]), step=1)
+    min_base_fee = f4.number_input("基础费率 ≥ %", min_value=0.0,
                                    value=float(saved["min_base_fee_pct"]), step=0.5)
-with f5:
-    if scan_mode == SCAN_MODE_48H:
-        price_position_min = st.number_input("现价/48h最高 下限", min_value=0.0,
-                                             max_value=1.0, step=0.05, format="%.2f",
-                                             value=float(saved["price_position_min"]))
+    if is_48h:
+        price_position_min = f5.number_input("现价/48h最高 ≥", min_value=0.0, max_value=1.0, step=0.05,
+                                             format="%.2f", value=float(saved["price_position_min"]))
         rsi_max = float(saved["rsi_max"])
     else:
-        rsi_max = st.number_input("RSI(3, 1h) 上限", min_value=0.0, max_value=100.0,
+        rsi_max = f5.number_input("RSI(3, 1h) ≤", min_value=0.0, max_value=100.0,
                                   value=float(saved["rsi_max"]), step=1.0)
         price_position_min = float(saved["price_position_min"])
-
-with st.expander("高级参数", expanded=False):
-    a1, a2, a3 = st.columns(3)
-    with a1:
-        page_size = st.number_input("每页池数", min_value=10, max_value=1000,
+    scan = f6.form_submit_button("🔍 扫描", type="primary", width="stretch")
+    with st.expander("高级参数 / 保存为后台默认"):
+        a1, a2, a3 = st.columns(3)
+        page_size = a1.number_input("每页池数", min_value=10, max_value=1000,
                                     value=int(mu.DEFAULT_PAGE_SIZE), step=50)
-    with a2:
-        max_pages = st.number_input("拉取页数", min_value=1, max_value=10,
-                                    value=int(mu.DEFAULT_MAX_PAGES), step=1)
-    with a3:
-        rsi_top_n = st.number_input("最多算 RSI 的候选数", min_value=1,
-                                    max_value=200, value=30, step=5)
-    if st.button("🧹 清除缓存并重拉"):
-        st.cache_data.clear()
-        st.rerun()
+        max_pages = a2.number_input("拉取页数", min_value=1, max_value=10, value=int(mu.DEFAULT_MAX_PAGES), step=1)
+        rsi_top_n = a3.number_input("最多计算候选数", min_value=1, max_value=200, value=30, step=5)
+        save_default = st.checkbox("扫描时把以上阈值保存为后台默认值")
 
-s1, s2 = st.columns([1, 4])
-with s1:
-    save = st.button("💾 保存参数", width="stretch")
-with s2:
-    st.caption("保存后同时作为手动扫描默认值与后台定时任务的参数。")
-if save:
-    ok = update_meme_underval_params({
-        "min_market_cap": float(min_market_cap),
-        "min_tvl_usd": float(min_tvl),
-        "min_bin_step": int(min_bin_step),
-        "min_base_fee_pct": float(min_base_fee),
-        "rsi_max": float(rsi_max),
-        "price_position_min": float(price_position_min),
-    })
-    if ok:
-        st.success("✅ 参数已保存，手动与自动运行同步生效")
+if scan and save_default:
+    if update_meme_underval_params({
+        "min_market_cap": float(min_market_cap), "min_tvl_usd": float(min_tvl),
+        "min_bin_step": int(min_bin_step), "min_base_fee_pct": float(min_base_fee),
+        "rsi_max": float(rsi_max), "price_position_min": float(price_position_min),
+    }):
+        st.toast("已保存为后台默认参数", icon="💾")
     else:
         st.error("❌ 参数保存失败（数据库不可用），本次扫描仍用页面值")
 
-scan = st.button("🔍 开始扫描", type="primary", width="stretch")
 if not scan:
-    st.info("设置好五个阀值后点击「开始扫描」")
+    st.caption("设好阈值后点「扫描」。")
     st.stop()
 
 with st.spinner("正在拉取 Top Performers..."):
@@ -119,12 +89,8 @@ prefiltered = [p for p in unique
                                            min_base_fee, min_tvl)]
 prefiltered.sort(key=mu.fee_ratio_24h, reverse=True)
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("拉取池数", len(pools))
-m2.metric("按币去重", len(unique))
-m3.metric("通过预筛", len(prefiltered))
-m4.metric("待算 RSI" if scan_mode == SCAN_MODE_RSI else "待算 48h 位置",
-          min(len(prefiltered), int(rsi_top_n)))
+st.caption(f"拉取 {len(pools)} 个池 → 按币去重 {len(unique)} → 通过预筛 {len(prefiltered)} → "
+           f"计算前 {min(len(prefiltered), int(rsi_top_n))} 个")
 
 if not prefiltered:
     st.info(f"当前阀值下无预筛标的（市值≥${min_market_cap:,.0f}，"
@@ -168,7 +134,8 @@ if scan_mode == SCAN_MODE_48H:
     fig.update_layout(title="命中标的 现价 / 48h最高（%）",
                       xaxis_title="池子", yaxis_title="现价/48h最高 %",
                       template="plotly_dark", height=380)
-    st.plotly_chart(fig, width="stretch")
+    with st.expander("图表"):
+        st.plotly_chart(fig, width="stretch")
 
     df = pd.DataFrame(hits)
     df["price_ratio_pct"] = df["price_ratio_48h"] * 100
@@ -241,7 +208,8 @@ fig.add_trace(go.Bar(
 fig.update_layout(title="命中标的 24h 费 / TVL 比率（%）",
                   xaxis_title="池子", yaxis_title="费/TVL %",
                   template="plotly_dark", height=380)
-st.plotly_chart(fig, width="stretch")
+with st.expander("图表"):
+    st.plotly_chart(fig, width="stretch")
 
 df = pd.DataFrame(hits)
 df["gmgn_link"] = df["meme_mint"].apply(

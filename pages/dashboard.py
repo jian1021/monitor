@@ -1,11 +1,11 @@
-"""监控标的配置管理页（超卖监控）。
+"""超卖监控 · 标的管理（Meteora 池 / 可转债 / ETF）。
 
-资产增删改查统一走 asset_config（唯一实现），本页只负责渲染。
+资产增删改查统一走 asset_config（唯一实现），本页只负责渲染：
+一行添加；每个分类一张可编辑表格（启用 / 删除），改完统一保存。
 """
 
+import pandas as pd
 import streamlit as st
-from app.interfaces.monitor_controls import render_monitor_controls
-from app.interfaces.timefmt import to_local_display
 
 from app.interfaces.asset_config import (
     CHAIN_LABELS,
@@ -14,166 +14,114 @@ from app.interfaces.asset_config import (
     delete_asset,
     ensure_asset_schema,
     fetch_all_assets,
-    stale_module_names,
     update_asset_status,
 )
+from app.interfaces.monitor_controls import render_monitor_controls
+from app.interfaces.timefmt import to_local_display
 
+ASSET_TYPE_MAP = {"meteora": "☄️ Meteora 池", "bond": "📈 可转债", "etf": "📊 ETF"}
 
-# =============================================================================
-# 4. Streamlit 界面构建
-# =============================================================================
 st.set_page_config(page_title="超卖监控 · 标的管理", page_icon="⚙️", layout="wide")
-st.title("⚙️ 超卖监控 · 标的管理")
-st.caption("🔎 当前页面专注 **Meteora 池 / 可转债 / ETF** 的添加与管理；其他资产类别请前往对应页面配置。")
+st.title("⚙️ 超卖监控")
+st.caption("RSI(3) 跌破 10 报「超卖」，回升上穿 10 再报一次「反转突破」。Meteora 池 / 可转债每个交易日收盘后检查，ETF 按周线检查。")
 render_monitor_controls("rsi", "RSI 监控（Meteora 池 / 可转债）")
 render_monitor_controls("etf_rsi", "ETF 周线 RSI 监控", webhook_editable=True)
-st.caption(
-    "📐 ETF 告警口径：周线 RSI(3) 跌破 10 报「超卖」；从 10 下方回升上穿 10 再报一次"
-    "「反转突破」——同一段回升只报一次，不重复轰炸。"
-)
 
-_missing = stale_module_names()
-if _missing:
-    st.warning("⚠️ 检测到当前运行的模块是旧版（缺失：" + "、".join(_missing) +
-               "），链上代币等新功能不可用。请在 Streamlit Cloud 上重启 / 重新部署后再试。")
-
-# 明确定义资产映射（加密货币和链上代币已移至独立页面）
-ASSET_TYPE_MAP = {
-    "meteora": "☄️ Meteora 池",
-    "bond": "📈 可转债",
-    "etf": "📊 ETF",
-}
-
-# --- 读取标的 ---
 ensure_asset_schema()
 df = fetch_all_assets()
 
-with st.container(border=True):
-    st.subheader("➕ 添加监控标的")
-    with st.form("add_asset_form", clear_on_submit=True):
-        c1, c2, c3, c4 = st.columns([1.1, 1.5, 2, 2])
-        new_type = c1.selectbox(
-            "资产类别", options=list(ASSET_TYPE_MAP),
-            format_func=lambda key: ASSET_TYPE_MAP[key],
-        )
-        chain = c2.selectbox("所属链", TOKEN_CHAINS,
-                             format_func=lambda key: CHAIN_LABELS[key])
-        code_placeholder = "池子地址" if new_type == "meteora" else "代码或合约地址"
-        new_code = c3.text_input("标的代码 / 地址", placeholder=code_placeholder)
-        new_name = c4.text_input("显示名称（可选）", placeholder="未填写时使用代码")
-        submitted = st.form_submit_button("添加标的", type="primary")
-        if submitted:
-            if not new_code.strip():
-                st.warning("请输入标的代码或地址。")
-            elif add_new_asset(new_type, new_code, new_name, chain=chain):
-                st.toast(f"已添加：{new_name.strip() or new_code.strip()}", icon="✅")
-                st.rerun()
-            else:
-                st.warning("该标的已存在（同类型同代码），未重复添加。")
+# ---------------- 添加 ----------------
+with st.form("add_asset_form", clear_on_submit=True, border=False):
+    c1, c2, c3, c4, c5 = st.columns([1.2, 1.2, 2.6, 1.6, 0.8], vertical_alignment="bottom")
+    new_type = c1.selectbox("类别", list(ASSET_TYPE_MAP), format_func=ASSET_TYPE_MAP.get)
+    chain = c2.selectbox("所属链（Meteora）", TOKEN_CHAINS, format_func=lambda k: CHAIN_LABELS[k])
+    new_code = c3.text_input("代码 / 池子地址", placeholder="可转债 113052 · ETF 159967 · Meteora 池地址")
+    new_name = c4.text_input("名称（可选）")
+    if c5.form_submit_button("➕ 添加", type="primary", width="stretch"):
+        if not new_code.strip():
+            st.warning("请输入代码或池子地址。")
+        elif add_new_asset(new_type, new_code, new_name, chain=chain):
+            st.toast(f"已添加：{new_name.strip() or new_code.strip()}", icon="✅")
+            st.rerun()
+        else:
+            st.warning("该标的已存在（同类型同代码），未重复添加。")
 
-total_count = len(df)
-enabled_count = int(df["enabled"].fillna(False).astype(bool).sum()) if total_count else 0
-metric_cols = st.columns(4)
-metric_cols[0].metric("全部标的", total_count)
-metric_cols[1].metric("运行中", enabled_count)
-metric_cols[2].metric("已暂停", total_count - enabled_count)
-metric_cols[3].metric("报警中", int(df["alarm_active"].fillna(False).astype(bool).sum()) if total_count else 0)
+# ---------------- 列表 ----------------
+total = len(df)
+s_l, s_r = st.columns([3, 1])
+search_text = s_l.text_input("搜索", placeholder="名称、代码或地址片段", label_visibility="collapsed")
+status_filter = s_r.selectbox("状态", ["全部", "运行中", "已暂停", "报警中"], label_visibility="collapsed")
 
-st.divider()
-f1, f2 = st.columns([3, 1])
-search_text = f1.text_input("搜索标的", placeholder="输入名称、代码或地址片段", label_visibility="collapsed")
-status_filter = f2.selectbox("状态", ["全部状态", "运行中", "已暂停"], label_visibility="collapsed")
 
-tabs = st.tabs(
-    [ASSET_TYPE_MAP[key] for key in ASSET_TYPE_MAP],
-    on_change="rerun",
-    key="dashboard_asset_tabs",
-)
-for tab, (type_key, type_label) in zip(tabs, ASSET_TYPE_MAP.items()):
+def _tab_label(key: str) -> str:
+    sub = df[df["asset_type"] == key] if total else df
+    on = int(sub["enabled"].fillna(False).astype(bool).sum()) if len(sub) else 0
+    return f"{ASSET_TYPE_MAP[key]} {on}/{len(sub)}"
+
+
+tabs = st.tabs([_tab_label(k) for k in ASSET_TYPE_MAP], on_change="rerun", key="dashboard_asset_tabs")
+for tab, type_key in zip(tabs, ASSET_TYPE_MAP):
     if not tab.open:
         continue
     with tab:
-        category_df = df[df["asset_type"] == type_key].copy() if total_count else df.copy()
-        filtered = category_df
+        cat = df[df["asset_type"] == type_key].copy() if total else df.copy()
+        if cat.empty:
+            st.info("这个分类还没有标的，在上方添加。")
+            continue
+        view = cat
         if search_text.strip():
             needle = search_text.strip().casefold()
-            mask = (filtered["name"].fillna("").astype(str).str.casefold().str.contains(needle, regex=False)
-                    | filtered["code"].fillna("").astype(str).str.casefold().str.contains(needle, regex=False))
-            filtered = filtered[mask]
+            view = view[view["name"].fillna("").astype(str).str.casefold().str.contains(needle, regex=False)
+                        | view["code"].fillna("").astype(str).str.casefold().str.contains(needle, regex=False)]
+        enabled_mask = view["enabled"].fillna(False).astype(bool)
         if status_filter == "运行中":
-            filtered = filtered[filtered["enabled"].fillna(False).astype(bool)]
+            view = view[enabled_mask]
         elif status_filter == "已暂停":
-            filtered = filtered[~filtered["enabled"].fillna(False).astype(bool)]
-
-        active_count = int(category_df["enabled"].fillna(False).astype(bool).sum()) if len(category_df) else 0
-        head, count = st.columns([3, 2])
-        head.markdown(f"##### {type_label}")
-        count.caption(f"{active_count}/{len(category_df)} 运行中 · 当前显示 {len(filtered)} 条")
-        if category_df.empty:
-            st.info("这个分类还没有标的。可以使用上方「添加监控标的」开始配置。")
-            continue
-        if filtered.empty:
-            st.info("没有符合当前搜索和状态条件的标的。")
+            view = view[~enabled_mask]
+        elif status_filter == "报警中":
+            view = view[view["alarm_active"].fillna(False).astype(bool)]
+        if view.empty:
+            st.info("没有符合搜索 / 状态条件的标的。")
             continue
 
-        display_df = filtered[["id", "name", "code", "chain", "timeframe", "enabled", "alarm_active", "last_alert_at"]].copy()
-        display_df = display_df.rename(columns={
-            "id": "ID", "name": "名称", "code": "池子地址" if type_key == "meteora" else "代码 / 地址",
-            "chain": "所属链", "timeframe": "周期", "enabled": "运行", "alarm_active": "报警中",
-            "last_alert_at": "最近报警",
+        table = pd.DataFrame({
+            "ID": view["id"].astype(int),
+            "运行": view["enabled"].fillna(False).astype(bool),
+            "名称": view["name"],
+            "代码 / 地址": view["code"],
+            "报警中": view["alarm_active"].fillna(False).map({True: "🔔", False: ""}),
+            "最近报警": view["last_alert_at"].apply(to_local_display),   # 库里存 UTC
+            "删除": False,
         })
-        # 库里存 UTC，直接展示会比北京时间慢 8 小时
-        display_df["最近报警"] = display_df["最近报警"].apply(to_local_display)
-        with st.form(f"save_assets_{type_key}"):
-            edited = st.data_editor(
-                display_df, hide_index=True, width="stretch", num_rows="fixed",
-                disabled=[column for column in display_df.columns if column != "运行"],
-                column_config={
-                    "ID": st.column_config.NumberColumn(width="small"),
-                    "名称": st.column_config.TextColumn(width="medium"),
-                    "池子地址": st.column_config.TextColumn(width="large"),
-                    "代码 / 地址": st.column_config.TextColumn(width="large"),
-                    "所属链": st.column_config.TextColumn(width="small"),
-                    "周期": st.column_config.TextColumn(width="small"),
-                    "运行": st.column_config.CheckboxColumn(help="取消勾选后，该标的不再参与后台监控"),
-                    "报警中": st.column_config.CheckboxColumn(disabled=True),
-                    "最近报警": st.column_config.TextColumn(width="medium"),
-                },
-                key=f"asset_editor_{type_key}",
-            )
-            save_status = st.form_submit_button("保存运行状态", type="primary")
-        if save_status:
-            original = {int(row["id"]): bool(row["enabled"]) for row in filtered.to_dict("records")}
-            updates = 0
-            failed = 0
-            for row in edited.to_dict("records"):
-                asset_id = int(row["ID"])
-                new_enabled = bool(row["运行"])
-                if original.get(asset_id) != new_enabled:
-                    if update_asset_status(asset_id, new_enabled):
-                        updates += 1
-                    else:
-                        failed += 1
-            if failed:
-                st.error(f"有 {failed} 条状态保存失败，请检查数据库连接。")
-            else:
-                st.toast(f"运行状态已保存（更新 {updates} 条）。", icon="✅")
-                st.rerun()
+        edited = st.data_editor(
+            table, key=f"asset_editor_{type_key}", hide_index=True, width="stretch",
+            disabled=["名称", "代码 / 地址", "报警中", "最近报警"],
+            column_config={
+                "ID": None,
+                "运行": st.column_config.CheckboxColumn(width="small",
+                                                      help="取消勾选后不再参与后台监控"),
+                "报警中": st.column_config.TextColumn(width="small"),
+                "删除": st.column_config.CheckboxColumn(width="small"),
+            },
+        )
 
-        with st.expander("删除标的", expanded=False):
-            delete_options = category_df.to_dict("records")
-            selected_id = st.selectbox(
-                "选择要删除的标的", options=[int(row["id"]) for row in delete_options],
-                format_func=lambda asset_id: next(
-                    f"{row.get('name') or row.get('code')} · {row.get('code')}"
-                    for row in delete_options if int(row["id"]) == asset_id
-                ), key=f"delete_select_{type_key}",
-            )
-            confirm_delete = st.checkbox("我确认永久删除该标的", key=f"confirm_delete_{type_key}")
-            if st.button("永久删除", type="secondary", disabled=not confirm_delete,
-                         key=f"delete_asset_{type_key}"):
-                if delete_asset(selected_id):
-                    st.session_state[f"confirm_delete_{type_key}"] = False
-                    st.toast("标的已删除。", icon="🗑️")
+        orig, new = table.set_index("ID"), edited.set_index("ID")
+        changes = []
+        for rid in new.index:
+            if new.loc[rid, "删除"]:
+                changes.append(("delete", int(rid), None))
+            elif bool(orig.loc[rid, "运行"]) != bool(new.loc[rid, "运行"]):
+                changes.append(("enabled", int(rid), bool(new.loc[rid, "运行"])))
+        if changes:
+            n_del = sum(1 for c in changes if c[0] == "delete")
+            i_l, i_r = st.columns([4, 1], vertical_alignment="center")
+            i_l.info(f"{len(changes)} 项未保存" + (f"，含删除 {n_del} 条（不可恢复）" if n_del else ""))
+            if i_r.button("💾 保存修改", type="primary", width="stretch", key=f"save_{type_key}"):
+                failed = [rid for kind, rid, val in changes
+                          if not (delete_asset(rid) if kind == "delete" else update_asset_status(rid, val))]
+                st.session_state.pop(f"asset_editor_{type_key}", None)
+                if failed:
+                    st.error(f"有 {len(failed)} 条保存失败，请检查数据库连接。")
+                else:
+                    st.toast("已保存", icon="💾")
                     st.rerun()
-                st.error("删除失败，请检查数据库连接。")
