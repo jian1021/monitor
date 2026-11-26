@@ -1,0 +1,6 @@
+numpy>=1.24
+pandas>=1.5
+requests>=2.28
+libsql-client>=0.3          # 仅 import-turso 需要
+python-dotenv>=1.0          # 可选：读取 monitor 项目根目录的 .env
+tomli>=2.0; python_version < "3.11"

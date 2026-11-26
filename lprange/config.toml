@@ -1,0 +1,53 @@
+# lprange 配置。不要在这里写任何密钥：
+#   Turso 连接走环境变量 TURSO_DATABASE_URL / TURSO_AUTH_TOKEN，
+#   未设置时自动回退 monitor 项目 .env 里的 LIBSQL_URL / LIBSQL_TOKEN；
+#   CoinGecko Pro Key 走环境变量 CG_API_KEY（可选）。
+
+[paths]
+# watchlist 与 K 线缓存共用一个 SQLite 文件；相对路径相对本文件所在目录
+db = "data/watchlist.db"
+
+[turso]
+# 运行 `all` 前是否自动同步一次（也可用 all --sync-turso 临时开启）
+sync_before_all = false
+
+# monitor 项目里 chain 列的取值 → GeckoTerminal network id
+[turso.network_map]
+sol = "solana"
+eth = "eth"
+bsc = "bsc"
+base = "base"
+# robinhood = "robinhood"   # 请先确认 GeckoTerminal 上 Robinhood Chain 的 network id
+
+# ------------------------------------------------------------------
+# 以下表名 / 列名取自 monitor 项目代码里的建表语句（app/infrastructure/db/*）。
+# monitor_meteora_pump 已从项目中移除，不再有对应的表。
+# ------------------------------------------------------------------
+
+# 批量 Meme 超卖超买监控的池子（全是 Solana / Meteora 池）
+[[turso.sources]]
+label = "meme_watchlist"
+table = "meme_watchlist"
+address_column = "address"
+name_column = "symbol"
+network = "solana"
+where = "enabled = 1"
+
+# LP 仓位 / 池子价格告警：dlmm = Meteora 池，pool_price = 各链池子地址
+# （evm_v4 的 pool_address 是 Uniswap v4 poolId，不是 GeckoTerminal 能查的池子地址，排除）
+[[turso.sources]]
+label = "lp_position_alert"
+table = "lp_position_alert"
+address_column = "pool_address"
+name_column = "pool_name"
+network_column = "chain"
+where = "enabled = 1 AND kind IN ('dlmm', 'pool_price')"
+
+# RSI 监控里的 Meteora 池（asset_config.code 即池子地址）
+[[turso.sources]]
+label = "asset_config.meteora"
+table = "asset_config"
+address_column = "code"
+name_column = "name"
+network = "solana"
+where = "asset_type = 'meteora' AND enabled = 1"

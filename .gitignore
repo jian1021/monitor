@@ -51,3 +51,6 @@ modules/token-reversal-monitor/monitor_state.json
 # 重构备份 / 运行时数据
 *.bak
 app/application/meteora_scanner/data/
+
+# lprange 本地 watchlist / K 线缓存
+lprange/data/
