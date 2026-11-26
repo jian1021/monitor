@@ -5,7 +5,7 @@ replay 走 Streamlit 页面手动触发。工具链（Node / 子模块）缺失�
 未安装 Node 或子模块时跳过，不将缺失依赖作为运行错误。
 """
 
-from app.core.settings import FEISHU_WEBHOOK
+from app.infrastructure.db.module_webhooks import resolve_webhook
 from app.infrastructure.db.apr_watchlist import list_apr_watchlist, record_apr_result
 from app.infrastructure.db.pump_alerts import filter_unpushed, mark_pushed
 from app.infrastructure.lp_tools import runner
@@ -88,7 +88,7 @@ def run_lp_apr_monitor() -> None:
     fresh = set(filter_unpushed(APR_MODULE, [k for k, _ in pending], ttl_hours=APR_TTL_HOURS))
     msgs = [msg for key, msg in pending if key in fresh]
     if msgs:
-        result = FeishuNotifier().send(FEISHU_WEBHOOK, "\n\n".join(msgs))
+        result = FeishuNotifier().send(resolve_webhook(APR_MODULE), "\n\n".join(msgs))
         if not result.ok:
             # 发送失败不记去重，否则同一池同一方向会被压制 6 小时 → 漏报
             print(f"❌ [APR] 飞书推送失败（{result.detail}），本轮不写入去重记录")

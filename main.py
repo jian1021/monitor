@@ -85,7 +85,7 @@ def _run_meteora_scan():
             if result and all(item.get("state") == "done" for item in result.values()):
                 alerter = MeteoraFeishuAlerter(
                     scanner.db,
-                    FEISHU_WEBHOOK,
+                    resolve_webhook("meteora_scan"),
                     meteora_config.FEISHU_WEBHOOK_SECRET,
                 )
                 alert_stats = evaluate_saved_scan(scanner.db, alerter)
@@ -229,11 +229,13 @@ def build_lanes(once: bool = False) -> LaneScheduler:
         Job("price", _runner("价格到达告警", _price_alert_job),
             every("price", offset=0), run_on_start=True),
     ]
+    # 收盘后执行：A 股 RSI 优先取 baostock，其日/周 K 线在收盘后数小时才入库（15:00 刚收盘时
+    # 取到的仍是上一根），所以放到 18:00 之后，确保用的是当天 / 当周已收盘的 K 线。
     close = [
         Job("rsi", _runner("RSI 监控", lambda: runners.run_rsi_monitor(cfg())),
-            DailyAtPolicy(dtime(15, 5), is_trading_day=a_share_trading_day)),
+            DailyAtPolicy(dtime(18, 0), is_trading_day=a_share_trading_day)),
         Job("etf_rsi", _runner("ETF 周线 RSI 监控", lambda: runners.run_etf_monitor(cfg())),
-            DailyAtPolicy(dtime(15, 10), weekdays=frozenset({4}), is_trading_day=a_share_trading_day)),
+            DailyAtPolicy(dtime(18, 10), weekdays=frozenset({4}), is_trading_day=a_share_trading_day)),
     ]
     store = MemoryStateStore() if once else DbStateStore(get_db_client)
     return LaneScheduler([
@@ -241,6 +243,42 @@ def build_lanes(once: bool = False) -> LaneScheduler:
         Lane("crypto", crypto, store, enabled, on_unhealthy, tick=5.0),
         Lane("close", close, store, enabled, on_unhealthy, tick=10.0),
     ])
+
+
+def run_legacy(once: bool = False) -> None:
+    """旧版单线程调度（--legacy 回退用），逻辑与分通道改造前一致。
+
+    直接复用本文件的 build_scheduler，不依赖 main.py.bak——.bak 已被 .gitignore 忽略，
+    换台机器或重新 clone 后不存在，原来的写法会让 --legacy 直接崩溃。
+    """
+    state = {"config": load_instruments(), "loaded_at": time.time()}
+    scheduler = build_scheduler(lambda: state["config"])
+    last_run: dict[str, float] = {key: 0.0 for key in DEFAULT_INTERVALS}
+    module_settings: dict[str, bool] = {}
+    refresh_intervals(force=True)
+    print("🚀 旧版单线程调度器已启动" + ("（单轮模式）" if once else ""))
+    while True:
+        now = time.time()
+        if now - state["loaded_at"] >= 60:
+            try:
+                state["config"] = load_instruments()
+            except Exception as e:  # noqa: BLE001
+                print(f"⚠️ 刷新资产配置失败，沿用上一次配置: {e}")
+            state["loaded_at"] = now
+        try:
+            module_settings = get_module_settings()
+        except Exception as e:  # noqa: BLE001  读失败沿用上一轮的开关，避免把已停用的模块误开
+            print(f"⚠️ 读取模块开关失败，沿用上一轮: {e}")
+        intervals = refresh_intervals()
+        for spec in scheduler.due(last_run, module_settings, intervals, now):
+            spec.runner()
+            last_run[spec.interval_key] = time.time()
+        if once:
+            if _meteora_scan_thread is not None:
+                _meteora_scan_thread.join()
+            print("✅ 单轮监控完成，退出。")
+            return
+        time.sleep(scheduler.sleep_seconds(intervals, module_settings, last_run, now))
 
 
 # ================= 主程序逻辑 =================
@@ -263,8 +301,7 @@ if __name__ == "__main__":
         raise SystemExit(2) from exc
 
     if args.legacy:
-        import runpy
-        runpy.run_path(__file__.replace("main.py", "main.py.bak"), run_name="__main__")
+        run_legacy(once=args.once)
         raise SystemExit(0)
 
     scheduler = build_lanes(once=args.once)
