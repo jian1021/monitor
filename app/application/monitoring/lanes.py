@@ -33,6 +33,9 @@ class SchedulePolicy(Protocol):
     def next_after(self, ts: float) -> float:
         """返回严格大于 ts 的下一次计划执行时间（epoch 秒）。"""
 
+    def signature(self) -> str:
+        """策略配置指纹；写入持久化状态，配置变更时让旧 next_due 自动失效。"""
+
 
 @dataclass
 class IntervalPolicy:
@@ -48,12 +51,17 @@ class IntervalPolicy:
         k = int((ts - self.offset) // iv) + 1
         return k * iv + self.offset
 
+    def signature(self) -> str:
+        # 间隔本身是热更新的（UI 可改），不写进签名；沿用旧 next_due 是安全的，
+        # 下一轮 run_due_once 会用新间隔的 next_after 自然对齐。只有错峰 offset 变更才需重算。
+        return f"interval:offset={self.offset}"
+
 
 @dataclass
 class DailyAtPolicy:
     """每天指定时刻执行（本地时区），可限制星期几 / 交易日。
 
-    例：A 股日线 RSI 收盘后 15:05；ETF 周线 RSI 周五 15:10。
+    例：A 股日线 RSI 收盘后 18:00；ETF 周线 RSI 周五 18:10。
     """
     at: dtime
     weekdays: frozenset[int] = frozenset(range(7))      # 0=周一
@@ -70,6 +78,12 @@ class DailyAtPolicy:
             day += timedelta(days=1)
         raise RuntimeError("DailyAtPolicy: 400 天内找不到可执行日")
 
+    def signature(self) -> str:
+        # 时刻 / 星期 / 是否交易日过滤任一变更，都必须让持久化的旧 next_due 失效，
+        # 否则重启后仍会按旧时刻跑一次（例如 15:05 改成 18:00 后仍取到未收盘 K 线）。
+        days = ",".join(str(d) for d in sorted(self.weekdays))
+        return f"daily:{self.at.strftime('%H:%M')}:wd={days}:td={self.is_trading_day is not None}"
+
 
 def weekday_trading_day(dt: datetime) -> bool:
     """最简交易日判定（仅排除周末）；生产建议换成交易所日历（如 baostock query_trade_dates）。"""
@@ -79,27 +93,36 @@ def weekday_trading_day(dt: datetime) -> bool:
 # ================= 状态持久化 =================
 class StateStore(Protocol):
     def load(self, key: str) -> float | None: ...
-    def save(self, key: str, next_due: float) -> None: ...
+    def load_state(self, key: str) -> tuple[float | None, str]:
+        """返回 (next_due, signature)；老数据无签名时 signature 为空串。"""
+    def save(self, key: str, next_due: float, signature: str = "") -> None: ...
 
 
 class MemoryStateStore:
     def __init__(self) -> None:
-        self._d: dict[str, float] = {}
+        self._d: dict[str, tuple[float, str]] = {}
         self._lock = threading.Lock()
 
     def load(self, key):
         with self._lock:
-            return self._d.get(key)
+            v = self._d.get(key)
+            return v[0] if v else None
 
-    def save(self, key, next_due):
+    def load_state(self, key):
         with self._lock:
-            self._d[key] = next_due
+            v = self._d.get(key)
+            return (v[0], v[1]) if v else (None, "")
+
+    def save(self, key, next_due, signature=""):
+        with self._lock:
+            self._d[key] = (next_due, signature)
 
 
 class DbStateStore:
-    """持久化到 libsql：表 module_schedule_state(module_name PK, next_due REAL)。
+    """持久化到 libsql：表 module_schedule_state(module_name PK, next_due REAL, signature TEXT)。
 
-    写失败只打印，不影响调度（最坏情况是重启后多跑一次）。
+    signature 记录算出 next_due 时的调度策略指纹；重启时若策略已变更则丢弃旧值重算，
+    避免「改了收盘时刻但重启后仍按旧时刻执行」。写失败只打印，不影响调度。
     """
 
     def __init__(self, get_client: Callable[[], object]) -> None:
@@ -119,26 +142,40 @@ class DbStateStore:
         try:
             self._exec("CREATE TABLE IF NOT EXISTS module_schedule_state ("
                        "module_name TEXT PRIMARY KEY, next_due REAL NOT NULL, "
+                       "signature TEXT NOT NULL DEFAULT '', "
                        "updated_at TEXT DEFAULT (datetime('now')))")
+            # 老库补列：CREATE TABLE IF NOT EXISTS 不会改动已存在的表
+            try:
+                self._exec("ALTER TABLE module_schedule_state "
+                           "ADD COLUMN signature TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                pass  # 列已存在
         except Exception as e:  # noqa: BLE001
             print(f"⚠️ 创建 module_schedule_state 失败: {e}")
 
     def load(self, key):
+        due, _ = self.load_state(key)
+        return due
+
+    def load_state(self, key):
         try:
-            rs = self._exec("SELECT next_due FROM module_schedule_state WHERE module_name = ?", [key])
+            rs = self._exec("SELECT next_due, signature FROM module_schedule_state "
+                            "WHERE module_name = ?", [key])
             if rs and rs.rows:
-                return float(rs.rows[0][0])
+                row = rs.rows[0]
+                return float(row[0]), str(row[1] or "")
         except Exception as e:  # noqa: BLE001
             print(f"⚠️ 读取调度状态失败({key}): {e}")
-        return None
+        return None, ""
 
-    def save(self, key, next_due):
+    def save(self, key, next_due, signature=""):
         try:
             self._exec(
-                "INSERT INTO module_schedule_state (module_name, next_due, updated_at) "
-                "VALUES (?, ?, datetime('now')) ON CONFLICT(module_name) DO UPDATE SET "
-                "next_due = excluded.next_due, updated_at = datetime('now')",
-                [key, float(next_due)])
+                "INSERT INTO module_schedule_state (module_name, next_due, signature, updated_at) "
+                "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(module_name) DO UPDATE SET "
+                "next_due = excluded.next_due, signature = excluded.signature, "
+                "updated_at = datetime('now')",
+                [key, float(next_due), signature])
         except Exception as e:  # noqa: BLE001
             print(f"⚠️ 保存调度状态失败({key}): {e}")
 
@@ -191,13 +228,18 @@ class Lane(threading.Thread):
         self.next_due: dict[str, float] = {}
         now = clock()
         for job in self.jobs:
-            saved = store.load(job.name)
-            if saved is not None:
-                # 停机期间错过的执行只补一次，而不是连补 N 次
+            saved, saved_sig = store.load_state(job.name)
+            current_sig = job.policy.signature()
+            if saved is not None and saved_sig == current_sig:
+                # 策略未变：沿用持久化状态，停机期间错过的执行只补一次，不连补 N 次
                 self.next_due[job.name] = saved
             else:
+                # 策略变更 / 首次启动 / 老数据无签名：丢弃旧 next_due，按当前策略重算
+                if saved is not None:
+                    print(f"♻️ [{job.name}] 调度策略变更"
+                          f"（{saved_sig or '无签名'} → {current_sig}），按新策略重排")
                 self.next_due[job.name] = now if job.run_on_start else job.policy.next_after(now)
-                store.save(job.name, self.next_due[job.name])
+                store.save(job.name, self.next_due[job.name], current_sig)
 
     def stop(self) -> None:
         self._stop_evt.set()
@@ -216,7 +258,7 @@ class Lane(threading.Thread):
             # 若执行超时跨过多个周期，next_after(now) 直接跳到未来，不会堆积补跑。
             nxt = job.policy.next_after(max(planned, self.clock()))
             self.next_due[job.name] = nxt
-            self.store.save(job.name, nxt)
+            self.store.save(job.name, nxt, job.policy.signature())
         return ran
 
     def _execute(self, job: Job) -> None:

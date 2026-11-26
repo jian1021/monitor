@@ -4,7 +4,7 @@ from datetime import datetime, time as dtime
 
 from app.application.monitoring.lanes import (
     TZ, CachedSource, DailyAtPolicy, IntervalPolicy, Job, Lane, MemoryStateStore,
-    weekday_trading_day,
+    DbStateStore, weekday_trading_day,
 )
 
 
@@ -53,10 +53,11 @@ def test_weekly_friday_only():
 
 def test_restart_uses_persisted_state():
     store = MemoryStateStore()
-    store.save("j", 5000.0)
-    lane = Lane("t", [Job("j", lambda: None, IntervalPolicy(lambda: 60), run_on_start=True)],
+    policy = IntervalPolicy(lambda: 60)
+    store.save("j", 5000.0, policy.signature())
+    lane = Lane("t", [Job("j", lambda: None, policy, run_on_start=True)],
                 store, lambda _: True, clock=FakeClock(1000.0))
-    assert lane.next_due["j"] == 5000.0      # 不因重启立即重跑
+    assert lane.next_due["j"] == 5000.0      # 策略未变，不因重启立即重跑
 
 
 def test_disabled_job_skipped_but_schedule_advances():
@@ -108,3 +109,126 @@ def test_lanes_isolated_slow_does_not_block_fast():
     time.sleep(1.2)
     slow.stop(); fast.stop(); slow.join(3); fast.join(3)
     assert len(fast_hits) >= 1               # 慢通道 sleep 期间快通道照常执行
+
+
+# ================= 策略签名：重启后自动失效旧 next_due =================
+def test_daily_policy_signature_changes_with_time():
+    a = DailyAtPolicy(dtime(15, 5), is_trading_day=weekday_trading_day)
+    b = DailyAtPolicy(dtime(18, 0), is_trading_day=weekday_trading_day)
+    c = DailyAtPolicy(dtime(18, 0), is_trading_day=weekday_trading_day)
+    assert a.signature() != b.signature()
+    assert b.signature() == c.signature()
+    # 周五限定 vs 每天，签名也要不同
+    assert b.signature() != DailyAtPolicy(dtime(18, 0), weekdays=frozenset({4})).signature()
+    # 是否启用交易日过滤，签名也要不同
+    assert b.signature() != DailyAtPolicy(dtime(18, 0)).signature()
+
+
+def test_interval_signature_ignores_hot_updated_interval():
+    """间隔可在 UI 热更新，不应因间隔变化就让持久化状态失效。"""
+    p = IntervalPolicy(lambda: 60)
+    assert p.signature() == IntervalPolicy(lambda: 300).signature()
+    assert p.signature() != IntervalPolicy(lambda: 60, offset=5).signature()
+
+
+def test_restart_invalidates_state_when_close_time_changed():
+    """核心回归：收盘时刻从 15:05 改到 18:00 后重启，不能仍按 15:05 执行。"""
+    old = DailyAtPolicy(dtime(15, 5))
+    new = DailyAtPolicy(dtime(18, 0))
+    store = MemoryStateStore()
+    # 老进程按 15:05 存的下次执行时间
+    store.save("rsi", ts(2026, 11, 27, 15, 5), old.signature())
+
+    clock = FakeClock(ts(2026, 11, 26, 22, 0))
+    lane = Lane("close", [Job("rsi", lambda: None, new)], store, lambda _: True, clock=clock)
+
+    assert lane.next_due["rsi"] == ts(2026, 11, 27, 18, 0)
+    # 重算结果要带新签名写回，后续重启才会稳定沿用
+    assert store.load_state("rsi") == (ts(2026, 11, 27, 18, 0), new.signature())
+
+
+def test_restart_invalidates_legacy_state_without_signature():
+    """升级前的老库没有 signature 列，旧 next_due 应视为失效并重算。"""
+    new = DailyAtPolicy(dtime(18, 0))
+    store = MemoryStateStore()
+    store.save("rsi", ts(2026, 11, 27, 15, 5))   # 老版本 save 不带签名
+
+    lane = Lane("close", [Job("rsi", lambda: None, new)], store, lambda _: True,
+                clock=FakeClock(ts(2026, 11, 26, 22, 0)))
+
+    assert lane.next_due["rsi"] == ts(2026, 11, 27, 18, 0)
+
+
+def test_same_policy_after_restart_still_reuses_state():
+    """策略没变时仍沿用持久化状态（不重复执行、停机只补一次）。"""
+    policy = DailyAtPolicy(dtime(18, 0))
+    store = MemoryStateStore()
+    due = ts(2026, 11, 27, 18, 0)
+    store.save("rsi", due, policy.signature())
+
+    lane = Lane("close", [Job("rsi", lambda: None, policy)], store, lambda _: True,
+                clock=FakeClock(ts(2026, 11, 26, 22, 0)))
+
+    assert lane.next_due["rsi"] == due
+
+
+def test_run_due_once_writes_current_signature():
+    """每轮推进后写回的状态必须带当前策略签名。"""
+    policy = IntervalPolicy(lambda: 60)
+    store = MemoryStateStore()
+    clock = FakeClock(1000.0)
+    lane = Lane("t", [Job("j", lambda: None, policy, run_on_start=True)],
+                store, lambda _: True, clock=clock)
+    lane.run_due_once()
+    assert store.load_state("j") == (lane.next_due["j"], policy.signature())
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+
+class _FakeDbClient:
+    """记录 SQL，模拟 libsql client.execute / close。"""
+
+    def __init__(self, rows=None, alter_raises=False):
+        self.rows = rows or []
+        self.alter_raises = alter_raises
+        self.statements = []
+
+    def execute(self, sql, args=None):
+        self.statements.append((sql, args))
+        if sql.strip().startswith("ALTER") and self.alter_raises:
+            raise RuntimeError("duplicate column name: signature")  # 老库补列已存在
+        if sql.strip().startswith("SELECT"):
+            return _FakeResult(self.rows)
+        return _FakeResult([])
+
+    def close(self):
+        pass
+
+
+def test_db_state_store_persists_signature_and_migrates_old_table():
+    """DbStateStore 要把签名写入新列，并对已存在的老表做幂等 ALTER 补列。"""
+    client = _FakeDbClient(rows=[(1770000000.0, "daily:18:00:wd=0,1,2,3,4,5,6:td=True")],
+                           alter_raises=True)
+    store = DbStateStore(lambda: client)
+
+    due, sig = store.load_state("rsi")
+    assert due == 1770000000.0
+    assert sig.startswith("daily:18:00")
+
+    store.save("rsi", 1770003600.0, "daily:18:00:wd=0,1,2,3,4,5,6:td=True")
+    insert_sql, insert_args = client.statements[-1]
+    assert "signature" in insert_sql
+    assert insert_args[-1] == "daily:18:00:wd=0,1,2,3,4,5,6:td=True"
+
+    assert any("ALTER TABLE" in s and "signature" in s for s, _ in client.statements)
+
+
+def test_db_state_store_legacy_row_without_signature():
+    """老数据（无签名）load_state 返回空签名，Lane 会据此重算。"""
+    client = _FakeDbClient(rows=[(1770000000.0, None)])
+    store = DbStateStore(lambda: client)
+    assert store.load_state("rsi") == (1770000000.0, "")
+
