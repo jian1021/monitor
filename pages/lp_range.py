@@ -19,8 +19,8 @@ from lprange.turso import TursoError, import_turso
 from lprange.watchlist import Watchlist, parse_import_line
 
 # GeckoTerminal 的 network id（与 monitor 的链代码 sol/eth… 不是一套命名）
-NETWORKS = {"solana": "Solana", "eth": "Ethereum", "base": "Base", "bsc": "BNB Chain",
-            "arbitrum": "Arbitrum"}
+NETWORKS = {"solana": "Solana", "robinhood": "Robinhood Chain", "eth": "Ethereum", "base": "Base",
+            "bsc": "BNB Chain", "arbitrum": "Arbitrum"}
 HOLD_OPTIONS = [168, 336, 504, 720]
 TARGET_OPTIONS = [0.7, 0.8, 0.9]
 
@@ -188,10 +188,11 @@ st.caption("持有 1w~1m、区间不调整时，要让价格在区间内的时�
 with st.form("lpr_form", border=False):
     c_q, c_net, c_bin, c_go = st.columns([4, 1.3, 1, 0.8], vertical_alignment="bottom")
     query = c_q.text_input("池子 / 代币地址，或历史池子名称", key="lpr_query",
-                           placeholder="粘贴 Meteora 池子地址；代币地址会自动选流动性最大的池子")
+                           placeholder="Meteora 池子地址 / Uniswap 池子地址或 v4 poolId；代币地址自动选流动性最大的池子")
     network = c_net.selectbox("网络", list(NETWORKS), format_func=NETWORKS.get, key="lpr_net")
     bin_step = c_bin.number_input("binStep（0=自动）", min_value=0, max_value=1000, value=0, step=1,
-                                  key="lpr_bin")
+                                  key="lpr_bin", disabled=network != "solana",
+                                  help="仅 Meteora DLMM（Solana）有 bin；Uniswap 池子不输出 bin 表")
     go = c_go.form_submit_button("📏 分析", type="primary", width="stretch")
     with st.expander("更多参数"):
         a1, a2, a3, a4 = st.columns(4)
@@ -202,7 +203,7 @@ with st.form("lpr_form", border=False):
                              format_func={"base": "base 计价（默认）", "quote": "反转（quote）"}.get)
         refresh = st.checkbox("忽略缓存，强制重新拉取")
 
-opts = {"network": network, "bin_step": int(bin_step), "days": int(days),
+opts = {"network": network, "bin_step": int(bin_step) if network == "solana" else 0, "days": int(days),
         "holds": sorted(holds) or HOLD_OPTIONS, "targets": sorted(targets) or TARGET_OPTIONS,
         "token": token, "refresh": refresh}
 

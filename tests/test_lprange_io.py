@@ -236,3 +236,27 @@ def test_cli_run_records_watchlist_and_batch(tmp_path, monkeypatch, capsys):
     text = capsys.readouterr().out
     assert "批量汇总" in text and "失败 1 个" in text           # 单个池子失败不影响其余
     assert "1w_bins" in out.read_text(encoding="utf-8-sig")
+
+
+# ---------- Robinhood Chain ----------
+def test_robinhood_network_mapping_and_v4_pool_id(tmp_path):
+    cfg = load_config(db_override=str(tmp_path / "w.db"))
+    assert cfg.network_map.get("robinhood") == "robinhood"
+    lp = next(s for s in cfg.turso_sources if s.table == "lp_position_alert")
+    assert "evm_v4" in (lp.where or "")
+
+    class RhTurso:
+        def execute(self, sql):
+            if "lp_position_alert" in sql:
+                return _RS([("0x" + "Ab" * 32, "TOKEN / ETH", "robinhood"),     # v4 poolId（64 hex）
+                            ("0x" + "cd" * 20, "PAIR", "robinhood")])          # v2/v3 池子地址
+            return _RS([])
+
+        def close(self):
+            pass
+
+    wl = Watchlist(cfg.db_path)
+    rows, added, _ = turso.import_turso(cfg, wl, client=RhTurso())
+    assert added == 2
+    assert {p.network for p in wl.list()} == {"robinhood"}
+    assert wl.get("robinhood", "0x" + "ab" * 32) is not None                    # EVM 地址统一小写

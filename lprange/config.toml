@@ -17,7 +17,7 @@ sol = "solana"
 eth = "eth"
 bsc = "bsc"
 base = "base"
-# robinhood = "robinhood"   # 请先确认 GeckoTerminal 上 Robinhood Chain 的 network id
+robinhood = "robinhood"     # GeckoTerminal 的 Robinhood Chain network id
 
 # ------------------------------------------------------------------
 # 以下表名 / 列名取自 monitor 项目代码里的建表语句（app/infrastructure/db/*）。
@@ -33,15 +33,15 @@ name_column = "symbol"
 network = "solana"
 where = "enabled = 1"
 
-# LP 仓位 / 池子价格告警：dlmm = Meteora 池，pool_price = 各链池子地址
-# （evm_v4 的 pool_address 是 Uniswap v4 poolId，不是 GeckoTerminal 能查的池子地址，排除）
+# LP 仓位 / 池子价格告警：dlmm = Meteora 池，pool_price = 各链池子地址，
+# evm_v4 = Robinhood Chain 上的 Uniswap v4 仓位（pool_address 存的是 poolId，GeckoTerminal 的 v4 池子就用 poolId 寻址）
 [[turso.sources]]
 label = "lp_position_alert"
 table = "lp_position_alert"
 address_column = "pool_address"
 name_column = "pool_name"
 network_column = "chain"
-where = "enabled = 1 AND kind IN ('dlmm', 'pool_price')"
+where = "enabled = 1 AND kind IN ('dlmm', 'pool_price', 'evm_v4')"
 
 # RSI 监控里的 Meteora 池（asset_config.code 即池子地址）
 [[turso.sources]]

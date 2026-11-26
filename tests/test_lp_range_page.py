@@ -20,3 +20,8 @@ def test_lp_range_page_reuses_package():
     tree = ast.parse((ROOT / "pages" / "lp_range.py").read_text(encoding="utf-8"))
     mods = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     assert {"lprange.cli", "lprange.stats", "lprange.watchlist"} <= mods
+
+
+def test_lp_range_page_offers_robinhood():
+    src = (ROOT / "pages" / "lp_range.py").read_text(encoding="utf-8")
+    assert '"robinhood": "Robinhood Chain"' in src

@@ -24,6 +24,7 @@ python -m lprange                                   # 无参数：列出 watchli
 python -m lprange run <池子或代币地址> --bin-step 100
 python -m lprange run 3                              # watchlist 第 3 个
 python -m lprange run sol-usdc                       # 名称/备注关键字（多个匹配时让你选）
+python -m lprange run <地址> --network robinhood       # Robinhood Chain（Uniswap 池子地址或 v4 poolId）
 python -m lprange run <地址> --network base --holds 168,720 --targets 0.8 --days 90
 python -m lprange run <地址> --token quote            # 反转价格方向（如看 SOL/cbBTC）
 python -m lprange run --csv kline.csv                # 现成 K 线（timestamp/high/low/close）
@@ -125,11 +126,15 @@ positions = ceil(总 bin 数 / max_bins)   # >1 时提示拆分或换更大的 b
 | 来源 | 表 | 地址列 | 名称列 | network | 过滤 |
 |---|---|---|---|---|---|
 | 批量 Meme 超卖超买 | `meme_watchlist` | `address` | `symbol` | 固定 solana | `enabled = 1` |
-| LP 仓位 / 池子价格告警 | `lp_position_alert` | `pool_address` | `pool_name` | `chain` 列（sol→solana） | `enabled = 1 AND kind IN ('dlmm','pool_price')` |
+| LP 仓位 / 池子价格告警 | `lp_position_alert` | `pool_address` | `pool_name` | `chain` 列（sol→solana，robinhood→robinhood） | `enabled = 1 AND kind IN ('dlmm','pool_price','evm_v4')` |
 | RSI 监控里的 Meteora 池 | `asset_config` | `code` | `name` | 固定 solana | `asset_type = 'meteora' AND enabled = 1` |
 
 需求里提到的 `monitor_meteora_pump` 已从项目中移除，没有对应的表。`lp_position_alert` 里 `kind = 'evm_v4'`
-的行存的是 Uniswap v4 poolId，GeckoTerminal 查不到，所以排除。单个来源查询失败只会跳过该来源；
+的行是 Robinhood Chain 上的 Uniswap v4 仓位，`pool_address` 存的是 poolId——GeckoTerminal 的 v4 池子正是用
+poolId 寻址，所以一并导入。
+
+**Robinhood Chain**：GeckoTerminal network id 为 `robinhood`。Uniswap 池子没有 DLMM 的 bin，
+所以 Robinhood / EVM 池子不输出 bin 表（`--bin-step` 只对 Meteora DLMM 有意义）。单个来源查询失败只会跳过该来源；
 Turso 连不上时会给出明确提示，不影响本地 watchlist。
 
 ## 测试
