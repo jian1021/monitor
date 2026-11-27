@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS price_alert (
     direction     TEXT NOT NULL DEFAULT 'gte',   -- gte: 价格>=目标; lte: 价格<=目标
     enabled       INTEGER NOT NULL DEFAULT 1,
     last_price    REAL,
-    last_checked_at TEXT,
+    last_price_at TEXT,                            -- 最近一次成功取价时间(手动刷新/定时检查都会更新)
+    last_checked_at TEXT,                          -- 最近一次「完整定时检查」完成时间(每日门控的唯一依据)
     daily_check_at TEXT,                           -- NULL=跟随调度轮询; 'HH:MM'=每天北京时间该时刻后检查一次
     alerted       INTEGER NOT NULL DEFAULT 0,    -- 1=该规则已触发过告警(避免重复轰炸)
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS price_alert (
 _MIGRATIONS = (
     "ALTER TABLE price_alert ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'token'",
     "ALTER TABLE price_alert ADD COLUMN daily_check_at TEXT",
+    "ALTER TABLE price_alert ADD COLUMN last_price_at TEXT",
 )
 CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_price_alert_enabled ON price_alert(enabled);"
 
@@ -172,12 +174,15 @@ def load_enabled_rules():
 
 
 def update_rule_price(rule_id: int, price: float, touch_checked: bool = True):
-    """回写最新价格；touch_checked=True 时同时推进 last_checked_at。
+    """回写最新价格与「最近取价」时间；touch_checked=True 时额外推进 last_checked_at。
 
-    last_checked_at 是「每日定时规则今天是否已检查」的唯一依据，只能在
-    调度检查完整处理完（含告警送达）后推进：
-      - 页面手动查价必须传 False，否则当天 09:30 后手动查一次，定时检查就被跳过；
-      - 告警推送失败时不推进，保证每日规则下一轮重试，而不是拖到明天。
+    两个时间戳刻意分开：
+      - last_price_at：只要成功取到价就更新（页面手动刷新 / 后台定时检查都算），
+        用来回答「现价是什么时候拿到的」；
+      - last_checked_at：是「每日定时规则今天是否已检查」的唯一依据，只能在
+        调度检查完整处理完（含告警送达）后推进：
+          * 页面手动查价必须传 False，否则当天 09:30 后手动查一次，定时检查就被跳过；
+          * 告警推送失败时不推进，保证每日规则下一轮重试，而不是拖到明天。
     """
     client = get_db_client()
     if not client:
@@ -185,10 +190,13 @@ def update_rule_price(rule_id: int, price: float, touch_checked: bool = True):
     try:
         if touch_checked:
             client.execute(
-                "UPDATE price_alert SET last_price = ?, last_checked_at = datetime('now') WHERE id = ?",
+                "UPDATE price_alert SET last_price = ?, last_price_at = datetime('now'),"
+                " last_checked_at = datetime('now') WHERE id = ?",
                 [price, rule_id])
         else:
-            client.execute("UPDATE price_alert SET last_price = ? WHERE id = ?", [price, rule_id])
+            client.execute(
+                "UPDATE price_alert SET last_price = ?, last_price_at = datetime('now') WHERE id = ?",
+                [price, rule_id])
     except Exception as e:
         print(f"❌ 回写价格失败 (id={rule_id}): {e}")
     finally:
@@ -242,7 +250,7 @@ def clear_alerted(rule_id: int):
 # ============================================================
 RULE_COLUMNS = ("id", "address", "chain", "asset_type", "symbol", "target_price", "direction",
                 "enabled", "last_price", "last_checked_at", "daily_check_at",
-                "alerted", "created_at")
+                "alerted", "last_price_at", "created_at")
 
 
 def load_all_rules() -> list[dict]:
@@ -253,7 +261,7 @@ def load_all_rules() -> list[dict]:
     try:
         rows = client.execute(
             "SELECT id, address, chain, asset_type, symbol, target_price, direction, enabled,"
-            " last_price, last_checked_at, daily_check_at, alerted, created_at"
+            " last_price, last_checked_at, daily_check_at, alerted, last_price_at, created_at"
             " FROM price_alert ORDER BY id DESC"
         ).rows
         return [
@@ -263,7 +271,7 @@ def load_all_rules() -> list[dict]:
                 "target_price": row[5], "direction": row[6], "enabled": bool(row[7]),
                 "last_price": row[8], "last_checked_at": row[9],
                 "daily_check_at": row[10],
-                "alerted": bool(row[11]), "created_at": row[12],
+                "alerted": bool(row[11]), "last_price_at": row[12], "created_at": row[13],
             }
             for row in rows
         ]

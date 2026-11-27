@@ -179,7 +179,7 @@ n_hit = int((df["enabled"] & df["alerted"]).sum())
 bar_l, bar_r = st.columns([4, 1], vertical_alignment="bottom")
 bar_l.subheader(f"监控列表　{n_on}/{len(df)} 启用 · {n_hit} 已触发")
 refresh = bar_r.button("🔄 刷新现价", width="stretch",
-                       help="立即查询所有启用规则的现价（不影响每日定时检查）")
+                       help="立即查询所有启用规则的现价，并更新「最近取价」时间；不影响每日定时检查")
 
 if refresh:
     with st.spinner("刷新中 ..."):
@@ -191,6 +191,8 @@ if refresh:
                 bad += 1
                 continue
             price_service.update_rule_price(int(r["id"]), px, touch_checked=False)
+    # data_editor 会按 key 缓存单元格状态；不清掉会拿旧值盖住刚刷新的数据
+    st.session_state.pop("rules_editor", None)
     st.toast("现价已刷新" + (f"，{bad} 条取价失败" if bad else ""), icon="🔄")
     st.rerun()
 
@@ -218,7 +220,8 @@ view = pd.DataFrame({
     "状态": df.apply(lambda r: "🔔 已触发" if r["enabled"] and r["alerted"]
                      else ("🟢 监控中" if r["enabled"] else "⏸️ 停用"), axis=1),
     "每日检查": df["daily_check_at"].fillna(""),
-    "最近检查": df["last_checked_at"].apply(lambda v: to_local_display(v, fallback="—")),
+    "最近取价": df["last_price_at"].apply(lambda v: to_local_display(v, fallback="—")),
+    "最近定时检查": df["last_checked_at"].apply(lambda v: to_local_display(v, fallback="—")),
     "删除": False,
 })
 
@@ -228,8 +231,9 @@ edited = st.data_editor(
     hide_index=True,
     width="stretch",
     column_order=["启用", "名称", "类型", "条件", "目标价", "现价", "距目标", "状态",
-                  "每日检查", "最近检查", "代码/地址", "删除"],
-    disabled=["名称", "类型", "现价", "距目标", "状态", "最近检查", "代码/地址"],
+                  "每日检查", "最近取价", "最近定时检查", "代码/地址", "删除"],
+    disabled=["名称", "类型", "现价", "距目标", "状态", "最近取价", "最近定时检查",
+              "代码/地址"],
     column_config={
         "id": None,
         "启用": st.column_config.CheckboxColumn(width="small"),
@@ -240,6 +244,11 @@ edited = st.data_editor(
                                               help="目标价相对现价的涨跌幅"),
         "每日检查": st.column_config.TextColumn(help="HH:MM 每天定时检查一次；留空跟随轮询",
                                               width="small"),
+        "最近取价": st.column_config.TextColumn(
+            help="最近一次成功取到报价的时刻；手动「刷新现价」和后台定时检查都会更新", width="small"),
+        "最近定时检查": st.column_config.TextColumn(
+            help="最近一次完整定时检查（含告警判定）完成的时刻，每日规则靠它判断今天是否已查过；手动刷新不会改动",
+            width="small"),
         "代码/地址": st.column_config.TextColumn(width="medium"),
         "删除": st.column_config.CheckboxColumn(width="small"),
     },
@@ -292,3 +301,6 @@ if changes:
 
 st.caption("勾选「启用」「删除」，或直接改目标价 / 条件 / 每日检查后点保存。"
            "改目标价或条件会重置「已触发」状态。后台由 `python main.py` 调度运行。")
+st.caption("「最近取价」= 最近一次拿到报价的时刻（手动刷新与定时检查都更新）；"
+           "「最近定时检查」= 完成一次完整定时检查（含告警判定）的时刻，每日规则靠它判断当天是否已查过，"
+           "所以手动刷新不会改动它。")
