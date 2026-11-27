@@ -8,11 +8,38 @@
 页面默认：持有 1 周、历史门槛 1 倍（history_days ≥ 持有天数即给结果，适合历史短的新池子）；
 命令行默认仍是 4 个周期 + 3 倍门槛。
 """
+import importlib
 import json
+import os
+import sys
+import time
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+# Streamlit 每次交互只重跑页面文件，已导入的 lprange 模块会一直留在 sys.modules 里。
+# git pull 更新代码后（Streamlit Cloud 推送部署就是这样），页面是新的、lprange 还是旧的，
+# 新页面引用旧模块里没有的函数就会 ImportError。这里在导入前检查文件修改时间，有更新就按依赖顺序重载。
+_LPR_MODULES = ("lprange.stats", "lprange.backtest", "lprange.data", "lprange.watchlist",
+                "lprange.config", "lprange.turso", "lprange.report", "lprange.cli")
+
+
+def _reload_lprange_if_changed() -> None:
+    pkg = sys.modules.get("lprange")
+    if pkg is None:
+        return
+    loaded = [sys.modules[n] for n in _LPR_MODULES if n in sys.modules]
+    files = [getattr(m, "__file__", None) for m in loaded + [pkg]]
+    newest = max((os.path.getmtime(f) for f in files if f and os.path.exists(f)), default=0.0)
+    if newest <= getattr(pkg, "_loaded_at", 0.0):
+        return
+    for mod in loaded:
+        importlib.reload(mod)
+    pkg._loaded_at = time.time()
+
+
+_reload_lprange_if_changed()
 
 from lprange.cli import build_parser, run_backtest, run_one
 from lprange.config import load_config

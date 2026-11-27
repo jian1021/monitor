@@ -31,3 +31,14 @@ def test_lp_range_page_defaults_one_week_and_mult_one():
     src = (ROOT / "pages" / "lp_range.py").read_text(encoding="utf-8")
     assert "DEFAULT_HOLDS = [168]" in src and "DEFAULT_HISTORY_MULT = 1.0" in src
     assert "一键分析全部" in src and "分析选中" in src
+
+
+def test_lp_range_page_reloads_stale_modules_before_import():
+    """Streamlit 只重跑页面脚本，lprange.* 会留在 sys.modules；推送部署后
+    新页面引用旧模块没有的函数会 ImportError（Cloud 上实际发生过）。
+    守卫必须在导入 lprange.cli 之前执行。"""
+    src = (ROOT / "pages" / "lp_range.py").read_text(encoding="utf-8")
+    guard = "\n_reload_lprange_if_changed()\n"
+    assert guard in src
+    assert "importlib.reload" in src
+    assert src.index(guard) < src.index("from lprange.cli import")
