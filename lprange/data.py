@@ -23,6 +23,24 @@ PAGE_LIMIT = 1000
 HOUR = 3600
 
 
+def to_api_currency(currency: str, token: str = "base") -> tuple[str, str]:
+    """内部价格口径 → GeckoTerminal OHLCV 的 (currency, token) 查询参数。
+
+    GeckoTerminal 的 ``currency`` 只接受 ``usd`` / ``token``；传 ``quote`` 会返回
+    HTTP 400 "Invalid currency. Allowed values: usd, token"。要拿「池子自身比价」
+    必须用 ``currency=token``，再由 ``token`` 决定方向（实测）：
+
+      - ``token=base``  → 1 base = X quote（与 base_token_price_quote_token 一致）
+      - ``token=quote`` → 倒数 1 quote = X base
+
+    内部（CLI 默认值、缓存 series key、测试 FakeClient）沿用更贴切的 ``quote``
+    口径名，只在真正发请求时转换，避免污染上层语义。
+    """
+    if currency == "quote":
+        return "token", token
+    return currency, token
+
+
 class LPRangeError(Exception):
     """面向用户的错误：只打印消息，不打印堆栈。"""
 
@@ -106,7 +124,8 @@ class GeckoClient:
 
     def ohlcv_page(self, network: str, pool: str, before: int | None, currency: str,
                    token: str) -> list[list[float]]:
-        params = {"aggregate": 1, "limit": PAGE_LIMIT, "currency": currency, "token": token}
+        api_currency, api_token = to_api_currency(currency, token)
+        params = {"aggregate": 1, "limit": PAGE_LIMIT, "currency": api_currency, "token": api_token}
         if before is not None:
             params["before_timestamp"] = int(before)
         payload = self.get(f"/networks/{network}/pools/{pool}/ohlcv/hour", params)
@@ -411,7 +430,7 @@ class BacktestData:
 def load_backtest_series(client: "GeckoClient", network: str, pool: str, days: float, *,
                          token: str = "base", cache: "OhlcvCache | None" = None, refresh: bool = False,
                          now: int | None = None) -> BacktestData:
-    """价格取 currency=quote（池子比价），成交量取 currency=usd，两条序列按小时对齐。"""
+    """价格取池子比价（内部 quote 口径，请求时转 currency=token&token=base），成交量取 usd。"""
     now = int(now or time.time())
     raw_px, rep_px = load_ohlcv(client, network, pool, days, currency="quote", token=token,
                                 cache=cache, refresh=refresh, now=now)

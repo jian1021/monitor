@@ -1,6 +1,6 @@
 """策略回测：(区间宽度 × 调仓规则) 网格的逐小时模拟。
 
-价格必须是池子自身的比价（base 以 quote 计价，GeckoTerminal currency=quote），不是美元价；
+价格必须是池子自身的比价（base 以 quote 计价；接口用 currency=token&token=base），不是美元价；
 成交量用美元口径，和 TVL（美元）相除得到无量纲的手续费收益率。
 
 记账口径（全部相对「持有建仓时那一篮子代币」= HODL）：

@@ -163,7 +163,9 @@ Turso 连不上时会给出明确提示，不影响本地 watchlist。
 
 口径：
 
-- **价格**：池子自身比价（GeckoTerminal `currency=quote`），不是美元价；成交量单独取美元口径，与 TVL（美元）相除；
+- **价格**：池子自身比价（`1 base = X quote`），不是美元价；成交量单独取美元口径，与 TVL（美元）相除。
+  接口参数实际是 `currency=token&token=base`（GeckoTerminal 的 `currency` 只允许 `usd`/`token`，
+  代码里的 `quote` 是内部口径名，发请求时自动转换）；`--token quote` 取倒数比价；
 - **基准**：相对「持有建仓时那一篮子代币」的超额收益，不含代币本身涨跌；
 - **手续费**：收盘价在区间内的小时计入 `成交量 × 费率 × liq_width ÷ (区间对数宽度 × TVL)`。
   `liq_width` 表示「池子其他 LP 的流动性相当于 TVL 均匀铺在多宽的对数区间里」（默认 0.5，约 ±25%），

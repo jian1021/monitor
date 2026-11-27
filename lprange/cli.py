@@ -44,8 +44,9 @@ def _analysis_options() -> argparse.ArgumentParser:
                    help="时间占比目标，默认 0.7,0.8,0.9")
     g.add_argument("--days", type=float, default=180, help="回看天数（默认 180）")
     g.add_argument("--currency", choices=["usd", "quote"], default="quote",
-                   help="价格口径：quote = 池子自身比价（默认，LP 区间就是按它算的）；usd = 美元价")
-    g.add_argument("--token", default="base", help="base / quote / 代币地址（做币本位相对价格）")
+                   help="价格口径：quote = 池子自身比价（默认；接口转为 currency=token）；usd = 美元价")
+    g.add_argument("--token", default="base",
+                   help="base / quote / 代币地址：quote 口径下的比价方向（base = base/quote 比价）")
     g.add_argument("--bin-step", type=int, default=None, help="DLMM binStep；不传时 solana 池子尝试自动读取")
     g.add_argument("--no-auto-bin-step", action="store_true", help="不自动读取 Meteora binStep")
     g.add_argument("--max-bins", type=int, default=69, help="单个 position 的 bin 上限（默认 69）")
