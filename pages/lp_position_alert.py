@@ -13,8 +13,10 @@ import pandas as pd
 import streamlit as st
 
 from app.interfaces.monitor_controls import render_monitor_controls
-from app.interfaces.timefmt import to_local_display
+from app.interfaces.reload_guard import fresh_timefmt
 from scripts import lp_position_alert as lpa
+
+to_local_display = fresh_timefmt()
 
 st.set_page_config(page_title="LP 仓位告警", page_icon="📌", layout="wide")
 st.title("📌 LP 仓位告警")

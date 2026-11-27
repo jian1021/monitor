@@ -18,7 +18,9 @@ from app.interfaces.asset_config import (
     fetch_all_assets, format_candidate, token_candidates, update_asset_status,
 )
 from app.interfaces.monitor_controls import render_monitor_controls
-from app.interfaces.timefmt import to_local_display
+from app.interfaces.reload_guard import fresh_timefmt
+
+to_local_display = fresh_timefmt()
 
 TOKEN_TIMEFRAMES = {"1d": "日线", "4h": "4H", "1h": "1H"}
 TF_BY_LABEL = {v: k for k, v in TOKEN_TIMEFRAMES.items()}

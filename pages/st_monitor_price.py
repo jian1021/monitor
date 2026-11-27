@@ -40,7 +40,9 @@ RULE_COLUMNS = price_service.RULE_COLUMNS  # 必须在 reload 之后再取，否
 from app.infrastructure.market_data.dexscreener import fetch_token_info
 from app.infrastructure.market_data.a_share import fetch_realtime_price, is_convertible_bond
 from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
-from app.interfaces.timefmt import to_local_display
+from app.interfaces.reload_guard import fresh_timefmt
+
+to_local_display = fresh_timefmt()
 
 CHAIN_OPTIONS = TOKEN_CHAINS  # 唯一来源：app/interfaces/asset_config.py
 TYPE_LABELS = {"token": "🪙 代币", "ashare": "📈 A股/ETF", "cbond": "💴 可转债"}

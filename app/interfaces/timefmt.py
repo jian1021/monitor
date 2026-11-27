@@ -1,10 +1,14 @@
-"""数据库时间戳展示：库里统一存 UTC（`datetime('now')`），页面按本机时区展示。
+"""数据库时间戳展示：库里统一存 UTC，页面固定按 UTC+8（北京时间）展示。
 
 SQLite/Turso 的 `datetime('now')` 返回 UTC，不带时区标记。若直接把字符串丢到
-表格里，北京时间会显示成比实际早 8 小时，看起来像「告警没发出去」。
+表格里，会显示成比北京时间早 8 小时（看起来像「告警没发出去」）。这里显式用
+`DISPLAY_TZ`，不用裸 `.astimezone()`——后者跟随服务器时区，Streamlit Cloud
+默认 UTC 时又会显示错。
 """
 
 from datetime import datetime, timezone
+
+from app.core.timezones import DISPLAY_TZ
 
 _PARSERS = (
     "%Y-%m-%d %H:%M:%S.%f",
@@ -17,9 +21,12 @@ _PARSERS = (
 
 
 def to_local_display(value, fmt: str = "%Y-%m-%d %H:%M", fallback: str = "-") -> str:
-    """把 UTC 时间串转成本机时区；无法解析时原样返回，空值返回 fallback。
+    """把库里的时间串统一转成 UTC+8（北京时间）展示；空值返回 fallback。
 
-    已经是带时区的 ISO 串（含 +08:00 / Z）时按原时区解析后再转换。
+    - 无时区的 naive 串按 UTC 解析（数据库 `datetime('now')` 的约定）；
+    - 带时区的 ISO 串（含 +08:00 / Z）按其原时区解析后再换算到 UTC+8；
+    - 无法解析时原样返回。
+    输出与运行环境的 TZ 无关，本地 / Cloud / 服务器显示一致。
     """
     if value is None:
         return fallback
@@ -37,12 +44,12 @@ def to_local_display(value, fmt: str = "%Y-%m-%d %H:%M", fallback: str = "-") ->
     except ValueError:
         parsed = None
     if parsed is not None and parsed.tzinfo is not None:
-        return parsed.astimezone().strftime(fmt)
+        return parsed.astimezone(DISPLAY_TZ).strftime(fmt)
 
     for parser in _PARSERS:
         try:
             naive = datetime.strptime(text, parser)
         except ValueError:
             continue
-        return naive.replace(tzinfo=timezone.utc).astimezone().strftime(fmt)
+        return naive.replace(tzinfo=timezone.utc).astimezone(DISPLAY_TZ).strftime(fmt)
     return str(value)

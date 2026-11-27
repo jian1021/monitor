@@ -17,7 +17,9 @@ from app.interfaces.asset_config import (
     update_asset_status,
 )
 from app.interfaces.monitor_controls import render_monitor_controls
-from app.interfaces.timefmt import to_local_display
+from app.interfaces.reload_guard import fresh_timefmt
+
+to_local_display = fresh_timefmt()
 
 ASSET_TYPE_MAP = {"meteora": "☄️ Meteora 池", "bond": "📈 可转债", "etf": "📊 ETF"}
 

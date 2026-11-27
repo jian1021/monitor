@@ -12,10 +12,11 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
+
+from app.core.timezones import now_display
 
 from app.application.meteora_scanner import config
 from app.application.meteora_scanner.db import Database
@@ -128,7 +129,7 @@ def fmt_num(v, digits=2) -> str:
 
 
 def now_str() -> str:
-    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    return now_display()
 
 
 # ===========================================================================

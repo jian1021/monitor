@@ -44,12 +44,14 @@ _reload_lprange_if_changed()
 from lprange.cli import build_parser, run_backtest, run_one
 from lprange.config import load_config
 from lprange.data import LPRangeError
-from app.interfaces.timefmt import to_local_display
+from app.interfaces.reload_guard import fresh_timefmt
 from lprange.report import (BACKTEST_DISCLAIMER, BACKTEST_NOTE, DISCLAIMER, backtest_rows, list_summary, pct,
                             single_csv_rows, single_to_dict)
 from lprange.stats import STATUS_INSUFFICIENT, STATUS_REFERENCE, bin_counts, hold_label, tilt_label
 from lprange.turso import TursoError, import_turso
 from lprange.watchlist import Watchlist, parse_import_line
+
+to_local_display = fresh_timefmt()
 
 # GeckoTerminal 的 network id（与 monitor 的链代码 sol/eth… 不是一套命名）
 NETWORKS = {"solana": "Solana", "robinhood": "Robinhood Chain", "eth": "Ethereum", "base": "Base",

@@ -5,7 +5,6 @@
    后台会重复取数、重复告警。
 """
 
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,10 +12,9 @@ from app.application.assets import service as asset_service
 from app.interfaces.timefmt import to_local_display
 
 
-def test_utc_timestamp_converted_to_local():
-    expected = datetime(2026, 11, 5, 8, 32, 45, tzinfo=timezone.utc).astimezone().strftime(
-        "%Y-%m-%d %H:%M")
-    assert to_local_display("2026-11-05 08:32:45") == expected
+def test_utc_timestamp_converted_to_beijing():
+    # 库里 datetime('now') 是 UTC naive 串，展示固定 +8，与运行环境时区无关
+    assert to_local_display("2026-11-05 08:32:45") == "2026-11-05 16:32"
 
 
 def test_empty_timestamp_uses_fallback():
@@ -29,10 +27,11 @@ def test_unparsable_timestamp_returned_as_is():
     assert to_local_display("not-a-time") == "not-a-time"
 
 
-def test_iso_with_timezone_is_converted():
-    expected = datetime(2026, 11, 5, 0, 32, 45, tzinfo=timezone.utc).astimezone().strftime(
-        "%Y-%m-%d %H:%M")
-    assert to_local_display("2026-11-05T00:32:45Z") == expected
+def test_iso_with_timezone_is_converted_to_beijing():
+    # 无论写入时带的是 Z / +00:00 / +08:00，展示都归一到 UTC+8
+    assert to_local_display("2026-11-05T00:32:45Z") == "2026-11-05 08:32"
+    assert to_local_display("2026-11-05T00:32:45+00:00") == "2026-11-05 08:32"
+    assert to_local_display("2026-11-05T08:32:45+08:00") == "2026-11-05 08:32"
 
 
 def test_add_new_asset_rejects_duplicate():

@@ -18,7 +18,9 @@ from app.interfaces.asset_config import (
     add_new_asset, delete_asset, ensure_asset_schema, fetch_all_assets, update_asset_status,
 )
 from app.interfaces.monitor_controls import render_monitor_controls
-from app.interfaces.timefmt import to_local_display
+from app.interfaces.reload_guard import fresh_timefmt
+
+to_local_display = fresh_timefmt()
 
 CRYPTO_TIMEFRAMES = {"1W": "周线", "1D": "日线", "4H": "4H", "1H": "1H", "15m": "15分钟"}
 TF_BY_LABEL = {v: k for k, v in CRYPTO_TIMEFRAMES.items()}

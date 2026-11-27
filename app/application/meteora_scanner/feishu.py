@@ -19,6 +19,7 @@ from typing import Optional
 
 import requests
 
+from app.core.timezones import now_iso
 from .db import Database
 
 # 不同事件的去重时间窗（小时）
@@ -33,7 +34,12 @@ DEDUP_WINDOWS = {
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    """告警文案里的「更新时间」：固定 UTC+8（北京时间），不随服务器时区变。
+
+    注意这只用于消息展示；alerts.ts 的去重时间戳仍由 db._now_iso() 生成，
+    那边必须保持与历史数据的偏移一致，不能混用。
+    """
+    return now_iso()
 
 
 def _fmt(v) -> str:
