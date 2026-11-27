@@ -260,3 +260,43 @@ def test_robinhood_network_mapping_and_v4_pool_id(tmp_path):
     assert added == 2
     assert {p.network for p in wl.list()} == {"robinhood"}
     assert wl.get("robinhood", "0x" + "ab" * 32) is not None                    # EVM 地址统一小写
+
+
+# ---------- 监控列表：结果保存 ----------
+def test_watchlist_results_roundtrip_and_cascade(tmp_path):
+    wl = Watchlist(str(tmp_path / "w.db"))
+    wl.upsert("solana", POOL, name="A")
+    pool = wl.get("solana", POOL)
+    wl.save_result(pool.id, {"holds": {"1w": {"typical": 0.1}}})
+    wl.save_result(pool.id, {"holds": {"1w": {"typical": 0.2}}})        # 覆盖为最新一次
+    at, summary = wl.results()[pool.id]
+    assert at and summary["holds"]["1w"]["typical"] == 0.2
+    wl.remove(pool)
+    assert wl.results() == {}
+
+
+def test_list_summary_from_run(tmp_path):
+    from lprange.report import list_summary
+    n = 24 * 30
+    close = np.exp(np.cumsum(np.random.default_rng(9).normal(0, 0.01, n)))
+    f = tmp_path / "k.csv"
+    pd.DataFrame({"timestamp": NOW + np.arange(n) * HOUR, "high": close, "low": close,
+                  "close": close}).to_csv(f, index=False)
+    args = cli.build_parser().parse_args(["run", "--csv", str(f), "--holds", "168", "--bin-step", "100",
+                                          "--min-history-mult", "1", "--db", str(tmp_path / "w.db")])
+    r = cli.run_one(args, load_config(db_override=str(tmp_path / "w.db")),
+                    Watchlist(str(tmp_path / "w.db")), None)
+    s = list_summary(r)
+    h = s["holds"]["1w"]
+    assert s["target"] == 0.8 and h["status"] == "ok"
+    assert 0 < h["typical"] <= h["conservative"] and h["bins"] > 0
+    json.dumps(s)                                                         # 能序列化存库
+
+
+def test_one_week_mult_one_gives_result_on_short_history():
+    from lprange import stats
+    close = np.exp(np.cumsum(np.random.default_rng(4).normal(0, 0.01, 24 * 10)))
+    (res,) = stats.analyze(close, holds=[168], history_days=10, min_history_mult=1)
+    assert res.recommend                                                  # 10 天 ≥ 7 天 × 1
+    (res3,) = stats.analyze(close, holds=[168], history_days=10, min_history_mult=3)
+    assert not res3.recommend                                             # 10 天 < 7 天 × 3

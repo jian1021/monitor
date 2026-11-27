@@ -175,6 +175,28 @@ def render_single(r: RunResult) -> str:
     return "\n".join(out)
 
 
+# ================= 监控列表摘要 =================
+def list_summary(r: RunResult, target: float = 0.8) -> dict:
+    """一次分析的摘要（存进 watchlist.results，供监控列表展示）。"""
+    if target not in r.targets and r.targets:
+        target = r.targets[len(r.targets) // 2]
+    holds = {}
+    for h in r.holds:
+        rec = (h.recommend.get(target) or {}) if h.has_recommendation else {}
+        typical, conservative = rec.get("typical"), rec.get("conservative")
+        bins = bin_counts(typical, typical, r.bin_step, r.max_bins) if (r.bin_step and typical is not None) else None
+        e = h.exits or {}
+        holds[h.label] = {
+            "status": h.status, "typical": typical, "conservative": conservative,
+            "bins": bins["bins_total"] if bins else None, "positions": bins["positions"] if bins else None,
+            "tilt": tilt_label(e.get("up_share")), "never_return": e.get("never_return_ratio"),
+            "independent_windows": round(h.independent_windows, 1),
+        }
+    return {"target": target, "name": r.pool.get("name"), "price": r.current_price,
+            "history_days": round(r.history_days, 1), "gap_ratio": round(r.gap_ratio, 4),
+            "bin_step": r.bin_step, "holds": holds, "warnings": r.warnings}
+
+
 # ================= 批量 =================
 def batch_row(r: RunResult, target: float = 0.8) -> dict:
     row = {"名称": r.pool.get("name") or "—", "network": r.pool.get("network"),

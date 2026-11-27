@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -56,6 +57,13 @@ class Watchlist:
                 added_at TEXT NOT NULL DEFAULT (datetime('now')),
                 UNIQUE (network, address)
             )""")
+        # 每个池子最近一次分析的摘要（监控列表展示用）；只存摘要，不存 K 线
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS results (
+                pool_id INTEGER PRIMARY KEY,
+                analyzed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                summary TEXT NOT NULL
+            )""")
         self.conn.commit()
 
     # ---- 写 ----
@@ -84,7 +92,27 @@ class Watchlist:
 
     def remove(self, pool: Pool) -> None:
         self.conn.execute("DELETE FROM pools WHERE id = ?", (pool.id,))
+        self.conn.execute("DELETE FROM results WHERE pool_id = ?", (pool.id,))
         self.conn.commit()
+
+    # ---- 分析结果 ----
+    def save_result(self, pool_id: int, summary: dict) -> None:
+        self.conn.execute(
+            "INSERT INTO results (pool_id, analyzed_at, summary) VALUES (?, datetime('now'), ?)"
+            " ON CONFLICT(pool_id) DO UPDATE SET analyzed_at = excluded.analyzed_at,"
+            " summary = excluded.summary",
+            (int(pool_id), json.dumps(summary, ensure_ascii=False, default=float)))
+        self.conn.commit()
+
+    def results(self) -> dict[int, tuple[str, dict]]:
+        """{pool_id: (analyzed_at UTC 文本, 摘要)}。"""
+        out = {}
+        for row in self.conn.execute("SELECT pool_id, analyzed_at, summary FROM results").fetchall():
+            try:
+                out[int(row[0])] = (row[1], json.loads(row[2]))
+            except (TypeError, ValueError):
+                continue
+        return out
 
     # ---- 读 ----
     def get(self, network: str, address: str) -> Pool | None:

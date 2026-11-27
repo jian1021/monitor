@@ -25,3 +25,9 @@ def test_lp_range_page_reuses_package():
 def test_lp_range_page_offers_robinhood():
     src = (ROOT / "pages" / "lp_range.py").read_text(encoding="utf-8")
     assert '"robinhood": "Robinhood Chain"' in src
+
+
+def test_lp_range_page_defaults_one_week_and_mult_one():
+    src = (ROOT / "pages" / "lp_range.py").read_text(encoding="utf-8")
+    assert "DEFAULT_HOLDS = [168]" in src and "DEFAULT_HISTORY_MULT = 1.0" in src
+    assert "一键分析全部" in src and "分析选中" in src
