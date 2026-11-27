@@ -14,11 +14,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from lprange.cli import build_parser, run_one
+from lprange.cli import build_parser, run_backtest, run_one
 from lprange.config import load_config
 from lprange.data import LPRangeError
 from app.interfaces.timefmt import to_local_display
-from lprange.report import DISCLAIMER, list_summary, pct, single_csv_rows, single_to_dict
+from lprange.report import (BACKTEST_DISCLAIMER, BACKTEST_NOTE, DISCLAIMER, backtest_rows, list_summary, pct,
+                            single_csv_rows, single_to_dict)
 from lprange.stats import STATUS_INSUFFICIENT, STATUS_REFERENCE, bin_counts, hold_label, tilt_label
 from lprange.turso import TursoError, import_turso
 from lprange.watchlist import Watchlist, parse_import_line
@@ -382,6 +383,63 @@ else:
             st.error(f"上次分析失败：{summary['error']}")
         else:
             st.caption("完整明细（偏斜区间、出界行为、宽度曲线等）需要在本次会话里分析一次：点「分析此池」。")
+
+    # ---------------- 策略回测 ----------------
+    with st.expander("🧪 策略回测：(宽度 × 调仓规则) 网格，按净收益排序", expanded=False):
+        bpool = by_id[detail_id]
+        b1, b2, b3, b4, b5 = st.columns([1, 1, 1, 1, 1])
+        bt_fee = b1.number_input("费率 %（0 = 自动读取）", min_value=0.0, max_value=20.0, value=0.0, step=0.05,
+                                 key="bt_fee")
+        bt_tvl = b2.number_input("TVL $（0 = 用当前值）", min_value=0.0, value=0.0, step=10_000.0, key="bt_tvl")
+        bt_liq = b3.number_input("liq_width", min_value=0.05, max_value=5.0, value=0.5, step=0.05, key="bt_liq",
+                                 help="其他 LP 的流动性等效铺开的对数宽度；越小 = 竞争越集中 = 你的手续费越少")
+        bt_extra = b4.number_input("调仓额外成本 %", min_value=0.0, max_value=5.0, value=0.2, step=0.05,
+                                   key="bt_extra", help="滑点 / gas；另加 0.5 × 费率")
+        bt_h = b5.selectbox("H", HOLD_OPTIONS, index=0, format_func=hold_label, key="bt_h",
+                            help="波动率定宽 √H 的 H、到期调仓的周期、独立窗口的长度")
+        if st.button(f"🧪 回测 {bpool.name or bpool.address[:10]}", type="primary"):
+            argv = ["backtest", bpool.address, "--network", bpool.network, "--days", str(opts["days"]),
+                    "--holds", str(bt_h), "--token", opts["token"], "--liq-width", str(bt_liq),
+                    "--rebalance-extra", str(bt_extra / 100)]
+            if bt_fee > 0:
+                argv += ["--fee", str(bt_fee / 100)]
+            if bt_tvl > 0:
+                argv += ["--tvl", str(bt_tvl)]
+            if opts["refresh"]:
+                argv.append("--refresh")
+            with st.spinner("拉取比价与成交量并模拟 64 个组合 …"):
+                try:
+                    st.session_state["bt_report"] = (detail_id, run_backtest(build_parser().parse_args(argv),
+                                                                             _cfg(), _wl(), bpool.address,
+                                                                             network=bpool.network))
+                except Exception as exc:  # noqa: BLE001
+                    st.session_state.pop("bt_report", None)
+                    st.error(f"❌ 回测失败：{exc}")
+        saved_bt = st.session_state.get("bt_report")
+        if saved_bt and saved_bt[0] == detail_id:
+            rep_bt = saved_bt[1]
+            r_bt = rep_bt.result
+            st.caption(f"模拟 {r_bt.hours / 24:.0f} 天 · 费率 {r_bt.fee_rate * 100:.3g}%（{rep_bt.fee_source}）· "
+                       f"TVL ${r_bt.tvl_usd:,.0f}（{rep_bt.tvl_source}）· 每次调仓成本 {r_bt.rebalance_cost * 100:.3g}%")
+            for n in rep_bt.notes:
+                st.warning(n, icon="⚠️")
+            df_bt = pd.DataFrame(backtest_rows(rep_bt))
+            show = ["排名", "组合", "平均半宽", "净收益年化", "手续费年化", "无常损失年化", "调仓成本年化",
+                    "调仓次数", "时间占比", "成交量占比", "窗口净收益p10", "独立窗口"]
+            pct_cols = ["平均半宽", "净收益年化", "手续费年化", "无常损失年化", "调仓成本年化", "时间占比",
+                        "成交量占比", "窗口净收益p10"]
+            view_bt = df_bt[show].copy()
+            for col in pct_cols:
+                view_bt[col] = view_bt[col] * 100
+            st.dataframe(view_bt, hide_index=True, width="stretch", height=460, column_config={
+                **{col: st.column_config.NumberColumn(f"{col} %", format="%.1f") for col in pct_cols},
+                "独立窗口": st.column_config.NumberColumn(format="%.1f", width="small"),
+                "调仓次数": st.column_config.NumberColumn(width="small"),
+            })
+            st.download_button("⬇️ 回测 CSV", df_bt.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="lprange_backtest.csv", mime="text/csv")
+            st.caption(BACKTEST_NOTE + " 窗口净收益 p10 = 按 H 切成不重叠窗口后最差 10% 的持有期（不年化）。")
+            st.caption(BACKTEST_DISCLAIMER)
 
 # ---------------- 导入 ----------------
 with st.expander("➕ 批量导入池子"):

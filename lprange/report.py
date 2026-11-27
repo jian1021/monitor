@@ -8,6 +8,7 @@ import math
 import unicodedata
 from dataclasses import dataclass, field
 
+from .backtest import BacktestResult, combo_row
 from .stats import (STATUS_INSUFFICIENT, STATUS_REFERENCE, HoldResult, bin_counts,
                     log_width, tilt_label)
 
@@ -333,3 +334,70 @@ def single_csv_rows(r: RunResult) -> list[dict]:
         for item in h["width_table"]:
             rows.append({"hold": h["label"], "status": h["status"], **item})
     return rows
+
+
+# ================= 策略回测 =================
+BACKTEST_NOTE = ("口径：价格为池子自身比价；收益相对「持有建仓时的代币篮子」（不含代币本身涨跌）；"
+                 "手续费 = 成交量 × 费率 × liq_width ÷ (区间对数宽度 × TVL)，绝对水平取决于 liq_width 与 TVL 假设，"
+                 "组合之间的相对排序更可信；无常损失按集中流动性公式近似 DLMM。")
+BACKTEST_DISCLAIMER = "⚠️ 回测是对历史行情的模拟，不代表未来收益；样本内最优的组合往往在样本外变差，请看窗口 p10 与独立窗口数。"
+
+
+@dataclass
+class BacktestReport:
+    pool: dict
+    result: BacktestResult
+    fee_source: str
+    tvl_source: str
+    history_days: float
+    gap_ratio: float
+    notes: list[str] = field(default_factory=list)
+
+
+def _sp(v, digits: int = 3) -> str:
+    """带符号百分比；超大值（窄区间高频调仓时手续费年化可能上千倍）用倍数显示。"""
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return "—"
+    if abs(v) >= 100:
+        return f"{v:+.0f}x"
+    return f"{v * 100:+.{digits}g}%"
+
+
+def backtest_rows(rep: BacktestReport) -> list[dict]:
+    rows = []
+    for rank, c in enumerate(rep.result.sorted(), 1):
+        rows.append({"排名": rank, **combo_row(c)})
+    return rows
+
+
+def render_backtest(rep: BacktestReport, top: int = 15) -> str:
+    r, p = rep.result, rep.pool
+    out = [f"池子：{p.get('name') or '—'}   network={p.get('network')}   地址={p.get('address')}",
+           f"模拟 {r.hours} 小时（{r.hours / 24:.1f} 天，前 {r.warmup} 小时只用于估计 σ）· "
+           f"费率 {r.fee_rate * 100:.3g}%（{rep.fee_source}）· TVL ${r.tvl_usd:,.0f}（{rep.tvl_source}）",
+           f"liq_width={r.liq_width:g} · 每次调仓成本 {r.rebalance_cost * 100:.3g}% · σ_EWMA 半衰期 {r.halflife:g}h"]
+    combos = r.sorted()
+    headers = ["#", "组合", "平均半宽", "净收益年化", "手续费年化", "无常损失年化", "调仓成本年化",
+               "调仓次数", "时间占比", "成交量占比", "窗口p10", "独立窗口"]
+    rows = []
+    for i, c in enumerate(combos[:top], 1):
+        rows.append([i, c.label, f"±{pct(c.avg_half_width)}", _sp(c.net_annual), _sp(c.fee_annual),
+                     _sp(c.il_annual), _sp(c.cost_annual), c.rebalances, pct(c.time_share),
+                     pct(c.volume_share), _sp(c.window_p10), f"{c.independent_windows:.1f}"])
+    out.append(table(headers, rows, f"策略回测 · 按净收益年化排序（共 {len(combos)} 个组合，显示前 {min(top, len(combos))}）"))
+    out.append("窗口p10 = 按不重叠的 H 小时切分后，最差 10% 的持有期净收益（不年化）。独立窗口 < 3 时排名不可靠。")
+    for n in rep.notes:
+        out.append(n)
+    out.append(BACKTEST_NOTE)
+    out.append(BACKTEST_DISCLAIMER)
+    return "\n".join(out)
+
+
+def backtest_to_dict(rep: BacktestReport) -> dict:
+    r = rep.result
+    return {"pool": rep.pool, "history_days": round(rep.history_days, 2), "gap_ratio": round(rep.gap_ratio, 4),
+            "simulated_hours": r.hours, "warmup_hours": r.warmup, "fee_rate": r.fee_rate,
+            "fee_source": rep.fee_source, "tvl_usd": r.tvl_usd, "tvl_source": rep.tvl_source,
+            "liq_width": r.liq_width, "rebalance_cost": r.rebalance_cost, "halflife": r.halflife,
+            "notes": rep.notes, "combos": backtest_rows(rep), "method": BACKTEST_NOTE,
+            "disclaimer": BACKTEST_DISCLAIMER}

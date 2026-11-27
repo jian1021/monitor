@@ -9,10 +9,13 @@ import sys
 import time
 
 from .config import Config, load_config
-from .data import (GeckoClient, LPRangeError, OhlcvCache, fetch_meteora_bin_step, load_csv,
-                   load_ohlcv, prepare_hourly, resolve_pool)
-from .report import (RunResult, batch_row, export, render_batch, render_single, single_csv_rows,
-                     single_to_dict, sort_rows, table)
+from . import backtest as bt
+from .data import (GeckoClient, LPRangeError, OhlcvCache, fee_from_pool_name, fetch_meteora_bin_step,
+                   fetch_meteora_pool_params, load_backtest_series, load_csv, load_ohlcv,
+                   prepare_hourly, resolve_pool)
+from .report import (BacktestReport, RunResult, backtest_rows, backtest_to_dict, batch_row, export,
+                     render_backtest, render_batch, render_single, single_csv_rows, single_to_dict,
+                     sort_rows, table)
 from .stats import (DEFAULT_HOLDS, DEFAULT_MIN_HISTORY_MULT, DEFAULT_TARGETS, STATUS_INSUFFICIENT,
                     analyze, hold_label)
 from .turso import TursoError, import_turso
@@ -40,7 +43,8 @@ def _analysis_options() -> argparse.ArgumentParser:
     g.add_argument("--targets", type=_csv_list(float), default=list(DEFAULT_TARGETS),
                    help="时间占比目标，默认 0.7,0.8,0.9")
     g.add_argument("--days", type=float, default=180, help="回看天数（默认 180）")
-    g.add_argument("--currency", choices=["usd", "quote"], default="usd")
+    g.add_argument("--currency", choices=["usd", "quote"], default="quote",
+                   help="价格口径：quote = 池子自身比价（默认，LP 区间就是按它算的）；usd = 美元价")
     g.add_argument("--token", default="base", help="base / quote / 代币地址（做币本位相对价格）")
     g.add_argument("--bin-step", type=int, default=None, help="DLMM binStep；不传时 solana 池子尝试自动读取")
     g.add_argument("--no-auto-bin-step", action="store_true", help="不自动读取 Meteora binStep")
@@ -78,6 +82,32 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("run", parents=[common, opts], help="分析单个池子")
     p.add_argument("target", nargs="?", help="池子/代币地址、watchlist 序号或名称关键字")
     p.add_argument("--csv", help="用现成 K 线 CSV（需含 timestamp/high/low/close）")
+
+    p = sub.add_parser("backtest", parents=[common], help="策略回测：(宽度 × 调仓规则) 网格逐小时模拟")
+    p.add_argument("target", nargs="?", help="池子/代币地址、watchlist 序号或名称关键字")
+    p.add_argument("--csv", help="现成 K 线 CSV（需含 timestamp/close/volume，价格须为池子比价）")
+    p.add_argument("--network", default="solana")
+    p.add_argument("--days", type=float, default=180)
+    p.add_argument("--holds", type=_csv_list(int), default=[168], help="H（小时），默认 168")
+    p.add_argument("--widths", type=_csv_list(float), default=list(bt.DEFAULT_FIXED_WIDTHS),
+                   help="固定半宽网格，默认 0.02,0.03,0.05,0.08,0.12,0.18,0.25,0.35,0.5")
+    p.add_argument("--ks", type=_csv_list(float), default=list(bt.DEFAULT_KS),
+                   help="波动率定宽 k 网格，默认 1.0~2.5 每 0.25")
+    p.add_argument("--rules", type=_csv_list(str), default=list(bt.DEFAULT_RULES),
+                   help="调仓规则：hold（到期调仓）/ out:N（连续出界 N 小时调仓），默认 hold,out:1,out:6,out:24")
+    p.add_argument("--fee", type=float, help="池子费率（小数，0.003 = 0.3%%）；不传时自动读取")
+    p.add_argument("--tvl", type=float, help="池子 TVL（美元）；不传时用 GeckoTerminal 当前值")
+    p.add_argument("--liq-width", type=float, default=bt.DEFAULT_LIQ_WIDTH,
+                   help="其他 LP 的流动性等效铺开的对数宽度（决定手续费绝对水平），默认 0.5")
+    p.add_argument("--rebalance-extra", type=float, default=bt.DEFAULT_REBALANCE_EXTRA,
+                   help="每次调仓的额外成本（滑点 / gas，占仓位价值），默认 0.002；另加 0.5 × 费率")
+    p.add_argument("--halflife", type=float, default=bt.DEFAULT_HALFLIFE, help="σ_EWMA 半衰期（小时），默认 72")
+    p.add_argument("--token", default="base", help="base / quote：价格方向")
+    p.add_argument("--top", type=int, default=15, help="终端显示前 N 个组合（导出为全部）")
+    p.add_argument("--refresh", action="store_true")
+    p.add_argument("--no-cache", action="store_true")
+    p.add_argument("--interval", type=float, default=2.5)
+    p.add_argument("--out", help="导出到 .csv 或 .json（全部组合）")
 
     p = sub.add_parser("all", parents=[common, opts], help="对 watchlist 全部池子批量运行")
     p.add_argument("--sort", help="按列排序，如 1m、history_days、1w_bins（降序加 --desc，或写成 --sort=-1m）")
@@ -184,6 +214,88 @@ def run_one(args, cfg: Config, wl: Watchlist, target: str | None, network: str |
                      bin_step=bin_step, max_bins=args.max_bins, fetch_note=fetch_note, warnings=warnings)
 
 
+# ================= 回测 =================
+def _resolve_fee(args, info: dict, network: str, address: str) -> tuple[float, str]:
+    if args.fee is not None:
+        return float(args.fee), "参数 --fee"
+    if network == "solana":
+        fee_pct = fetch_meteora_pool_params(address).get("base_fee_pct")
+        if fee_pct:
+            return float(fee_pct) / 100, "Meteora 基础费率（不含动态费，偏保守）"
+    fee = fee_from_pool_name(info.get("name"))
+    if fee:
+        return fee, "池子名称里的费率档"
+    raise LPRangeError("读不到池子费率，请用 --fee 指定（小数，如 0.003 表示 0.3%）")
+
+
+def run_backtest(args, cfg: Config, wl: Watchlist, target: str | None, network: str | None = None,
+                 interactive: bool = False, client: GeckoClient | None = None) -> BacktestReport:
+    notes: list[str] = []
+    if getattr(args, "csv", None):
+        raw = load_csv(args.csv)
+        if raw["volume"].isna().all():
+            raise LPRangeError("回测需要成交量：CSV 里缺少 volume 列")
+        if args.fee is None or args.tvl is None:
+            raise LPRangeError("CSV 回测需要同时指定 --fee 和 --tvl")
+        prep = prepare_hourly(raw)
+        ts, close = prep.ts, prep.close
+        volume = prep.frame["volume"].to_numpy(float)
+        gap, hist = prep.gap_ratio, prep.history_days
+        pool = {"name": os.path.basename(args.csv), "network": "csv", "address": os.path.abspath(args.csv)}
+        fee, fee_src, tvl, tvl_src = float(args.fee), "参数 --fee", float(args.tvl), "参数 --tvl"
+        notes.append("CSV 模式：请确认 close 是池子自身比价（不是美元价），volume 是美元口径。")
+    else:
+        if not target:
+            raise LPRangeError("请提供池子/代币地址、watchlist 序号或名称关键字")
+        net = network or args.network
+        if looks_like_address(target):
+            address = target.strip()
+        else:
+            picked = _pick(wl.match(target), interactive, target)
+            address, net = picked.address, picked.network
+        client = client or GeckoClient(interval=args.interval)
+        info, from_token = resolve_pool(client, net, address)
+        address = info["address"] or address
+        pool = {**info, "network": net, "from_token": from_token}
+        cache = None if args.no_cache else OhlcvCache(cfg.db_path)
+        data = load_backtest_series(client, net, address, args.days, token=args.token, cache=cache,
+                                    refresh=args.refresh)
+        ts, close, volume = data.ts, data.close, data.volume_usd
+        gap, hist = data.gap_ratio, data.history_days
+        fee, fee_src = _resolve_fee(args, info, net, address)
+        if args.tvl is not None:
+            tvl, tvl_src = float(args.tvl), "参数 --tvl"
+        elif info.get("reserve_usd"):
+            tvl, tvl_src = float(info["reserve_usd"]), "GeckoTerminal 当前 TVL（整段历史都按当前值，偏差见说明）"
+        else:
+            raise LPRangeError("读不到池子 TVL，请用 --tvl 指定（美元）")
+        wl.upsert(net, address, name=info.get("name"), source="query", touch=True)
+        if hist < args.days - 1:
+            notes.append(f"⚠️ 回溯不足：请求 {args.days:g} 天，实际 {hist:.1f} 天。")
+    if gap > 0.2:
+        notes.append(f"⚠️ gap_ratio={gap:.0%}：成交稀疏，补齐的小时没有成交量也没有手续费。")
+    res = bt.run_grid(close, volume, fee_rate=fee, tvl_usd=tvl, holds=args.holds,
+                      fixed_widths=args.widths, ks=args.ks, rules=args.rules, halflife=args.halflife,
+                      liq_width=args.liq_width, rebalance_extra=args.rebalance_extra, ts=ts)
+    for h in args.holds:
+        windows = res.hours / int(h)
+        if windows < 3:
+            notes.append(f"⚠️ H={h}h 只有 {windows:.1f} 个独立窗口，排名主要由少数几段行情决定。")
+    return BacktestReport(pool=pool, result=res, fee_source=fee_src, tvl_source=tvl_src,
+                          history_days=hist, gap_ratio=gap, notes=notes)
+
+
+def cmd_backtest(args, cfg, wl) -> int:
+    if not args.target and not args.csv:
+        raise LPRangeError("请提供池子地址 / 序号 / 关键字，或 --csv")
+    rep = run_backtest(args, cfg, wl, args.target, interactive=sys.stdin.isatty())
+    print(render_backtest(rep, top=args.top))
+    if args.out:
+        export(args.out, backtest_to_dict(rep), backtest_rows(rep))
+        print(f"\n已导出：{args.out}")
+    return 0
+
+
 # ================= 子命令 =================
 def cmd_run(args, cfg, wl, interactive=False) -> int:
     result = run_one(args, cfg, wl, args.target, interactive=interactive or sys.stdin.isatty())
@@ -286,6 +398,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_run(args, cfg, wl)
         if args.cmd == "all":
             return cmd_all(args, cfg, wl)
+        if args.cmd == "backtest":
+            return cmd_backtest(args, cfg, wl)
         if args.cmd == "list":
             _print_list(wl)
             return 0

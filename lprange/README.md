@@ -30,6 +30,8 @@ python -m lprange run <地址> --token quote            # 反转价格方向（�
 python -m lprange run --csv kline.csv                # 现成 K 线（timestamp/high/low/close）
 python -m lprange run <地址> --out result.json        # 导出（.csv / .json）
 
+python -m lprange backtest <地址> --network robinhood   # 策略回测：宽度 × 调仓规则网格
+python -m lprange backtest <地址> --fee 0.02 --tvl 300000 --liq-width 0.3 --out bt.csv
 python -m lprange all --sort 1m --desc --out batch.csv
 python -m lprange all --source turso --sync-turso
 python -m lprange all --tag core                     # 名称或备注含 core 的池子
@@ -145,6 +147,38 @@ Turso 连不上时会给出明确提示，不影响本地 watchlist。
 
 覆盖验收标准 1~4、7，以及取数翻页、增量缓存、网络中断、watchlist、批量模式、Turso dry-run/导入（全部离线，用模拟接口）。
 
+## 策略回测（`backtest`）
+
+对 (宽度 × 调仓规则) 网格逐小时模拟，按净收益年化排序。默认 16 种宽度 × 4 种调仓 = 64 个组合，180 天约 1 秒。
+
+| 维度 | 网格 |
+|---|---|
+| 固定宽度 | 半宽 ±2% ±3% ±5% ±8% ±12% ±18% ±25% ±35% ±50%（`--widths`） |
+| 波动率定宽 | 半宽 = k × σ_EWMA × √H，k = 1.0 ~ 2.5 每 0.25（`--ks`）；σ 为小时对数收益率 EWMA（半衰期 `--halflife`，默认 72h），只用开仓时刻之前的数据 |
+| 调仓规则 | `hold` 到期调仓（每 H 小时重新居中）、`out:1` 出界即调、`out:6` / `out:24` 连续出界 6 / 24 小时才调（`--rules`） |
+| H | 默认 168（`--holds`） |
+
+每个组合输出：净收益年化、手续费年化、无常损失年化、调仓次数与调仓成本年化、时间占比、成交量占比
+（区间内成交量 ÷ 总成交量）、按 H 切成不重叠窗口后每个窗口净收益的中位数与 p10、独立窗口数（模拟小时 ÷ H）。
+
+口径：
+
+- **价格**：池子自身比价（GeckoTerminal `currency=quote`），不是美元价；成交量单独取美元口径，与 TVL（美元）相除；
+- **基准**：相对「持有建仓时那一篮子代币」的超额收益，不含代币本身涨跌；
+- **手续费**：收盘价在区间内的小时计入 `成交量 × 费率 × liq_width ÷ (区间对数宽度 × TVL)`。
+  `liq_width` 表示「池子其他 LP 的流动性相当于 TVL 均匀铺在多宽的对数区间里」（默认 0.5，约 ±25%），
+  它和 TVL 一起决定手续费的**绝对水平**——组合之间的相对排序比绝对 APR 更可信；
+- **无常损失**：用 Uniswap v3 集中流动性公式（仓位价值 ÷ 持币价值）近似 DLMM，每段仓位结束时结算、多段连乘；
+- **调仓成本**：每次 `0.5 × 费率 + 额外成本`（默认 0.2%，`--rebalance-extra`），模拟出界后换掉约一半仓位；
+- **费率**：`--fee` 优先；Solana 池子读 Meteora `pool_config.base_fee_pct`（不含动态费，偏保守）；
+  Uniswap 池子从 GeckoTerminal 池子名称里的费率档解析；都读不到时报错要求指定；
+- **TVL**：`--tvl` 优先，否则用 GeckoTerminal 当前 `reserve_in_usd`——整段历史都按当前 TVL，
+  TVL 变化大的池子手续费会有偏差；
+- 前 `max(24, 半衰期)` 小时只用来估计 σ，不计收益，所有组合共用同一段模拟区间。
+
+> 同时修改：`run` 的价格口径默认值由 `usd` 改为 `quote`（池子比价）。LP 区间是按池子比价定义的，
+> 用美元价会把 quote 币（如 SOL）自身的涨跌也算进去。需要美元口径时加 `--currency usd`。
+
 ## 明确不做
 
-不预测价格；不估算手续费收益和无常损失；不执行链上交易；没有图形界面。
+不预测价格；不执行链上交易。（手续费与无常损失只在 `backtest` 里按上面的近似口径估算。）

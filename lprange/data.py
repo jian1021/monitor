@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -148,25 +149,39 @@ def resolve_pool(client: GeckoClient, network: str, address: str) -> tuple[dict,
         raise LPRangeError(f"地址无效或池子不存在：{address}（network={network}）") from exc
 
 
-def fetch_meteora_bin_step(address: str, timeout: float = 10.0) -> int | None:
-    """尽力从 Meteora DLMM 接口读取 bin_step；拿不到返回 None（不影响主流程）。"""
+def fetch_meteora_pool_params(address: str, timeout: float = 10.0) -> dict:
+    """尽力从 Meteora DLMM 接口读取 {"bin_step", "base_fee_pct"}；读不到的键为 None（不影响主流程）。"""
+    out = {"bin_step": None, "base_fee_pct": None}
     try:
         resp = requests.get(f"{METEORA_DLMM_BASE}/pools/{address}", timeout=timeout,
                             headers={"User-Agent": "lprange/1.0"})
         if resp.status_code != 200:
-            return None
+            return out
         data = resp.json() or {}
     except Exception:  # noqa: BLE001
-        return None
-    for holder in (data, data.get("pool_config") or {}, data.get("dlmm_params") or {},
-                   data.get("parameters") or {}):
-        value = holder.get("bin_step") if isinstance(holder, dict) else None
-        if value not in (None, ""):
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                continue
-    return None
+        return out
+    holders = [h for h in (data, data.get("pool_config"), data.get("dlmm_params"), data.get("parameters"))
+               if isinstance(h, dict)]
+    for key, cast in (("bin_step", int), ("base_fee_pct", float)):
+        for h in holders:
+            value = h.get(key)
+            if value not in (None, ""):
+                try:
+                    out[key] = cast(value)
+                    break
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def fetch_meteora_bin_step(address: str, timeout: float = 10.0) -> int | None:
+    return fetch_meteora_pool_params(address, timeout)["bin_step"]
+
+
+def fee_from_pool_name(name: str | None) -> float | None:
+    """GeckoTerminal 的 Uniswap 池子名称通常带费率档，如 "TOKEN / WETH 0.3%" → 0.003。"""
+    m = re.search(r"(\d+(?:\.\d+)?)\s*%", name or "")
+    return float(m.group(1)) / 100 if m else None
 
 
 # ================= 本地 K 线缓存 =================
@@ -380,3 +395,31 @@ def prepare_hourly(df: pd.DataFrame, extend_to: int | None = None) -> Prepared:
     return Prepared(ts=d.index.to_numpy(dtype=np.int64), close=d["close"].to_numpy(float),
                     frame=d.reset_index(), gap_ratio=float(filled.sum() / n),
                     history_days=n / 24, dropped_bad=dropped)
+
+
+# ================= 回测数据 =================
+@dataclass
+class BacktestData:
+    ts: np.ndarray
+    close: np.ndarray            # 池子自身比价（base 以 quote 计价）
+    volume_usd: np.ndarray
+    gap_ratio: float
+    history_days: float
+    requests: int
+
+
+def load_backtest_series(client: "GeckoClient", network: str, pool: str, days: float, *,
+                         token: str = "base", cache: "OhlcvCache | None" = None, refresh: bool = False,
+                         now: int | None = None) -> BacktestData:
+    """价格取 currency=quote（池子比价），成交量取 currency=usd，两条序列按小时对齐。"""
+    now = int(now or time.time())
+    raw_px, rep_px = load_ohlcv(client, network, pool, days, currency="quote", token=token,
+                                cache=cache, refresh=refresh, now=now)
+    raw_vol, rep_vol = load_ohlcv(client, network, pool, days, currency="usd", token=token,
+                                  cache=cache, refresh=refresh, now=now)
+    px = prepare_hourly(raw_px, extend_to=now)
+    vol = prepare_hourly(raw_vol, extend_to=now)
+    vol_by_ts = dict(zip(vol.ts.tolist(), vol.frame["volume"].to_numpy(float).tolist()))
+    volume = np.array([vol_by_ts.get(int(t), 0.0) for t in px.ts], float)
+    return BacktestData(ts=px.ts, close=px.close, volume_usd=volume, gap_ratio=px.gap_ratio,
+                        history_days=px.history_days, requests=rep_px.requests + rep_vol.requests)
