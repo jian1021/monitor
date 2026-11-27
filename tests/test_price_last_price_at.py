@@ -97,3 +97,15 @@ def test_page_shows_both_time_columns_and_clears_editor_cache():
     assert '"最近取价"' in src and '"最近定时检查"' in src
     assert "touch_checked=False" in src                        # 手动刷新不能推进门控
     assert 'st.session_state.pop("rules_editor", None)' in src  # 刷新后重建表格
+
+
+def test_page_reloads_stale_price_module_before_use():
+    """Cloud 推送部署后 sys.modules 里的 price 可能是旧版；守卫必须存在，
+    且 RULE_COLUMNS 必须在 reload 之后从模块属性取（否则拿到旧列定义）。"""
+    src = (ROOT / "pages" / "st_monitor_price.py").read_text(encoding="utf-8")
+    assert "_reload_price_module_if_changed()" in src
+    assert "importlib.reload(mod)" in src
+    guard = "\n_reload_price_module_if_changed()\n"
+    assert guard in src
+    assert src.index(guard) < src.index("RULE_COLUMNS = price_service.RULE_COLUMNS")
+    assert "from app.application.monitors.price import RULE_COLUMNS" not in src

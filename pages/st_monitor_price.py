@@ -6,7 +6,11 @@
 分层：建表 / 规则 CRUD / 价格回写全部走 app/application/monitors/price.py，
 本页只负责渲染与交互，不拼 SQL。
 """
+import importlib
 import math
+import os
+import sys
+import time as _time
 from datetime import time as dtime
 
 import pandas as pd
@@ -14,7 +18,25 @@ import streamlit as st
 
 from app.core.settings import FEISHU_WEBHOOK
 from app.application.monitors import price as price_service
-from app.application.monitors.price import RULE_COLUMNS
+
+
+# Streamlit 每次交互只重跑页面脚本，已导入的 app.* 模块会常驻 sys.modules。
+# Cloud 推送部署后页面是新版、price 模块还是旧版，新增列/函数就会 KeyError / AttributeError。
+def _reload_price_module_if_changed() -> None:
+    mod = sys.modules.get(price_service.__name__)
+    if mod is None:
+        return
+    src = getattr(mod, "__file__", None)
+    if not src or not os.path.exists(src):
+        return
+    if os.path.getmtime(src) <= getattr(mod, "_ui_loaded_at", 0.0):
+        return
+    importlib.reload(mod)
+    mod._ui_loaded_at = _time.time()
+
+
+_reload_price_module_if_changed()
+RULE_COLUMNS = price_service.RULE_COLUMNS  # 必须在 reload 之后再取，否则拿到旧列定义
 from app.infrastructure.market_data.dexscreener import fetch_token_info
 from app.infrastructure.market_data.a_share import fetch_realtime_price, is_convertible_bond
 from app.interfaces.asset_config import CHAIN_LABELS, TOKEN_CHAINS
